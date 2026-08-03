@@ -33,7 +33,6 @@
     "./metrics/snapshots": "./metrics/snapshots.ts",
     "./network/request-body": "./network/request-body.ts",
     "./network/safe-fetch": "./network/safe-fetch.ts",
-    "./notify/email": "./notify/email.ts",
     "./network/signed-webhook": "./network/signed-webhook.ts",
     "./settings/repository": "./settings/repository.ts",
     "./settings/types": "./settings/types.ts",

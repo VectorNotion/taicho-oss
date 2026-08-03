@@ -12,7 +12,7 @@ export type ContentAction =
   | 'schedule_post';
 
 export type OutreachAction = 'research_lead' | 'qualify_lead' | 'generate_outreach';
-export type CascadeAction = 'enroll_in_funnel';
+export type CascadeAction = 'add_to_funnel';
 export type ResonanceAction = 'resonance_run';
 export type BackgroundAction =
   | ContentAction

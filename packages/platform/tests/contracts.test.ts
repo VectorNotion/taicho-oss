@@ -33,10 +33,10 @@ test('catalog actions resolve to their owning product', () => {
 
 test('shipping actions are registry-backed, resonance_run never is', () => {
   assert.equal(getActionProduct('schedule_post'), 'content');
-  assert.equal(getActionProduct('enroll_in_funnel'), 'cascade');
+  assert.equal(getActionProduct('add_to_funnel'), 'cascade');
   assert.equal(getActionProduct('generate_outreach'), 'outreach');
   assert.ok('schedule_post' in actionHandlers);
-  assert.ok('enroll_in_funnel' in actionHandlers);
+  assert.ok('add_to_funnel' in actionHandlers);
   assert.ok('generate_outreach' in actionHandlers);
   assert.ok(!('resonance_run' in actionHandlers)); // Modal-dispatched — contracts.ts
 });

@@ -97,11 +97,12 @@ test("emitProductEventFromContext falls back to the graph organization boundary"
   assert.equal(recorded[0].organizationId, "org_graph");
 });
 
-test("the frozen v1 vocabulary is exactly the spec §7 lead and content chains", () => {
+test("the frozen v1 vocabulary contains product outcomes, not funnel delivery events", () => {
   // `lead.replied` closes the lead chain (spec §7, emitted from the activity
   // choke point); `post.metrics.updated` closes the feedback chain (emitted by
   // recordMetricSnapshot, plan 2026-07-31-metrics-groundwork). The Cascade
-  // email/funnel chain stays Phase 2.
+  // Funnel list and email CRUD are state, not delivery events. External
+  // automation owns delivery and can report channel-neutral outcomes.
   assert.deepEqual([...PRODUCT_EVENT_NAMES], [
     "lead.created", "lead.researched", "lead.qualified",
     "outreach.generated", "outreach.sent", "lead.replied",

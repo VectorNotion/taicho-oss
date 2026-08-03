@@ -50,7 +50,7 @@ type ConfirmDelete =
   | { type: "activity"; id: string }
   | { type: "message"; id: string };
 
-type NurtureFunnel = { id: string; name: string; openEnded?: boolean };
+type NurtureFunnel = { id: string; name: string };
 
 export default function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: routeLeadId } = use(params);
@@ -465,12 +465,12 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     setNurtureDialogOpen(true);
   };
 
-  const handleEnrollInNurture = async () => {
+  const handleAddToFunnel = async () => {
     if (!lead || !selectedFunnelId || !enrollEmail.includes("@")) return;
     const funnel = nurtureFunnels?.find((item) => item.id === selectedFunnelId);
     setIsEnrolling(true);
     try {
-      const response = await fetch(`/api/cascade/funnels/${selectedFunnelId}/enroll`, {
+      const response = await fetch(`/api/cascade/funnels/${selectedFunnelId}/members`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -486,7 +486,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? "Could not enroll this person");
+      if (!response.ok) throw new Error(data.error ?? "Could not add this person");
 
       if (lead.email !== enrollEmail.trim()) {
         const updateResponse = await fetch(`/api/outreach/leads/${lead.id}`, {
@@ -502,7 +502,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "nurture_enrolled",
-          title: `Enrolled in ${funnel?.name ?? "nurture"}`,
+          title: `Added to ${funnel?.name ?? "funnel"}`,
           metadata: { funnelId: selectedFunnelId, funnelName: funnel?.name },
         }),
       });
@@ -511,10 +511,10 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         setActivities((current) => [activity, ...current]);
       }
 
-      toast.success(`${lead.name} enrolled in ${funnel?.name ?? "nurture"}`);
+      toast.success(`${lead.name} added to ${funnel?.name ?? "funnel"}`);
       setNurtureDialogOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not enroll this person");
+      toast.error(error instanceof Error ? error.message : "Could not add this person");
     } finally {
       setIsEnrolling(false);
     }
@@ -665,9 +665,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             />
           }
           nurtureAction={nurtureFunnels ? (
-            <Button aria-label="Enroll in nurture" size="sm" variant="outline" onClick={openNurtureDialog}>
+            <Button aria-label="Add to funnel" size="sm" variant="outline" onClick={openNurtureDialog}>
               <GitBranch className="h-4 w-4" />
-              <span className="hidden sm:inline">Enroll in nurture</span>
+              <span className="hidden sm:inline">Add to funnel</span>
             </Button>
           ) : undefined}
         />
@@ -793,9 +793,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
       <Dialog open={nurtureDialogOpen} onOpenChange={setNurtureDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Enroll {lead.name} in nurture</DialogTitle>
+            <DialogTitle>Add {lead.name} to a funnel</DialogTitle>
             <DialogDescription>
-              Choose the funnel that should start now. The same workspace Contact gains a Nurture role while remaining an Outreach target.
+              Choose the people list. The same workspace Contact gains a Nurture role while remaining an Outreach target.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
@@ -810,7 +810,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 </SelectContent>
               </Select>
               {nurtureFunnels?.length === 0 && (
-                <p className="text-xs text-muted-foreground">Create a funnel in Nurture before enrolling this person.</p>
+                <p className="text-xs text-muted-foreground">Create a funnel in Nurture before adding this person.</p>
               )}
             </div>
             <div className="grid gap-2">
@@ -821,9 +821,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNurtureDialogOpen(false)} disabled={isEnrolling}>Cancel</Button>
-            <Button onClick={handleEnrollInNurture} disabled={isEnrolling || !selectedFunnelId || !enrollEmail.includes("@")}>
+            <Button onClick={handleAddToFunnel} disabled={isEnrolling || !selectedFunnelId || !enrollEmail.includes("@")}>
               {isEnrolling && <Loader2 className="h-4 w-4 animate-spin" />}
-              Enroll contact
+              Add person
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,7 +1,7 @@
 import {
   contactsInCascade as contactsTable,
   databaseFor,
-  enrollmentsInCascade as enrollmentsTable,
+  funnel_membersInCascade as funnelMembersTable,
 } from "@content-automation/database";
 import { desc, eq, sql } from "drizzle-orm";
 import type { Pool } from "pg";
@@ -46,7 +46,7 @@ export interface NurtureContactProjection {
   attributes: Record<string, unknown>;
   timezone: string | null;
   subscriptionStatus: Contact["subscriptionStatus"];
-  activeEnrollments: number;
+  funnelCount: number;
 }
 
 export async function listContacts(
@@ -59,9 +59,9 @@ export async function listContacts(
     attributes: contactsTable.attributes,
     timezone: contactsTable.timezone,
     subscription_status: contactsTable.subscription_status,
-    active_enrollments: sql<number>`count(${enrollmentsTable.id}) filter (where ${enrollmentsTable.state} = 'active')::int`,
+    funnel_count: sql<number>`count(${funnelMembersTable.id})::int`,
   }).from(contactsTable)
-    .leftJoin(enrollmentsTable, eq(enrollmentsTable.contact_id, contactsTable.id))
+    .leftJoin(funnelMembersTable, eq(funnelMembersTable.contact_id, contactsTable.id))
     .groupBy(contactsTable.id)
     .orderBy(desc(contactsTable.created_at));
   return rows.map((row) => ({
@@ -71,6 +71,6 @@ export async function listContacts(
     attributes: (row.attributes ?? {}) as Record<string, unknown>,
     timezone: row.timezone,
     subscriptionStatus: row.subscription_status as Contact["subscriptionStatus"],
-    activeEnrollments: row.active_enrollments,
+    funnelCount: row.funnel_count,
   }));
 }

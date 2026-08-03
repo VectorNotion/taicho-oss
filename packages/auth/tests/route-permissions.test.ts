@@ -50,7 +50,6 @@ test('streaming endpoints require the same permission as their synchronous sibli
     ['/api/content/research/run', '/api/content/research/run/stream'],
     ['/api/content/topics/generate', '/api/content/topics/generate/stream'],
     ['/api/outreach/leads/test-id/qualify', '/api/outreach/leads/test-id/qualify/stream'],
-    ['/api/cascade/templates/generate', '/api/cascade/templates/generate/stream'],
   ] as const;
 
   for (const [synchronous, streaming] of pairs) {
@@ -68,6 +67,5 @@ test('special operations map to their least-privilege actions', () => {
   assert.deepEqual(permissionForRequest('/api/content/ideas/test-id/draft/stream', 'POST'), { product: 'content', action: 'generate' });
   assert.deepEqual(permissionForRequest('/api/outreach/leads/test-id/qualify/stream', 'POST'), { product: 'outreach', action: 'qualify' });
   assert.deepEqual(permissionForRequest('/api/content/channels/callback/linkedin', 'GET'), { product: 'content', action: 'read' });
-  assert.deepEqual(permissionForRequest('/api/cascade/emails/preview', 'POST'), { product: 'cascade', action: 'read' });
-  assert.deepEqual(permissionForRequest('/api/cascade/delivery-settings', 'POST'), { product: 'cascade', action: 'approve' });
+  assert.deepEqual(permissionForRequest('/api/cascade/funnels/test-id/emails/email-id', 'PATCH'), { product: 'cascade', action: 'update' });
 });

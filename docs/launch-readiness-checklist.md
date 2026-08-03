@@ -102,7 +102,7 @@ Do not set a public launch date while any P0 item is open.
 | SEC-03 | Durable auth throttling, waitlist enforcement, privacy-safe alerts, and enumeration-safe errors pass local tests. | Exercise the immutable candidate and deployed edge safely. |
 | SEC-04 | Cookie/session policy, CSRF/origin checks, trusted origins, and safe redirects pass regression tests. | Capture immutable-candidate and deployed-cookie evidence. |
 | SEC-05 | Negative isolation suites pass across PostgreSQL, real FalkorDB, real Qdrant, jobs, assistants, webhooks, and workers. | Deploy scoped roles/migrations and repeat the rollback-only live probes. |
-| SEC-06 | SSRF, bounded-body, signature, replay, and redaction controls pass focused tests. Resend and Twilio SendGrid enforce provider timestamps; Mailchimp Transactional binds signatures to the exact webhook URL; all use durable replay receipts. | Connect the launch workspace provider through Nurture Settings, approve outbound hosts, then run candidate/live negative probes. |
+| SEC-06 | SSRF, bounded-body, signature, replay, and redaction controls pass focused tests. Generic external webhooks use signed, bounded, replay-safe deliveries. | Approve outbound hosts, then run candidate/live negative probes. |
 | SEC-07 | Blocking Gitleaks, local CodeQL SARIF, audit, image, SBOM, provenance, and signing controls are implemented in the release workflow, and the historical MCP key is conclusively retired from active stores. GitHub-hosted Code Scanning is unavailable on the private plan, so CodeQL output is gated and retained as an artifact without dashboard upload. | Produce a green, signed candidate plus production-host verification. |
 | SEC-08 | Value-free ownership/rotation inventory and strict CI validation are implemented; production secret files are root-only; registry credentials are split and rotated; the historical MCP key is retired. | Record and rehearse the remaining active application/provider rotations and emergency revocations; do not invent provider evidence. |
 | SEC-09 | Public, fail-closed legal pages and review packet are implemented as drafts and remain `noindex`. | Named counsel/Product approval, executed provider/DPA terms, tested contact channels, and approved production values are required. |
@@ -139,11 +139,11 @@ roles, and repeats live probes. Evidence:
 SEC-06 resolution progress (25 July 2026): customer-controlled publishing and
 MCP destinations now pass DNS-pinned SSRF policy with exact host rules,
 private/mapped/metadata denial, redirect rejection, timeouts, and byte limits.
-Automation, Resend/Svix, HubSpot, Pipedrive, Zoho, and assistant receivers have
+Automation, HubSpot, Pipedrive, Zoho, and assistant receivers have
 bounded streaming bodies, authenticated raw-body contracts, timestamp windows,
 durable replay keys, and privacy-safe errors. Architecture and focused
 negative suites pass. The ticket remains open until the real
-the workspace delivery-provider connection and outbound host decisions are supplied, the immutable
+the outbound host decisions are supplied, the immutable
 candidate applies receipt migrations, and live negative probes pass. Evidence:
 `docs/security/network-and-webhook-review-2026-07-25.md`.
 
@@ -491,16 +491,13 @@ and 30 high. Notable runtime chains include:
   advisories with patched releases available.
 - `path-to-regexp`, PostCSS, Sharp, and `linkify-it`: denial-of-service or
   file-handling advisories with patched releases.
-- `html-minifier` through MJML: ReDoS advisory with no patched release in the
-  reported chain, requiring replacement or bounded/isolated input processing.
 
 Expected: no unaccepted reachable high/critical advisory is present in the
 release, and a fail-closed lockfile audit blocks future regressions.
 
 Resolution progress (25 July 2026): the candidate production graph now reports
 0 critical, 0 high, 1 moderate, and 1 low advisories. MCP/Hono, Babel, routing,
-validation, rich-text, PostCSS, Sharp, glob, and YAML chains are patched; MJML
-5.4.0 removes `html-minifier`. CI now blocks on
+validation, rich-text, PostCSS, Sharp, glob, and YAML chains are patched. CI now blocks on
 `pnpm audit --prod --audit-level high` across the frozen lockfile. Runtime
 reachability, the two residual controls, expiry dates, and verification results are recorded in
 `docs/security/dependency-review-2026-07-25.md`. This ticket remains open until

@@ -67,6 +67,7 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0004_colorful_colossus",
       "0005_external_api_oauth_platform",
       "0006_violet_baron_strucker",
+      "0007_calm_shotgun",
     ],
   );
 });

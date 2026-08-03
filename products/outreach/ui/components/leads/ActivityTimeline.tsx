@@ -59,7 +59,7 @@ export const ACTIVITY_CONFIG: Record<
   meeting: { icon: Calendar, color: "text-muted-foreground", bgColor: "bg-muted", label: "Meeting" },
   observation: { icon: Eye, color: "text-muted-foreground", bgColor: "bg-muted", label: "Observation" },
   enrichment: { icon: Search, color: "text-muted-foreground", bgColor: "bg-muted", label: "Research" },
-  nurture_enrolled: { icon: GitBranch, color: "text-chart-2", bgColor: "bg-chart-2/10", label: "Nurture enrollment" },
+  nurture_enrolled: { icon: GitBranch, color: "text-chart-2", bgColor: "bg-chart-2/10", label: "Added to funnel" },
   note: { icon: FileText, color: "text-muted-foreground", bgColor: "bg-muted", label: "Note" },
   status_change: { icon: ArrowRight, color: "text-muted-foreground", bgColor: "bg-muted", label: "Status change" },
 };

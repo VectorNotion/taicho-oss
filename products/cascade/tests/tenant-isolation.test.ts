@@ -5,16 +5,20 @@ import { Pool } from "pg";
 
 import { createContact } from "../data/contact-repository";
 import {
-  configureDeliveryProvider,
-  findDeliveryWebhookConfiguration,
-  listDeliverySettings,
-} from "../data/delivery-settings-repository";
-import {
+  addFunnelMember,
   createFunnel,
-  getFunnelDetail,
+  getFunnel,
+  listFunnelMembers,
   listFunnels,
 } from "../data/funnel-repository";
+import {
+  createPlainTextEmail,
+  listPlainTextEmails,
+} from "../data/plain-text-email-repository";
 import { freshSchema } from "./helpers";
+import { closeCascadePools } from "../data/pool";
+
+test.after(async () => closeCascadePools());
 
 function databaseUrl(user?: string, password?: string): string {
   const source = process.env.DATABASE_URL
@@ -25,16 +29,13 @@ function databaseUrl(user?: string, password?: string): string {
   return url.toString();
 }
 
-test("Cascade runtime role blocks cross-organization reads and writes", async () => {
+test("Cascade runtime role isolates funnel lists, members, and emails by organization", async () => {
   const suffix = randomUUID().replaceAll("-", "");
   const role = `cascade_test_${process.pid}_${suffix.slice(0, 10)}`;
   const password = `T3st${suffix}`;
   const orgA = `cascade_a_${suffix}`;
   const orgB = `cascade_b_${suffix}`;
-  const admin = new Pool({
-    connectionString: databaseUrl(),
-    options: "-csearch_path=cascade",
-  });
+  const admin = new Pool({ connectionString: databaseUrl(), options: "-csearch_path=cascade" });
   const previousSchema = process.env.CASCADE_SCHEMA;
   const previousRole = process.env.CASCADE_DATABASE_ROLE;
   let poolA: Pool | undefined;
@@ -42,9 +43,7 @@ test("Cascade runtime role blocks cross-organization reads and writes", async ()
 
   try {
     await freshSchema();
-    await admin.query(
-      `CREATE ROLE "${role}" LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`,
-    );
+    await admin.query(`CREATE ROLE "${role}" LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`);
     await admin.query(`GRANT USAGE ON SCHEMA cascade TO "${role}"`);
     await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA cascade TO "${role}"`);
     await admin.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA cascade TO "${role}"`);
@@ -52,80 +51,30 @@ test("Cascade runtime role blocks cross-organization reads and writes", async ()
     process.env.CASCADE_DATABASE_ROLE = role;
 
     const runtimeUrl = databaseUrl(role, password);
-    poolA = new Pool({
-      connectionString: runtimeUrl,
-      options: `-csearch_path=cascade -capp.organization_id=${orgA}`,
-    });
-    poolB = new Pool({
-      connectionString: runtimeUrl,
-      options: `-csearch_path=cascade -capp.organization_id=${orgB}`,
-    });
+    poolA = new Pool({ connectionString: runtimeUrl, options: `-csearch_path=cascade -capp.organization_id=${orgA}` });
+    poolB = new Pool({ connectionString: runtimeUrl, options: `-csearch_path=cascade -capp.organization_id=${orgB}` });
 
-    const a = await createFunnel(poolA, {
-      name: "Private A",
-      steps: [{ type: "delay", config: { seconds: 1 } }],
-    });
-    const b = await createFunnel(poolB, {
-      name: "Private B",
-      steps: [{ type: "delay", config: { seconds: 1 } }],
-    });
-    await createContact(poolA, { email: "same@example.test" });
-    await createContact(poolB, { email: "same@example.test" });
-    const providerA = await configureDeliveryProvider(poolA, {
-      provider: "resend",
-      apiKey: "tenant-a-resend-key",
-      webhookSecret: "tenant-a-webhook-secret",
-    });
-    const providerB = await configureDeliveryProvider(poolB, {
-      provider: "resend",
-      apiKey: "tenant-b-resend-key",
-      webhookSecret: "tenant-b-webhook-secret",
-    });
+    const funnelA = await createFunnel(poolA, { name: "Private A" });
+    const funnelB = await createFunnel(poolB, { name: "Private B" });
+    const contactA = await createContact(poolA, { email: "same@example.test" });
+    const contactB = await createContact(poolB, { email: "same@example.test" });
+    await addFunnelMember(poolA, { funnelId: funnelA.id, contactId: contactA.id });
+    await addFunnelMember(poolB, { funnelId: funnelB.id, contactId: contactB.id });
+    await createPlainTextEmail(poolA, { funnelId: funnelA.id, name: "A", subject: "A only", body: "Text A" });
+    await createPlainTextEmail(poolB, { funnelId: funnelB.id, name: "B", subject: "B only", body: "Text B" });
 
     assert.deepEqual((await listFunnels(poolA)).map((item) => item.name), ["Private A"]);
     assert.deepEqual((await listFunnels(poolB)).map((item) => item.name), ["Private B"]);
-    assert.deepEqual(
-      (await listDeliverySettings(poolA)).providers.map((item) => item.id),
-      [providerA.id],
-    );
-    assert.deepEqual(
-      (await listDeliverySettings(poolB)).providers.map((item) => item.id),
-      [providerB.id],
-    );
-    assert.equal(await findDeliveryWebhookConfiguration(poolB, providerA.id), null);
-    assert.equal(await findDeliveryWebhookConfiguration(poolA, providerB.id), null);
-    assert.equal(await getFunnelDetail(poolB, a.funnel.id), null);
-    assert.equal(await getFunnelDetail(poolA, b.funnel.id), null);
-    assert.equal(
-      (await poolB.query("UPDATE funnels SET name='forbidden' WHERE id=$1", [a.funnel.id])).rowCount,
-      0,
-    );
-
+    assert.deepEqual((await listFunnelMembers(poolA, funnelA.id)).map((item) => item.email), ["same@example.test"]);
+    assert.deepEqual((await listPlainTextEmails(poolA, funnelA.id)).map((item) => item.subject), ["A only"]);
+    assert.equal(await getFunnel(poolB, funnelA.id), null);
+    assert.equal((await listFunnelMembers(poolB, funnelA.id)).length, 0);
+    assert.equal((await listPlainTextEmails(poolB, funnelA.id)).length, 0);
+    assert.equal((await poolB.query("UPDATE funnels SET name='forbidden' WHERE id=$1", [funnelA.id])).rowCount, 0);
+    assert.equal((await poolB.query("UPDATE plain_text_emails SET subject='forbidden' WHERE funnel_id=$1", [funnelA.id])).rowCount, 0);
     await assert.rejects(
-      poolB.query(
-        `INSERT INTO funnel_steps (funnel_id, position, type, config)
-         VALUES ($1, 2, 'delay', '{"seconds":1}')`,
-        [a.funnel.id],
-      ),
-      /foreign key constraint/,
-    );
-    await assert.rejects(
-      poolB.query(
-        "INSERT INTO funnels (name, organization_id) VALUES ('forbidden', $1)",
-        [orgA],
-      ),
+      poolB.query("INSERT INTO funnels (name, organization_id) VALUES ('forbidden', $1)", [orgA]),
       /row-level security policy/,
-    );
-    assert.equal(
-      (
-        await poolB.query(
-          `UPDATE delivery_provider_connections
-              SET display_name='forbidden'
-            WHERE id=$1`,
-          [providerA.id],
-        )
-      ).rowCount,
-      0,
     );
   } finally {
     await Promise.all([poolA?.end(), poolB?.end()]);

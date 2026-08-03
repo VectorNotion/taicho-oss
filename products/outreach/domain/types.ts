@@ -333,7 +333,7 @@ export const ACTIVITY_TYPE_CONFIG: Record<
   meeting: { label: "Meeting", color: "text-muted-foreground", bgColor: "bg-muted" },
   observation: { label: "Observation", color: "text-muted-foreground", bgColor: "bg-muted" },
   enrichment: { label: "Research", color: "text-muted-foreground", bgColor: "bg-muted" },
-  nurture_enrolled: { label: "Nurture enrollment", color: "text-chart-2", bgColor: "bg-chart-2/10" },
+  nurture_enrolled: { label: "Added to funnel", color: "text-chart-2", bgColor: "bg-chart-2/10" },
   note: { label: "Note", color: "text-muted-foreground", bgColor: "bg-muted" },
   status_change: { label: "Status change", color: "text-muted-foreground", bgColor: "bg-muted" },
 };

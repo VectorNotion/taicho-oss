@@ -12,10 +12,12 @@ import {
   emailsInCascade,
   enrollmentsInCascade,
   eventsInCascade,
+  funnel_membersInCascade as funnelMembersInCascade,
   funnel_routesInCascade as funnelRoutesInCascade,
   funnel_stepsInCascade as funnelStepsInCascade,
   funnelsInCascade,
   offersInCascade,
+  plain_text_emailsInCascade as plainTextEmailsInCascade,
   sendsInCascade,
   stage_daily_statsInCascade as stageDailyStatsInCascade,
   templatesInCascade,
@@ -34,6 +36,8 @@ export async function freshSchema(): Promise<Pool> {
     await tx.delete(eventsInCascade);
     await tx.delete(variantStatsInCascade);
     await tx.delete(stageDailyStatsInCascade);
+    await tx.delete(plainTextEmailsInCascade);
+    await tx.delete(funnelMembersInCascade);
     await tx.delete(sendsInCascade);
     await tx.delete(enrollmentsInCascade);
     await tx.delete(funnelRoutesInCascade);

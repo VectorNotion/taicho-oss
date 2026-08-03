@@ -129,7 +129,7 @@ pnpm env:validate:production
 
 The validator checks canonical URLs and origins, separate database roles,
 migration/worker tenant IDs, encryption keys, assistant and knowledge
-services, authentication, email, object storage, observability, and the
+services, authentication, object storage, observability, and the
 explicit launch integration sets. Its report contains only presence,
 structure, and semantic results; secret values are always redacted. A failed
 check exits non-zero.
@@ -144,16 +144,12 @@ isolation, encryption, object storage, the protected Payload billing catalog,
 publishing destinations, and
 Datadog/Langfuse observability remain mandatory. Configured deferred values
 are still validated strictly, unknown profiles fail, and dependent runtime
-features stay unavailable. Nurture provider API and webhook credentials are
-configured per workspace at `/cascade/settings`, encrypted with
-`CASCADE_CREDENTIAL_ENCRYPTION_KEY`, and never placed in the deployment
-environment. Production email delivery fails closed until the workspace has a
-healthy default provider and verified default sender.
+features stay unavailable. Nurture has no provider credentials, delivery
+configuration, scheduler, or worker. External automation reads and manages its
+funnel memberships and literal-text emails through OAuth REST or MCP.
 
 Production validation also rejects every deterministic test escape hatch:
-`ASSISTANT_MODEL_MODE=stub`,
-`CASCADE_TEMPLATE_RUNTIME_MODE=stub`, `CASCADE_MAILER_MODE=e2e`, and
-`CONTENT_MIGRATION_SKIP_GRAPH=1`. These values belong only to local or CI E2E
+`ASSISTANT_MODEL_MODE=stub` and `CONTENT_MIGRATION_SKIP_GRAPH=1`. These values belong only to local or CI E2E
 processes and must not appear in `/root/content-automation/.env`.
 
 The unified container runs the same complete validation before any migration

@@ -14,7 +14,7 @@
     "generate_outreach"
   ],
   "cascade": [
-    "enroll_in_funnel"
+    "add_to_funnel"
   ],
   "resonance": [
     "resonance_run"
@@ -31,6 +31,6 @@
     "qualify_lead": "mastra",
     "generate_outreach": "mastra",
     "schedule_post": "native",
-    "enroll_in_funnel": "native"
+    "add_to_funnel": "native"
   }
 }

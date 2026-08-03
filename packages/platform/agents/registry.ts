@@ -28,7 +28,7 @@ import { getLeadById } from '@/products/outreach/data/lead-repository';
 import type { OutreachMedium } from '@/products/outreach/domain/types';
 import { requireGraphOrganizationId } from '../data/organization-context';
 import type { ExecutableAction } from './contracts';
-import { runEnrollInFunnel } from './enroll-in-funnel';
+import { runAddToFunnel } from './add-to-funnel';
 
 /**
  * A background action handler: adapts the route payload, invokes the
@@ -114,10 +114,10 @@ export const actionHandlers: Record<ExecutableAction, ActionHandler> = {
     };
   },
 
-  // Payload: EnrollInFunnelPayload (leadId → Cascade import rendezvous, or a
+  // Payload: AddToFunnelPayload (leadId → Cascade import rendezvous, or a
   // direct Cascade contactId).
-  enroll_in_funnel: async (payload) =>
-    runEnrollInFunnel({
+  add_to_funnel: async (payload) =>
+    runAddToFunnel({
       leadId: payload.leadId as string | undefined,
       contactId: payload.contactId as string | undefined,
       funnelId: payload.funnelId as string,

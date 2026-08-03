@@ -159,18 +159,6 @@ export function permissionForRequest(pathname: string, method: string): {
 
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return { product, action: "read" };
 
-  if (product === "cascade") {
-    // Preview is a pure computation — POST for the payload, but read-only.
-    if (permissionPath === "/api/cascade/emails/preview") return { product, action: "read" };
-    if (
-      (method === "POST" && /\/api\/cascade\/variants\/[^/]+$/.test(permissionPath))
-      || permissionPath === "/api/cascade/settings"
-      || permissionPath === "/api/cascade/delivery-settings"
-    ) {
-      return { product, action: "approve" };
-    }
-  }
-
   if (product === "outreach") {
     if (permissionPath.endsWith("/research") || permissionPath === "/api/outreach/research") return { product, action: "research" };
     if (permissionPath.endsWith("/qualify")) return { product, action: "qualify" };

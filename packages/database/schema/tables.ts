@@ -1467,6 +1467,55 @@ export const funnelsInCascade = cascade.table("funnels", {
 	pgPolicy("funnels_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
 ]).enableRLS();
 
+export const funnel_membersInCascade = cascade.table("funnel_members", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	funnel_id: uuid().notNull(),
+	contact_id: uuid().notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_by: text(),
+	actor_type: text(),
+	request_id: text(),
+	parent_execution_id: text(),
+	trace_id: text(),
+	traceparent: text(),
+	organization_id: text().default(organizationIdDefault),
+}, (table) => [
+	foreignKey({ columns: [table.funnel_id, table.organization_id], foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id], name: "funnel_members_funnel_id_organization_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.contact_id, table.organization_id], foreignColumns: [contactsInCascade.id, contactsInCascade.organization_id], name: "funnel_members_contact_id_organization_fkey" }).onDelete("cascade"),
+	uniqueIndex("funnel_members_organization_id_id_key").on(table.organization_id, table.id),
+	unique("funnel_members_funnel_id_contact_id_key").on(table.funnel_id, table.contact_id),
+	index("funnel_members_funnel_created_idx").on(table.funnel_id, table.created_at),
+	check("funnel_members_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
+	pgPolicy("funnel_members_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+]).enableRLS();
+
+export const plain_text_emailsInCascade = cascade.table("plain_text_emails", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	funnel_id: uuid().notNull(),
+	name: text().notNull(),
+	subject: text().notNull(),
+	body: text().notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_by: text(),
+	actor_type: text(),
+	request_id: text(),
+	parent_execution_id: text(),
+	trace_id: text(),
+	traceparent: text(),
+	organization_id: text().default(organizationIdDefault),
+}, (table) => [
+	foreignKey({ columns: [table.funnel_id, table.organization_id], foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id], name: "plain_text_emails_funnel_id_organization_fkey" }).onDelete("cascade"),
+	uniqueIndex("plain_text_emails_organization_id_id_key").on(table.organization_id, table.id),
+	unique("plain_text_emails_funnel_id_name_key").on(table.funnel_id, table.name),
+	index("plain_text_emails_funnel_updated_idx").on(table.funnel_id, table.updated_at),
+	check("plain_text_emails_name_check", sql`length(btrim(name)) > 0`),
+	check("plain_text_emails_subject_check", sql`length(btrim(subject)) > 0`),
+	check("plain_text_emails_body_check", sql`length(btrim(body)) > 0`),
+	check("plain_text_emails_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
+	pgPolicy("plain_text_emails_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+]).enableRLS();
+
 export const assetsInCascade = cascade.table("assets", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	source_id: text().notNull(),

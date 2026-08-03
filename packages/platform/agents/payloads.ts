@@ -12,7 +12,7 @@ export interface SchedulePostPayload {
   when?: string;
 }
 
-export interface EnrollInFunnelPayload {
+export interface AddToFunnelPayload {
   leadId?: string;
   contactId?: string;
   funnelId: string;
@@ -40,7 +40,7 @@ export interface ActionPayloads {
   };
   qualify_lead: { lead_id: string };
   schedule_post: SchedulePostPayload;
-  enroll_in_funnel: EnrollInFunnelPayload;
+  add_to_funnel: AddToFunnelPayload;
   generate_outreach: GenerateOutreachPayload;
 }
 

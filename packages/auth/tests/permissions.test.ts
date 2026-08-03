@@ -33,10 +33,7 @@ test("API methods resolve to explicit permissions", () => {
   assert.deepEqual(permissionForRequest("/api/outreach/leads/1", "DELETE"), { product: "outreach", action: "delete" });
   assert.deepEqual(permissionForRequest("/api/content/generate-ideas", "POST"), { product: "content", action: "generate" });
   assert.deepEqual(permissionForRequest("/api/content/drafts/1", "PATCH"), { product: "content", action: "update" });
-  assert.deepEqual(permissionForRequest("/api/cascade/variants/1", "POST"), { product: "cascade", action: "approve" });
-  assert.deepEqual(permissionForRequest("/api/cascade/variants/1", "DELETE"), { product: "cascade", action: "delete" });
-  assert.deepEqual(permissionForRequest("/api/cascade/emails/preview", "POST"), { product: "cascade", action: "read" });
-  assert.deepEqual(permissionForRequest("/api/cascade/delivery-settings", "POST"), { product: "cascade", action: "approve" });
+  assert.deepEqual(permissionForRequest("/api/cascade/funnels/1/members", "POST"), { product: "cascade", action: "create" });
   assert.equal(permissionForRequest("/api/chat", "POST"), null);
   assert.equal(permissionForRequest("/api/chat/threads", "GET"), null);
   assert.equal(permissionForRequest("/api/workspace/agent-profile", "PATCH"), null);

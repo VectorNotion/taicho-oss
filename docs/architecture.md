@@ -13,7 +13,7 @@ content-automation/
 ├── products/                ← domain logic, no UI framework coupling
 │   ├── content-generator/   ← ideas/drafts/research/topics (graph) + publishing engine (Postgres)
 │   ├── outreach/            ← leads, qualification, outreach messages (graph)
-│   └── cascade/             ← "Nurture": email funnel engine (Postgres)
+│   └── cascade/             ← "Nurture": people lists and text emails (Postgres)
 └── packages/                ← shared foundations
     ├── auth/                ← Better Auth + org entitlements + role permissions
     ├── ui/                  ← the design system (shadcn/tokens, docs/design-language.md) + genui streaming kit
@@ -31,7 +31,7 @@ APIs. The standalone apps remain product-development shells.
 
 ## 2. One app, three products, one gate
 
-The unified app serves the sidebar shell and all pages. Its API routes do **not** call product services over HTTP — they import the product packages directly (`@content-automation/cascade`, `.../publishing/*`) and hit the databases through the same repositories the workers use. There is no internal service mesh, no RPC layer: the function call is the API.
+The unified app serves the sidebar shell and all pages. Its API routes do **not** call product services over HTTP — they import the product packages directly (`@content-automation/cascade`, `.../publishing/*`) and hit their repositories. There is no internal service mesh or RPC layer: the function call is the API.
 
 Authorization is one funnel: every request passes through
 `apps/unified/proxy.ts` → `packages/auth` — Better Auth session → organization
@@ -50,30 +50,25 @@ The runtime processes use Postgres poll loops with `SELECT … FOR UPDATE SKIP L
 | Worker | What it does | Surface |
 |---|---|---|
 | **unified** (Next.js, :3003) | UI + API routes | behind nginx at cloud.taicho.ai |
-| **cascade worker** (:3010) | funnel tick loop (advance enrollments, pick bandit variants, enqueue sends) + send loop (compose MJML, suppression-check, resolve the workspace default, send via Resend/Mailchimp) | public: `/u` `/o` `/c` `/webhooks` (unsubscribe, open/click tracking, provider webhooks) routed to it by nginx |
 | **publishing worker** | token-refresh heartbeat (never publish on a dead OAuth token) + publish loop through destination adapters (YouTube, X, LinkedIn, Instagram, CMS, signed webhook) | none public; writes results back onto drafts in-process |
 | **MCP operation worker** | durable MCP tools and asynchronous AI operations | none public; MCP protocol traffic enters through `/api/mcp` |
 
-Agents (content generation, template generation, funnel optimization — Mastra agents resolving through OpenRouter + Qwen; Cascade uses a plain OpenRouter fetch client) run **offline only**: scripts, cron, or explicit UI actions. Nothing on a send/publish path ever calls a model.
+Content and Outreach agents resolve through OpenRouter + Qwen. Cascade is plain CRUD and has no model, workflow, template, scheduler, worker, or delivery layer.
 
 ## 4. Data: two stores, one rule
 
 - **FalkorDB** — the knowledge graph: workspace Contacts and Content plus
   product-specific roles, research, topics, and activity. A person has one
   `Contact` identity; `Lead` and `NurtureContact` are role projections.
-- **Postgres** — the transactional runtime: one instance with product-owned schemas — `auth` tables (Better Auth + entitlements), `cascade` (funnels, enrollments, sends, events, variants), `publishing` (channels, posts), jobs, MCP operations, and the `observability.execution_event` support ledger. High-write, lock-based, idempotent. The "what we're doing" store.
+- **Postgres** — the transactional runtime: one instance with product-owned schemas — `auth` tables (Better Auth + entitlements), `cascade` (funnels, memberships, plain-text emails), `publishing` (channels, posts), jobs, MCP operations, and the `observability.execution_event` support ledger. The "what we're doing" store.
 
-The rule: **engines execute only from Postgres; the graph is never on a hot path.** Where the two must meet (a published post updating its draft; funnel content referencing assets), the engine bridges in-process or through an explicit sync boundary — the UI never sees the seam.
+The rule: **engines execute only from Postgres; the graph is never on a hot path.** Where the two must meet, the engine bridges through an explicit product boundary — the UI never sees the seam.
 
 External stores/services: **Cloudflare R2** (media staging for publishing),
-**Resend, Twilio SendGrid, or Mailchimp Transactional** (workspace-selected
-email transport behind
-a shared `Mailer` interface), the four **social platform APIs** (behind
+customer-operated **n8n** (external email orchestration), the four **social platform APIs** (behind
 destination adapters), **OpenRouter** (agents only), **Datadog Cloud**
 (operational telemetry), and **Langfuse Cloud** (privacy-filtered AI
-telemetry). Provider credentials are AES-256-GCM envelopes in the
-organization-scoped Cascade schema; the versioned envelope key remains in the
-deployment secret store.
+telemetry). Cascade stores no email-provider credentials.
 
 ## 5. Infrastructure (graph-server, 77.42.45.165)
 
@@ -81,8 +76,8 @@ deployment secret store.
 Cloudflare DNS (cloud.taicho.ai → 77.42.45.165)
         │
    nginx (TLS via certbot)
-   ├── /u /o /c /webhooks ─────────► nurture-worker :3010  (docker)
-   └── everything else ────────────► unified next :3003    (docker)
+   └── all application traffic ────► unified next :3003    (docker)
+
                                      content-worker         (docker, no port)
                                      mcp-worker             (docker, no port)
                                      pricing-worker         (docker, no port)
@@ -94,7 +89,7 @@ Cloudflare DNS (cloud.taicho.ai → 77.42.45.165)
    └──────────────────┴─────────────────────────────┘
 ```
 
-- Runs as a **Docker Compose stack** (`docker-compose.prod.yml`, project `content-automation`): `postgres`, `unified`, `nurture-worker`, `content-worker`, `mcp-worker`, `pricing-worker`, `falkordb`, `datadog-agent`, and `watchtower`. Env from `/root/content-automation/.env` (chmod 600). See `docs/deployment.md`.
+- Runs as a **Docker Compose stack** (`docker-compose.prod.yml`, project `content-automation`): `postgres`, `unified`, `content-worker`, `mcp-worker`, `pricing-worker`, `falkordb`, `datadog-agent`, and `watchtower`. Env from `/root/content-automation/.env` (chmod 600). See `docs/deployment.md`.
 - **Deploy**: push to GitHub main → CI (`.github/workflows/docker.yml`) tests, builds only the changed images, pushes them to `registry.vectornotion.com`; watchtower polls every 5 min and restarts the affected containers. Each container migrates its own Postgres schemas on boot. **Production deploys require owner review first.**
 - **Graph backend**: FalkorDB is the sole runtime graph store (`docs/graph-backend.md`).
 - **Observability**: every request, operation and durable worker attempt carries request/execution/parent IDs plus authoritative organization and actor attribution. Cloud telemetry is metadata-only; the raw tenant lookup remains in Postgres. See `docs/observability.md`.
@@ -106,9 +101,8 @@ Cloudflare DNS (cloud.taicho.ai → 77.42.45.165)
 Content (make it) ──publish──► the world (YouTube/X/LinkedIn/IG/CMS)
      ▲                              │ audience responds
      │ performance                  ▼
-  Nurture (warm leads over weeks) ◄──qualify── Outreach (capture leads)
-     │ interest click routes to deeper funnels
-     └────────────────► conversion
+  Nurture (organize people and copy) ◄──qualify── Outreach (capture leads)
+     └── external n8n automation owns email delivery and outcomes
 ```
 
 Each product owns one verb; the engines make the verbs run unattended; the unified app is the single pane of glass over all of it.

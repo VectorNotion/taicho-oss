@@ -3,8 +3,11 @@ import test from "node:test";
 import { freshSchema } from "./helpers";
 import { ensureCascadeSchema } from "../data/schema";
 import { schemaName } from "../data/pool";
+import { closeCascadePools } from "../data/pool";
 
-test("the canonical migration chain creates all Cascade engine tables", async () => {
+test.after(async () => closeCascadePools());
+
+test("the canonical migration chain creates the static funnel tables", async () => {
   const pool = await freshSchema();
   const res = await pool.query(
     `SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`,
@@ -23,10 +26,12 @@ test("the canonical migration chain creates all Cascade engine tables", async ()
       "emails",
       "enrollments",
       "events",
+      "funnel_members",
       "funnel_routes",
       "funnel_steps",
       "funnels",
       "offers",
+      "plain_text_emails",
       "sends",
       "stage_daily_stats",
       "templates",
