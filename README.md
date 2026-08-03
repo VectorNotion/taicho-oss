@@ -45,7 +45,6 @@ Self-hosted deployments run **unmetered** — no billing, no credit limits, ever
 | `packages/platform` | Graph seam, agent runtime, jobs, events, and the provider seams (`commercial`, `resonance`) |
 | `packages/ui`, `packages/atlas` | Visual primitives and The Brain knowledge explorer |
 | `packages/auth`, `packages/chat`, `packages/database`, `packages/observability`, `packages/config` | Shared infrastructure |
-| `extension/`, `extension-react/` | Chrome extension for LinkedIn Sales Navigator lead capture |
 | `tests/architecture` | Executable architecture contracts (including the open-core boundary) |
 
 ## Architecture notes

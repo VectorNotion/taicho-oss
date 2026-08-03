@@ -40,7 +40,6 @@
   },
   "workspaces": [
     "apps/*",
-    "extension-react",
     "products/*",
     "packages/*"
   ],
