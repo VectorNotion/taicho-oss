@@ -1,0 +1,30 @@
+{
+  "extends": "../../packages/config/typescript/next.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@/components/ui/*": ["./packages/ui/components/ui/*"],
+      "@/components/PageHeader": ["./packages/ui/components/PageHeader.tsx"],
+      "@/components/ListCard": ["./packages/ui/components/ListCard.tsx"],
+      "@/components/ListRow": ["./packages/ui/components/ListRow.tsx"],
+      "@/components/ListSurface": ["./packages/ui/components/ListSurface.tsx"],
+      "@/components/StatRow": ["./packages/ui/components/StatRow.tsx"],
+      "@/components/genui": ["./packages/ui/components/genui/index.ts"],
+      "@/lib/utils": ["./packages/ui/lib/utils.ts"],
+      "@/hooks/use-action-stream": ["./packages/ui/hooks/use-action-stream.ts"],
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

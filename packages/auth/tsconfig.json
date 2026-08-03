@@ -1,0 +1,13 @@
+{
+  "extends": "../config/typescript/next.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "noEmit": true,
+    "paths": {
+      "@/lib/utils": ["./packages/ui/lib/utils.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: content-automation-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-langgraph}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-langgraph}"]
+      interval: 60s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+      start_interval: 2s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: content-automation-falkordb
+    ports:
+      - "6380:6379"   # RESP — matches the FALKORDB_URL default in the dev scripts
+      - "3002:3000"   # FalkorDB Browser (visual graph explorer)
+    volumes:
+      - falkordb_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+
+volumes:
+  falkordb_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: content-automation-network

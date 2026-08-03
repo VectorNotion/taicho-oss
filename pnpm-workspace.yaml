@@ -1,0 +1,5 @@
+packages:
+  - "apps/*"
+  - "extension-react"
+  - "products/*"
+  - "packages/*"

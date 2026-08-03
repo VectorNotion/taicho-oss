@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Lead Capture for Sales Navigator",
+  "version": "1.1.1",
+  "description": "Capture leads from LinkedIn Sales Navigator with one click",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon.svg"
+  },
+  "icons": {
+    "128": "icons/icon.svg"
+  }
+}

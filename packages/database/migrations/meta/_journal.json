@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1785650815285,
+      "tag": "0000_baseline_existing_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785650827705,
+      "tag": "0001_remove_retired_automation_and_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785651544234,
+      "tag": "0002_force_tenant_row_level_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785655894375,
+      "tag": "0003_amusing_forgotten_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785670318593,
+      "tag": "0004_colorful_colossus",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785678258980,
+      "tag": "0005_external_api_oauth_platform",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785685389043,
+      "tag": "0006_violet_baron_strucker",
+      "breakpoints": true
+    }
+  ]
+}

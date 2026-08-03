@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: langgraph
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      falkordb:
+        image: falkordb/falkordb:latest
+        ports: ["6380:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Architecture contracts (includes the open-core boundary)
+        run: pnpm test:architecture
+      - name: Unit tests
+        run: |
+          pnpm test:observability
+          pnpm test:ui
+          pnpm test:chat
+      - name: Build products
+        env:
+          BETTER_AUTH_URL: https://build.invalid
+          BETTER_AUTH_SECRET: build-time-only-secret-not-used-at-runtime
+        run: |
+          pnpm build:content
+          pnpm build:outreach

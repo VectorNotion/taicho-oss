@@ -1,0 +1,47 @@
+{
+  "name": "@content-automation/cascade",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:assign-legacy": "tsx scripts/assign-legacy.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "agent:generate": "tsx scripts/generate.ts",
+    "agent:optimize": "tsx scripts/optimize.ts",
+    "worker": "tsx engine/worker.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts"
+  },
+  "dependencies": {
+    "@content-automation/database": "workspace:*",
+    "@content-automation/observability": "workspace:*",
+    "@content-automation/platform": "workspace:*",
+    "@content-automation/ui": "workspace:*",
+    "@templatical/renderer": "0.17.0",
+    "@templatical/types": "0.17.0",
+    "@xyflow/react": "^12.11.2",
+    "handlebars": "^4.7.9",
+    "liquidjs": "^10.16.0",
+    "lucide-react": "^0.554.0",
+    "mjml": "5.4.0",
+    "pg": "^8.16.3",
+    "postcss": "8.5.23",
+    "postcss-value-parser": "4.2.0",
+    "react": "19.2.7",
+    "sanitize-html": "2.17.6",
+    "sonner": "^2.0.7",
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@types/mjml": "^4.7.4",
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "@types/sanitize-html": "2.16.1",
+    "typescript": "^5"
+  },
+  "license": "AGPL-3.0-only"
+}

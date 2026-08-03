@@ -1,0 +1,5 @@
+@import "../../../packages/ui/globals.css";
+@source "../../../packages/ui";
+@source "../../../packages/auth";
+@source "../../../products/outreach";
+@import "@content-automation/auth/styles.css";

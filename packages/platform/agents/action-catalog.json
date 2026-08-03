@@ -1,0 +1,36 @@
+{
+  "content": [
+    "build_project_graph",
+    "do_research",
+    "extract_topics",
+    "refine_content_idea",
+    "generate_content_ideas",
+    "generate_content_draft",
+    "schedule_post"
+  ],
+  "outreach": [
+    "research_lead",
+    "qualify_lead",
+    "generate_outreach"
+  ],
+  "cascade": [
+    "enroll_in_funnel"
+  ],
+  "resonance": [
+    "resonance_run"
+  ],
+  "outreachGenerationRuntime": "mastra",
+  "runtimes": {
+    "do_research": "mastra",
+    "build_project_graph": "mastra",
+    "generate_content_ideas": "mastra",
+    "refine_content_idea": "mastra",
+    "generate_content_draft": "mastra",
+    "extract_topics": "mastra",
+    "research_lead": "mastra",
+    "qualify_lead": "mastra",
+    "generate_outreach": "mastra",
+    "schedule_post": "native",
+    "enroll_in_funnel": "native"
+  }
+}

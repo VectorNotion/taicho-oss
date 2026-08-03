@@ -1,0 +1,29 @@
+{
+  "name": "@content-automation/atlas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./brain-repository": "./data/brain-repository.ts",
+    "./types": "./types.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx --test data/*.test.ts tests/*.test.ts"
+  },
+  "dependencies": {
+    "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "d3-zoom": "^3.0.0",
+    "react": "19.2.7",
+    "@content-automation/platform": "workspace:*",
+    "@content-automation/ui": "workspace:*",
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-zoom": "^3.0.8",
+    "@types/react": "^19"
+  },
+  "license": "AGPL-3.0-only"
+}

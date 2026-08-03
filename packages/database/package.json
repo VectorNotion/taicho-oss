@@ -1,0 +1,29 @@
+{
+  "name": "@content-automation/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./client": "./client.ts",
+    "./migrate": "./migrate.ts",
+    "./schema": "./schema/index.ts"
+  },
+  "scripts": {
+    "db:adopt": "tsx migrate.ts --adopt-existing",
+    "db:migrate": "tsx migrate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@content-automation/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.15.6",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.2"
+  },
+  "license": "AGPL-3.0-only"
+}

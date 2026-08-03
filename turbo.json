@@ -1,0 +1,115 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "OPENROUTER_API_KEY",
+    "AUTH_OAUTH_PROVIDERS",
+    "AUTH_SIGNUP_POLICY",
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_URL",
+    "BETTER_AUTH_TRUSTED_ORIGINS",
+    "API_ALLOWED_ORIGINS",
+    "API_MEDIA_UPLOAD_MAX_BYTES",
+    "API_RATE_LIMIT_READ_PER_MINUTE",
+    "API_RATE_LIMIT_WRITE_PER_MINUTE",
+    "API_RESOURCE_URL",
+    "CAPABILITY_DATABASE_URL",
+    "CAPABILITY_ADMIN_DATABASE_URL",
+    "CAPABILITY_DATABASE_ROLE",
+    "CAPABILITY_OPERATION_POLL_MS",
+    "EXTERNAL_WEBHOOK_ALLOWED_HOSTS",
+    "EXTERNAL_WEBHOOK_ENCRYPTION_KEY",
+    "EXTERNAL_WEBHOOK_POLL_MS",
+    "OAUTH_AUTHORIZATION_ISSUER",
+    "OAUTH_ALLOW_PUBLIC_REGISTRATION",
+    "INTELLIGENCE_LEGACY_API_SUNSET",
+    "MCP_ALLOWED_ORIGINS",
+    "MCP_DATABASE_URL",
+    "MCP_ADMIN_DATABASE_URL",
+    "MCP_DATABASE_ROLE",
+    "MCP_AUTHORIZATION_ISSUER",
+    "MCP_ALLOW_PUBLIC_REGISTRATION",
+    "MCP_MEDIA_UPLOAD_MAX_BYTES",
+    "MCP_MAX_REQUEST_BYTES",
+    "MCP_OPERATION_POLL_MS",
+    "MCP_OUTBOUND_ALLOWED_HOSTS",
+    "MCP_RESOURCE_URL",
+    "CMS_API_URL",
+    "CMS_MCP_API_KEY",
+    "CMS_MCP_URL",
+    "CMS_TENANT_ID",
+    "COMMERCIAL_OPERATOR_EMAILS",
+    "DD_ENV",
+    "DD_SERVICE",
+    "DD_SITE",
+    "DD_VERSION",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_REALTIME",
+    "LANGFUSE_SECRET_KEY",
+    "MODEL_NAME",
+    "NEXT_PUBLIC_AUTH_PROVIDERS",
+    "OBSERVABILITY_ENABLED",
+    "OBSERVABILITY_ID_HASH_KEY",
+    "OBSERVABILITY_LEDGER_ENABLED",
+    "OBSERVABILITY_LEDGER_RETENTION_DAYS",
+    "OBSERVABILITY_LOG_LEVEL",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_PROTOCOL",
+    "OTEL_METRIC_EXPORT_INTERVAL",
+    "FALKORDB_GRAPH",
+    "FALKORDB_URL",
+    "POSTGRES_DB",
+    "POSTGRES_HOST",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_PORT",
+    "POSTGRES_USER",
+    "JOBS_DATABASE_URL",
+    "JOBS_ADMIN_DATABASE_URL",
+    "JOBS_DATABASE_ROLE",
+    "CASCADE_DATABASE_URL",
+    "CASCADE_ADMIN_DATABASE_URL",
+    "CASCADE_DATABASE_ROLE",
+    "PUBLISHING_DATABASE_URL",
+    "PUBLISHING_ADMIN_DATABASE_URL",
+    "PUBLISHING_DATABASE_ROLE",
+    "RELAY_R2_ACCESS_KEY_ID",
+    "RELAY_R2_BUCKET",
+    "RELAY_R2_ENDPOINT",
+    "RELAY_R2_PUBLIC_URL",
+    "RELAY_R2_SECRET_ACCESS_KEY",
+    "PUBLIC_APP_URL",
+    "TAVILY_API_KEY"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "build/**"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": [
+        "^lint"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^typecheck"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "^test"
+      ],
+      "outputs": []
+    }
+  }
+}

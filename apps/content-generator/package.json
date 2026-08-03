@@ -1,0 +1,39 @@
+{
+  "name": "@content-automation/content-generator-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3005",
+    "build": "next build",
+    "start": "next start -p 3005",
+    "lint": "eslint app components",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@content-automation/atlas": "workspace:*",
+    "@content-automation/auth": "workspace:*",
+    "@content-automation/config": "workspace:*",
+    "@content-automation/content-generator": "workspace:*",
+    "@content-automation/observability": "workspace:*",
+    "@content-automation/outreach": "workspace:*",
+    "@content-automation/platform": "workspace:*",
+    "@content-automation/ui": "workspace:*",
+    "ai": "6.0.39",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.554.0",
+    "next": "16.3.0-preview.7",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "sonner": "^2.0.7",
+    "zod": "4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  },
+  "license": "AGPL-3.0-only"
+}

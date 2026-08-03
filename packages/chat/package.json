@@ -1,0 +1,34 @@
+{
+  "name": "@content-automation/chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./client": "./client.ts",
+    "./server": "./server.ts"
+  },
+  "scripts": {
+    "db:migrate": "tsx scripts/migrate.ts",
+    "retention:prune": "tsx scripts/prune.ts",
+    "retention:preview": "tsx scripts/prune.ts --dry-run",
+    "knowledge:ingest-docs": "tsx scripts/ingest-docs.ts",
+    "knowledge:preview-docs": "tsx scripts/ingest-docs.ts --dry-run",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test:postgres": "node --import tsx --test --test-concurrency=1 tests-postgres/*.test.ts"
+  },
+  "dependencies": {
+    "@content-automation/database": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "pg": "^8.16.3",
+    "tsx": "^4.23.1",
+    "zod": "4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "typescript": "^5"
+  },
+  "license": "AGPL-3.0-only"
+}

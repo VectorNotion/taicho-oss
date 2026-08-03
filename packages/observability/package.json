@@ -1,0 +1,42 @@
+{
+  "name": "@content-automation/observability",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@content-automation/database": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "@mastra/core": "1.0.4",
+    "@mastra/langfuse": "1.0.0",
+    "@mastra/observability": "1.0.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.79.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-metrics": "^2.10.0",
+    "@opentelemetry/sdk-node": "^0.221.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "tsx": "^4.23.1",
+    "typescript": "^5"
+  },
+  "exports": {
+    ".": "./index.ts",
+    "./client": "./client.ts",
+    "./headers": "./headers.ts",
+    "./ai": "./ai.ts",
+    "./node": "./node.ts",
+    "./support": "./support.ts",
+    "./testing": "./testing.ts"
+  },
+  "license": "AGPL-3.0-only"
+}

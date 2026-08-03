@@ -1,0 +1,9 @@
+{
+  "extends": "../config/typescript/next.json",
+  "compilerOptions": {
+    "lib": ["esnext", "dom"],
+    "noEmit": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

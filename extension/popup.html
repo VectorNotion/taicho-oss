@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lead Capture</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Lead Capture</h1>
+    </header>
+
+    <!-- Wrong Page State -->
+    <div id="state-wrong-page" class="state">
+      <div class="message info">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+        <p>Navigate to a Sales Navigator profile to capture a lead.</p>
+      </div>
+    </div>
+
+    <!-- Ready State -->
+    <div id="state-ready" class="state hidden">
+      <div class="preview">
+        <div class="preview-header">
+          <img id="preview-photo" src="" alt="" class="avatar">
+          <div class="preview-info">
+            <h2 id="preview-name"></h2>
+            <p id="preview-title" class="subtitle"></p>
+          </div>
+        </div>
+        <div class="preview-details">
+          <div class="detail-row">
+            <span class="label">Company</span>
+            <span id="preview-company" class="value"></span>
+          </div>
+          <div class="detail-row" id="row-location">
+            <span class="label">Location</span>
+            <span id="preview-location" class="value"></span>
+          </div>
+          <div class="detail-row" id="row-connection">
+            <span class="label">Connection</span>
+            <span id="preview-connection" class="value"></span>
+          </div>
+          <div class="detail-row" id="row-industry">
+            <span class="label">Industry</span>
+            <span id="preview-industry" class="value"></span>
+          </div>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btn-capture" class="btn btn-secondary">Capture</button>
+        <button id="btn-capture-research" class="btn btn-primary">Capture & Research</button>
+      </div>
+    </div>
+
+    <!-- Capturing State -->
+    <div id="state-capturing" class="state hidden">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Capturing lead...</p>
+      </div>
+    </div>
+
+    <!-- Success State -->
+    <div id="state-success" class="state hidden">
+      <div class="message success">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+        <p id="success-message">Lead captured!</p>
+      </div>
+      <button id="btn-view-lead" class="btn btn-link">View in Dashboard</button>
+    </div>
+
+    <!-- Error State -->
+    <div id="state-error" class="state hidden">
+      <div class="message error">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="15" y1="9" x2="9" y2="15"></line>
+          <line x1="9" y1="9" x2="15" y2="15"></line>
+        </svg>
+        <p id="error-message">Something went wrong</p>
+      </div>
+      <button id="btn-retry" class="btn btn-secondary">Try Again</button>
+    </div>
+
+    <!-- Settings -->
+    <div class="settings">
+      <button id="btn-settings" class="btn-icon" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settings-panel" class="settings-panel hidden">
+      <h3>Settings</h3>
+      <div class="form-group">
+        <label for="api-url">API URL</label>
+        <input type="text" id="api-url" placeholder="http://localhost:3004">
+      </div>
+      <div class="settings-actions">
+        <button id="btn-save-settings" class="btn btn-primary">Save</button>
+        <button id="btn-cancel-settings" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Version -->
+    <div class="footer">
+      <span id="version" class="version"></span>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

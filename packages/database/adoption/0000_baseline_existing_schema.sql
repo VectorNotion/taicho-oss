@@ -1,0 +1,1 @@
+-- Existing schema verified against migrations/meta/0000_snapshot.json.

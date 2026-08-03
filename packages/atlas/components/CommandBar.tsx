@@ -1,0 +1,119 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { BrainSearchResult } from '../types';
+import { TYPE_COLOR } from '../palette';
+
+/** Parse "+ Name[, Title][ @ Company]" → lead fields. */
+export function parseAddLead(input: string): { name: string; title?: string; company?: string } | null {
+  const m = input.replace(/^\+\s*/, '').trim();
+  if (!m) return null;
+  const [beforeAt, company] = m.split('@').map((s) => s.trim());
+  const [name, title] = beforeAt.split(',').map((s) => s.trim());
+  if (!name) return null;
+  return { name, title: title || undefined, company: company || undefined };
+}
+
+export function CommandBar({ onPick, onLeadAdded }: {
+  onPick: (id: string) => void;
+  onLeadAdded: (id: string) => void;
+}) {
+  const [openBar, setOpenBar] = useState(false);
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<BrainSearchResult[]>([]);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isAdd = q.startsWith('+');
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault(); setOpenBar(true); setTimeout(() => inputRef.current?.focus(), 0);
+      }
+      if (e.key === 'Escape') { setOpenBar(false); setQ(''); setResults([]); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    if (isAdd || q.trim().length < 2) { setResults([]); return; }
+    const t = setTimeout(() => {
+      fetch(`/api/brain/search?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((d) => setResults(d.results ?? []))
+        .catch(() => setResults([]));
+    }, 180);
+    return () => clearTimeout(t);
+  }, [q, isAdd]);
+
+  const submitAdd = useCallback(async () => {
+    const lead = parseAddLead(q);
+    if (!lead) return;
+    setBusy(true);
+    try {
+      // Contract: apps/outreach/app/api/outreach/leads/route.ts POST —
+      // requires name + source; returns the lead object spread ({...lead, existed}).
+      const res = await fetch('/api/outreach/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...lead, source: 'manual', triggerResearch: true }),
+      });
+      const data = await res.json();
+      if (data?.id) { onLeadAdded(String(data.id)); setOpenBar(false); setQ(''); }
+    } finally { setBusy(false); }
+  }, [q, onLeadAdded]);
+
+  if (!openBar) {
+    return (
+      <button
+        onClick={() => { setOpenBar(true); setTimeout(() => inputRef.current?.focus(), 0); }}
+        className="absolute left-1/2 top-4 -translate-x-1/2 rounded-lg border border-border/50 bg-background/80 px-4 py-1.5 text-xs text-muted-foreground backdrop-blur hover:text-foreground"
+      >
+        ⌘K — find anything · “+ name” to add a lead
+      </button>
+    );
+  }
+
+  return (
+    <div className="absolute left-1/2 top-4 z-10 w-[420px] max-w-[90%] -translate-x-1/2 rounded-xl border border-border/60 bg-background/95 p-2 backdrop-blur">
+      <input
+        ref={inputRef}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            if (isAdd) void submitAdd();
+            else if (results[0]) { onPick(results[0].id); setOpenBar(false); setQ(''); }
+          }
+        }}
+        placeholder="Find anything… or “+ Sarah Chen, CTO @ Linear”"
+        className="w-full bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
+      />
+      {isAdd && (
+        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+          {busy ? 'adding — the brain will research them…' : (() => {
+            const p = parseAddLead(q);
+            return p ? `↵ add ${p.name}${p.title ? `, ${p.title}` : ''}${p.company ? ` @ ${p.company}` : ''}` : 'type a name';
+          })()}
+        </div>
+      )}
+      {!isAdd && results.length > 0 && (
+        <ul className="max-h-64 overflow-y-auto">
+          {results.map((r) => (
+            <li key={r.id}>
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/50"
+                onClick={() => { onPick(r.id); setOpenBar(false); setQ(''); }}
+              >
+                <span className="h-2 w-2 rounded-full" style={{ background: TYPE_COLOR[r.type] }} />
+                <span>{r.label}</span>
+                <span className="ml-auto truncate pl-2 text-xs text-muted-foreground">{r.sub}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,311 @@
+@import "tailwindcss";
+@source "../";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-action: var(--action);
+  --color-action-foreground: var(--action-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --font-heading: "Manrope", "Avenir Next", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --primary: oklch(0.606 0.25 292.717);
+  --action: oklch(0.541 0.281 293.009);
+  --action-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --border: oklch(1 0 0 / 10%);
+  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+}
+
+* {
+  border-color: var(--border);
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Roboto", "Avenir Next", ui-sans-serif, system-ui, sans-serif;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--primary) 45%, transparent);
+  color: var(--foreground);
+}
+
+.docs-backdrop {
+  background:
+    radial-gradient(
+      circle at 8% 10%,
+      color-mix(in oklab, var(--primary) 16%, transparent),
+      transparent 28rem
+    ),
+    radial-gradient(
+      circle at 92% 12%,
+      color-mix(in oklab, var(--primary) 11%, transparent),
+      transparent 32rem
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--background) 94%, var(--primary)),
+      var(--background)
+    );
+}
+
+.docs-backdrop::after {
+  background-image: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--foreground) 8%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 30px 30px;
+  content: "";
+  inset: 0;
+  mask-image: linear-gradient(to bottom, black, transparent 76%);
+  opacity: 0.55;
+  position: absolute;
+}
+
+.docs-copy {
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.docs-copy > :first-child {
+  margin-top: 0;
+}
+
+.docs-copy h2,
+.docs-copy h3 {
+  color: var(--foreground);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  scroll-margin-top: 6rem;
+}
+
+.docs-copy h2 {
+  border-top: 1px solid var(--border);
+  font-size: 1.65rem;
+  margin: 3rem 0 1rem;
+  padding-top: 2rem;
+}
+
+.docs-copy h3 {
+  font-size: 1.2rem;
+  margin: 2rem 0 0.75rem;
+}
+
+.docs-copy h2 > a,
+.docs-copy h3 > a {
+  color: var(--primary);
+  margin-left: 0.5rem;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.docs-copy h2:hover > a,
+.docs-copy h3:hover > a {
+  opacity: 1;
+}
+
+.docs-copy p,
+.docs-copy ol,
+.docs-copy ul,
+.docs-copy table,
+.docs-copy pre,
+.docs-copy figure {
+  margin: 1rem 0;
+}
+
+.docs-copy ol,
+.docs-copy ul {
+  padding-left: 1.5rem;
+}
+
+.docs-copy ol {
+  list-style: decimal;
+}
+
+.docs-copy ul {
+  list-style: disc;
+}
+
+.docs-copy li {
+  margin: 0.4rem 0;
+  padding-left: 0.25rem;
+}
+
+.docs-copy strong {
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+.docs-copy a {
+  color: color-mix(in oklab, var(--primary) 78%, white);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--primary) 45%, transparent);
+  text-underline-offset: 0.2rem;
+}
+
+.docs-copy code {
+  background: color-mix(in oklab, var(--muted) 75%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  color: var(--foreground);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.84em;
+  padding: 0.12rem 0.35rem;
+}
+
+.docs-copy pre {
+  background: oklch(0.105 0.006 285.8);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  padding: 1rem 1.1rem;
+}
+
+.docs-copy pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.docs-copy table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+}
+
+.docs-copy th,
+.docs-copy td {
+  border: 1px solid var(--border);
+  min-width: 10rem;
+  padding: 0.65rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-copy th {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.docs-copy img {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  height: auto;
+  margin: 1.5rem 0;
+  max-width: 100%;
+}
+
+.docs-callout {
+  align-items: flex-start;
+  background: color-mix(in oklab, var(--primary) 7%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--primary) 25%, var(--border));
+  border-radius: 0.75rem;
+  color: color-mix(in oklab, var(--primary) 72%, white);
+  display: flex;
+  gap: 0.8rem;
+  margin: 1.5rem 0;
+  padding: 1rem;
+}
+
+.docs-callout-warning {
+  background: oklch(0.2 0.04 75);
+  border-color: oklch(0.55 0.11 75);
+  color: oklch(0.85 0.12 80);
+}
+
+.docs-callout-success {
+  background: oklch(0.19 0.04 155);
+  border-color: oklch(0.52 0.11 155);
+  color: oklch(0.84 0.12 155);
+}
+
+.docs-callout-title {
+  color: var(--foreground);
+  font-weight: 700;
+  margin: 0 0 0.2rem;
+}
+
+.docs-callout-content > :first-child {
+  margin-top: 0;
+}
+
+.docs-callout-content > :last-child {
+  margin-bottom: 0;
+}
+
+.docs-neighbor {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  color: var(--foreground);
+  display: flex;
+  gap: 0.75rem;
+  min-height: 4.5rem;
+  padding: 0.85rem 1rem;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+.docs-neighbor:hover {
+  background: var(--accent);
+  border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
+}
+
+.docs-neighbor small {
+  color: var(--muted-foreground);
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.2rem;
+  text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

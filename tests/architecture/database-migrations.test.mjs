@@ -1,0 +1,72 @@
+import assert from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
+import { extname, join } from "node:path";
+import test from "node:test";
+
+const sourceExtensions = new Set([".ts", ".tsx", ".js", ".mjs", ".cjs"]);
+const ddl = /\b(?:CREATE\s+(?:TABLE|SCHEMA|INDEX|POLICY)|ALTER\s+TABLE|DROP\s+(?:TABLE|SCHEMA)|GRANT\s+(?:SELECT|INSERT|UPDATE|DELETE|USAGE))\b/i;
+
+async function sourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (
+        ["node_modules", ".next", ".turbo", "dist", "build", "test", "__tests__"].includes(entry.name)
+        || entry.name.startsWith("tests")
+      ) return [];
+      return sourceFiles(path);
+    }
+    return sourceExtensions.has(extname(entry.name)) ? [path] : [];
+  }));
+  return nested.flat();
+}
+
+test("database DDL exists only in generated Drizzle migrations", async () => {
+  const files = (
+    await Promise.all(["apps", "packages", "products"].map(sourceFiles))
+  ).flat();
+  const violations = [];
+
+  for (const file of files) {
+    if (ddl.test(await readFile(file, "utf8"))) violations.push(file);
+  }
+
+  assert.deepEqual(violations, [], `Runtime DDL found in: ${violations.join(", ")}`);
+});
+
+test("PostgreSQL access does not bypass Drizzle with direct pg query calls", async () => {
+  const files = (
+    await Promise.all(["apps", "packages", "products"].map(sourceFiles))
+  ).flat();
+  const violations = [];
+  const importsPg = /(?:from\s+["']pg["']|require\(\s*["']pg["']\s*\))/;
+  const callsQuery = /\.query\s*(?:<[^>]*>)?\s*\(/;
+
+  for (const file of files) {
+    const source = await readFile(file, "utf8");
+    if (importsPg.test(source) && callsQuery.test(source)) violations.push(file);
+  }
+
+  assert.deepEqual(violations, [], `Direct pg query calls found in: ${violations.join(", ")}`);
+});
+
+test("the canonical Drizzle migration chain is checked in", async () => {
+  const [manifest, journal] = await Promise.all([
+    readFile("package.json", "utf8"),
+    readFile("packages/database/migrations/meta/_journal.json", "utf8"),
+  ]);
+  assert.match(manifest, /"db:migrate"/);
+  assert.deepEqual(
+    JSON.parse(journal).entries.map((entry) => entry.tag),
+    [
+      "0000_baseline_existing_schema",
+      "0001_remove_retired_automation_and_sync",
+      "0002_force_tenant_row_level_security",
+      "0003_amusing_forgotten_one",
+      "0004_colorful_colossus",
+      "0005_external_api_oauth_platform",
+      "0006_violet_baron_strucker",
+    ],
+  );
+});

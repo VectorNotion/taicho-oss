@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/components/ui/*": ["./packages/ui/components/ui/*"],
+      "@/components/Logo": ["./packages/ui/components/Logo.tsx"],
+      "@/components/PageHeader": ["./packages/ui/components/PageHeader.tsx"],
+      "@/components/genui": ["./packages/ui/components/genui/index.ts"],
+      "@/components/leads": ["./products/outreach/ui/components/leads/index.ts"],
+      "@/components/leads/*": ["./products/outreach/ui/components/leads/*"],
+      "@/components/chat/*": ["./products/content-generator/ui/components/chat/*"],
+      "@/components/tools/*": ["./products/content-generator/ui/components/tools/*"],
+      "@/components/ChatInterface": ["./products/content-generator/ui/components/ChatInterface.tsx"],
+      "@/components/ContentCard": ["./products/content-generator/ui/components/ContentCard.tsx"],
+      "@/components/ContextView": ["./products/content-generator/ui/components/ContextView.tsx"],
+      "@/hooks/use-mobile": ["./packages/ui/hooks/use-mobile.ts"],
+      "@/hooks/use-action-stream": ["./packages/ui/hooks/use-action-stream.ts"],
+      "@/lib/utils": ["./packages/ui/lib/utils.ts"],
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}

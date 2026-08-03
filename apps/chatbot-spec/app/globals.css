@@ -1,0 +1,6 @@
+@import "../../../packages/ui/globals.css";
+@source "../../../packages/ui";
+@source "../components";
+
+html { scroll-behavior: smooth; }
+body { overflow-x: hidden; }

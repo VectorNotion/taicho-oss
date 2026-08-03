@@ -1,0 +1,61 @@
+{
+  "name": "@content-automation/auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./client": "./client.ts",
+    "./admin": "./admin.ts",
+    "./admin-console": "./admin-console.tsx",
+    "./components": "./components.tsx",
+    "./external-administration": "./external-administration.ts",
+    "./commercial": "./commercial.ts",
+    "./mcp-administration": "./mcp-administration.ts",
+    "./redirects": "./redirects.ts",
+    "./signup-policy": "./signup-policy.ts",
+    "./permissions": {
+      "types": "./permissions.d.ts",
+      "default": "./permissions.ts"
+    },
+    "./server": {
+      "types": "./server.d.ts",
+      "default": "./server.ts"
+    },
+    "./styles.css": "./styles.css"
+  },
+  "scripts": {
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "1.6.24",
+    "@better-auth/oauth-provider": "1.6.24",
+    "@content-automation/database": "workspace:*",
+    "@content-automation/observability": "workspace:*",
+    "@content-automation/ui": "workspace:*",
+    "better-auth": "^1.6.24",
+    "drizzle-orm": "0.45.2",
+    "lucide-react": "^0.554.0",
+    "pg": "^8.16.3",
+    "tsx": "^4.20.6",
+    "zod": "4.3.5",
+    "@content-automation/platform": "workspace:*"
+  },
+  "peerDependencies": {
+    "next": ">=16",
+    "react": ">=19",
+    "react-dom": ">=19"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "next": "16.3.0-preview.7",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "typescript": "^5"
+  },
+  "license": "AGPL-3.0-only"
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@content-automation/outreach",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./data/lead-repository": "./data/lead-repository.ts",
+    "./data/persona-repository": "./data/persona-repository.ts",
+    "./domain/types": "./domain/types.ts",
+    "./agent/generator": "./agent/generator.ts",
+    "./agent/lead-research": "./agent/lead-research.ts",
+    "./agent/qualify-lead": "./agent/qualify-lead.ts",
+    "./agent/tavily-tool": "./agent/tavily-tool.ts"
+  },
+  "dependencies": {
+    "@content-automation/content-generator": "workspace:*",
+    "@content-automation/observability": "workspace:*",
+    "@content-automation/platform": "workspace:*",
+    "@content-automation/ui": "workspace:*",
+    "@mastra/core": "1.0.4",
+    "@mastra/pg": "1.0.0",
+    "ai": "6.0.39",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.554.0",
+    "next": "16.3.0-preview.7",
+    "react": "19.2.7",
+    "sonner": "^2.0.7",
+    "tsx": "^4.20.6",
+    "zod": "^4.3.5"
+  },
+  "scripts": {
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "license": "AGPL-3.0-only"
+}
