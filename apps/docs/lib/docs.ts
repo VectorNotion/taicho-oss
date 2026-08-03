@@ -179,6 +179,16 @@ export function getDocumentationNavigation() {
     sections.set(document.section, items);
   }
 
+  const integrations = sections.get("Integrations") ?? [];
+  if (!integrations.some((item) => item.href === "/api-reference")) {
+    integrations.push({
+      href: "/api-reference",
+      order: 1,
+      title: "API reference",
+    });
+  }
+  sections.set("Integrations", integrations);
+
   return Array.from(sections, ([title, items]) => ({
     title,
     items: items
