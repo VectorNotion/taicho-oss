@@ -6,7 +6,7 @@ import {
   intelligence_artifact_outcomes as artifactOutcomesTable,
   intelligence_artifacts as artifactsTable,
   intelligence_runs as runsTable,
-  member as membersTable,
+  jobWorkspaceMemberIds as workspaceMemberIdsView,
   notification_preferences as notificationPreferencesTable,
   notification_recipients as notificationRecipientsTable,
   product_events as productEventsTable,
@@ -380,9 +380,9 @@ export async function recordProductEventProjection(input: {
 async function workspaceMemberIds(organizationId: string): Promise<string[]> {
   const scoped = dbFor(organizationId);
   const rows = await scoped.db
-    .select({ userId: membersTable.userId })
-    .from(membersTable)
-    .where(eq(membersTable.organizationId, scoped.organizationId));
+    .select({ userId: workspaceMemberIdsView.user_id })
+    .from(workspaceMemberIdsView)
+    .where(eq(workspaceMemberIdsView.organization_id, scoped.organizationId));
   return rows.map((row) => row.userId);
 }
 

@@ -57,6 +57,13 @@
       "when": 1785737184144,
       "tag": "0007_calm_shotgun",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785850972561,
+      "tag": "0008_restore_runtime_database_grants",
+      "breakpoints": true
     }
   ]
 }

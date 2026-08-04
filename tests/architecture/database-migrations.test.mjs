@@ -68,6 +68,39 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0005_external_api_oauth_platform",
       "0006_violet_baron_strucker",
       "0007_calm_shotgun",
+      "0008_restore_runtime_database_grants",
     ],
   );
+});
+
+test("runtime grants for post-baseline tables are migration-managed", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0008_restore_runtime_database_grants.sql",
+    "utf8",
+  );
+  for (const role of ["jobs_app", "capability_app", "mcp_app", "publishing_app", "cascade_app"]) {
+    assert.match(migration, new RegExp(`['\"]${role}['\"]`));
+  }
+  for (const relation of [
+    "attention_items",
+    "intelligence_api_tokens",
+    "intelligence_artifact_outcomes",
+    "intelligence_artifacts",
+    "intelligence_runs",
+    "notification_preferences",
+    "notification_recipients",
+    "product_event_projections",
+    "external_api_rate_limit",
+    "external_webhook_delivery",
+    "external_webhook_endpoint",
+    "content_assets",
+    "content_generation_runs",
+    "funnel_members",
+    "plain_text_emails",
+  ]) {
+    assert.match(migration, new RegExp(`['\"]${relation}['\"]`));
+  }
+  assert.match(migration, /job_workspace_member_ids/);
+  assert.doesNotMatch(migration, /DISABLE\s+ROW\s+LEVEL\s+SECURITY/i);
+  assert.doesNotMatch(migration, /BYPASSRLS|SUPERUSER/i);
 });

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { pgSchema, text } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
@@ -15,6 +15,52 @@ const migrationOptions = {
   migrationsTable: "__drizzle_migrations",
   migrationsSchema: "drizzle",
 } as const;
+
+const runtimeGrantContracts = [
+  {
+    environmentName: "JOBS_DATABASE_ROLE",
+    schema: "public",
+    relations: [
+      ["public.product_events", ["SELECT", "INSERT"]],
+      ["public.job_workspace_member_ids", ["SELECT"]],
+      ["public.attention_items", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.intelligence_api_tokens", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.intelligence_artifact_outcomes", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.intelligence_artifacts", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.intelligence_runs", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.notification_preferences", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.notification_recipients", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.product_event_projections", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.external_webhook_delivery", ["INSERT"]],
+      ["public.external_webhook_endpoint", ["SELECT"]],
+    ],
+  },
+  {
+    environmentName: "CAPABILITY_DATABASE_ROLE",
+    schema: "public",
+    relations: [
+      ["public.external_api_rate_limit", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.external_webhook_delivery", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.external_webhook_endpoint", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+    ],
+  },
+  {
+    environmentName: "PUBLISHING_DATABASE_ROLE",
+    schema: "publishing",
+    relations: [
+      ["publishing.content_assets", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["publishing.content_generation_runs", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+    ],
+  },
+  {
+    environmentName: "CASCADE_DATABASE_ROLE",
+    schema: "cascade",
+    relations: [
+      ["cascade.funnel_members", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["cascade.plain_text_emails", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+    ],
+  },
+] as const;
 
 const informationSchema = pgSchema("information_schema");
 const informationSchemaTables = informationSchema.table("tables", {
@@ -90,6 +136,33 @@ async function hasExistingApplicationTables(db: ReturnType<typeof databaseFor>) 
   return tables.size > 0;
 }
 
+async function verifyRuntimeGrants(db: ReturnType<typeof databaseFor>) {
+  const missing: string[] = [];
+  for (const contract of runtimeGrantContracts) {
+    const role = process.env[contract.environmentName]?.trim();
+    if (!role) continue;
+    const schemaGrant = await db.execute<{ allowed: boolean }>(sql`
+      SELECT has_schema_privilege(${role}, ${contract.schema}, 'USAGE') AS allowed
+    `);
+    if (!schemaGrant.rows[0]?.allowed) {
+      missing.push(`${contract.environmentName} lacks USAGE on ${contract.schema}`);
+    }
+    for (const [relation, privileges] of contract.relations) {
+      for (const privilege of privileges) {
+        const tableGrant = await db.execute<{ allowed: boolean }>(sql`
+          SELECT has_table_privilege(${role}, ${relation}, ${privilege}) AS allowed
+        `);
+        if (!tableGrant.rows[0]?.allowed) {
+          missing.push(`${contract.environmentName} lacks ${privilege} on ${relation}`);
+        }
+      }
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(`Runtime database grant verification failed:\n${missing.join("\n")}`);
+  }
+}
+
 export async function runMigrations({ adoptExisting = false } = {}) {
   const pool = new Pool({ ...adminPoolConfig(), max: 1 });
   const db = databaseFor(pool);
@@ -110,6 +183,7 @@ export async function runMigrations({ adoptExisting = false } = {}) {
     }
 
     await migrate(db, { migrationsFolder, ...migrationOptions });
+    await verifyRuntimeGrants(db);
   } finally {
     await pool.end();
   }
