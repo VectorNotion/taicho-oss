@@ -62,6 +62,29 @@ const runtimeGrantContracts = [
   },
 ] as const;
 
+const capabilityAdminColumnGrants = [
+  ["public.mcp_operation", [
+    "id",
+    "organization_id",
+    "status",
+    "lease_expires_at",
+    "attempt",
+    "max_attempts",
+    "created_at",
+  ]],
+  ["public.mcp_media_upload", ["id", "organization_id"]],
+  ["public.external_webhook_delivery", [
+    "id",
+    "organization_id",
+    "status",
+    "next_attempt_at",
+    "lease_expires_at",
+    "attempt",
+    "max_attempts",
+  ]],
+  ["public.external_api_rate_limit", ["expires_at"]],
+] as const;
+
 const informationSchema = pgSchema("information_schema");
 const informationSchemaTables = informationSchema.table("tables", {
   tableSchema: text("table_schema").notNull(),
@@ -136,7 +159,22 @@ async function hasExistingApplicationTables(db: ReturnType<typeof databaseFor>) 
   return tables.size > 0;
 }
 
-async function verifyRuntimeGrants(db: ReturnType<typeof databaseFor>) {
+function configuredDatabaseRole(...environmentNames: string[]) {
+  for (const environmentName of environmentNames) {
+    const value = process.env[environmentName]?.trim();
+    if (!value) continue;
+    try {
+      const role = decodeURIComponent(new URL(value).username).trim();
+      if (role) return { environmentName, role };
+    } catch {
+      throw new Error(`${environmentName} must be a valid PostgreSQL URL.`);
+    }
+    throw new Error(`${environmentName} must include a database username.`);
+  }
+  return undefined;
+}
+
+async function verifyDatabaseGrants(db: ReturnType<typeof databaseFor>) {
   const missing: string[] = [];
   for (const contract of runtimeGrantContracts) {
     const role = process.env[contract.environmentName]?.trim();
@@ -158,8 +196,69 @@ async function verifyRuntimeGrants(db: ReturnType<typeof databaseFor>) {
       }
     }
   }
+
+  const capabilityAdmin = configuredDatabaseRole(
+    "CAPABILITY_ADMIN_DATABASE_URL",
+    "MCP_ADMIN_DATABASE_URL",
+  );
+  if (capabilityAdmin) {
+    const roleAttributes = await db.execute<{
+      bypassRls: boolean;
+      superuser: boolean;
+    }>(sql`
+      SELECT rolbypassrls AS "bypassRls", rolsuper AS superuser
+      FROM pg_roles
+      WHERE rolname = ${capabilityAdmin.role}
+    `);
+    const attributes = roleAttributes.rows[0];
+    if (!attributes?.bypassRls) {
+      missing.push(`${capabilityAdmin.environmentName} role must have BYPASSRLS`);
+    }
+    if (attributes?.superuser) {
+      missing.push(`${capabilityAdmin.environmentName} role must not be SUPERUSER`);
+    }
+
+    const schemaGrant = await db.execute<{ allowed: boolean }>(sql`
+      SELECT has_schema_privilege(${capabilityAdmin.role}, 'public', 'USAGE') AS allowed
+    `);
+    if (!schemaGrant.rows[0]?.allowed) {
+      missing.push(`${capabilityAdmin.environmentName} lacks USAGE on public`);
+    }
+
+    const deleteGrant = await db.execute<{ allowed: boolean }>(sql`
+      SELECT has_table_privilege(
+        ${capabilityAdmin.role},
+        'public.external_api_rate_limit',
+        'DELETE'
+      ) AS allowed
+    `);
+    if (!deleteGrant.rows[0]?.allowed) {
+      missing.push(
+        `${capabilityAdmin.environmentName} lacks DELETE on public.external_api_rate_limit`,
+      );
+    }
+
+    for (const [relation, columns] of capabilityAdminColumnGrants) {
+      for (const column of columns) {
+        const columnGrant = await db.execute<{ allowed: boolean }>(sql`
+          SELECT has_column_privilege(
+            ${capabilityAdmin.role},
+            ${relation},
+            ${column},
+            'SELECT'
+          ) AS allowed
+        `);
+        if (!columnGrant.rows[0]?.allowed) {
+          missing.push(
+            `${capabilityAdmin.environmentName} lacks SELECT (${column}) on ${relation}`,
+          );
+        }
+      }
+    }
+  }
+
   if (missing.length > 0) {
-    throw new Error(`Runtime database grant verification failed:\n${missing.join("\n")}`);
+    throw new Error(`Database grant verification failed:\n${missing.join("\n")}`);
   }
 }
 
@@ -183,7 +282,7 @@ export async function runMigrations({ adoptExisting = false } = {}) {
     }
 
     await migrate(db, { migrationsFolder, ...migrationOptions });
-    await verifyRuntimeGrants(db);
+    await verifyDatabaseGrants(db);
   } finally {
     await pool.end();
   }

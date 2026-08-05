@@ -69,6 +69,7 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0006_violet_baron_strucker",
       "0007_calm_shotgun",
       "0008_restore_runtime_database_grants",
+      "0009_restore_capability_admin_grants",
     ],
   );
 });
@@ -102,5 +103,27 @@ test("runtime grants for post-baseline tables are migration-managed", async () =
   }
   assert.match(migration, /job_workspace_member_ids/);
   assert.doesNotMatch(migration, /DISABLE\s+ROW\s+LEVEL\s+SECURITY/i);
+  assert.doesNotMatch(migration, /BYPASSRLS|SUPERUSER/i);
+});
+
+test("capability control-plane grants are migration-managed and column-restricted", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0009_restore_capability_admin_grants.sql",
+    "utf8",
+  );
+  for (const role of ["capability_admin", "mcp_admin"]) {
+    assert.match(migration, new RegExp(`['\"]${role}['\"]`));
+  }
+  for (const relation of [
+    "mcp_operation",
+    "mcp_media_upload",
+    "external_webhook_delivery",
+    "external_api_rate_limit",
+  ]) {
+    assert.match(migration, new RegExp(`['\"]${relation}['\"]`));
+  }
+  assert.match(migration, /GRANT SELECT \(/i);
+  assert.match(migration, /GRANT SELECT \("expires_at"\), DELETE/i);
+  assert.doesNotMatch(migration, /GRANT SELECT, INSERT, UPDATE, DELETE/i);
   assert.doesNotMatch(migration, /BYPASSRLS|SUPERUSER/i);
 });

@@ -64,6 +64,13 @@
       "when": 1785850972561,
       "tag": "0008_restore_runtime_database_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785903931000,
+      "tag": "0009_restore_capability_admin_grants",
+      "breakpoints": true
     }
   ]
 }
