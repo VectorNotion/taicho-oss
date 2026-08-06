@@ -70,6 +70,7 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0007_calm_shotgun",
       "0008_restore_runtime_database_grants",
       "0009_restore_capability_admin_grants",
+      "0010_add_billing_promotions",
     ],
   );
 });

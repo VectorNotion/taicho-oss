@@ -961,6 +961,57 @@ export const credit_lot = pgTable("credit_lot", {
 	check("credit_lot_source_check", sql`source = ANY (ARRAY['included'::text, 'weekly_grant'::text, 'purchased'::text, 'adjustment'::text])`),
 ]);
 
+export const promotion_version = pgTable("promotion_version", {
+	promotion_id: text().notNull(),
+	version: integer().notNull(),
+	payload_promotion_id: text().notNull(),
+	payload_updated_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+	catalog_version: text().notNull(),
+	catalog_country: text().notNull(),
+	catalog_environment: text().notNull(),
+	provider: text().default('razorpay').notNull(),
+	provider_offer_id: text(),
+	name: text().notNull(),
+	description: text().notNull(),
+	code_hash: text().notNull(),
+	kind: text().notNull(),
+	trial_days: integer(),
+	discount_type: text(),
+	percent_off_basis_points: integer(),
+	amount_off_minor: bigint({ mode: "number" }),
+	maximum_discount_minor: bigint({ mode: "number" }),
+	currency: text(),
+	duration: text(),
+	duration_cycles: integer(),
+	eligible_plan_ids: text().array().notNull(),
+	starts_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+	ends_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+	new_customers_only: boolean().default(true).notNull(),
+	max_redemptions: integer(),
+	per_organization_limit: integer().default(1).notNull(),
+	active: boolean().default(true).notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.promotion_id, table.version], name: "promotion_version_pkey" }),
+	uniqueIndex("promotion_version_catalog_idx").on(table.promotion_id, table.catalog_version),
+	index("promotion_version_code_idx").on(table.code_hash, table.catalog_version, table.catalog_country, table.catalog_environment),
+	check("promotion_version_catalog_country_check", sql`catalog_country ~ '^[A-Z]{2}$'`),
+	check("promotion_version_catalog_environment_check", sql`catalog_environment = ANY (ARRAY['test'::text, 'live'::text])`),
+	check("promotion_version_provider_check", sql`provider = ANY (ARRAY['razorpay'::text, 'stripe'::text, 'paypal'::text])`),
+	check("promotion_version_kind_check", sql`kind = ANY (ARRAY['trial'::text, 'discount'::text])`),
+	check("promotion_version_discount_type_check", sql`discount_type IS NULL OR discount_type = ANY (ARRAY['percentage'::text, 'fixed'::text])`),
+	check("promotion_version_duration_check", sql`duration IS NULL OR duration = ANY (ARRAY['once'::text, 'repeating'::text, 'forever'::text])`),
+	check("promotion_version_time_check", sql`ends_at > starts_at`),
+	check("promotion_version_trial_days_check", sql`trial_days IS NULL OR (trial_days > 0 AND trial_days <= 90)`),
+	check("promotion_version_percent_check", sql`percent_off_basis_points IS NULL OR (percent_off_basis_points > 0 AND percent_off_basis_points <= 10000)`),
+	check("promotion_version_amount_check", sql`amount_off_minor IS NULL OR amount_off_minor > 0`),
+	check("promotion_version_maximum_discount_check", sql`maximum_discount_minor IS NULL OR maximum_discount_minor > 0`),
+	check("promotion_version_duration_cycles_check", sql`duration_cycles IS NULL OR duration_cycles > 1`),
+	check("promotion_version_eligible_plans_check", sql`cardinality(eligible_plan_ids) > 0`),
+	check("promotion_version_max_redemptions_check", sql`max_redemptions IS NULL OR max_redemptions > 0`),
+	check("promotion_version_per_organization_limit_check", sql`per_organization_limit > 0`),
+]);
+
 export const billing_subscription = pgTable("billing_subscription", {
 	organization_id: text().primaryKey().notNull(),
 	checkout_session_id: uuid(),
@@ -981,6 +1032,11 @@ export const billing_subscription = pgTable("billing_subscription", {
 	scheduled_provider_plan_id: text(),
 	scheduled_seats: integer(),
 	billing_country: text(),
+	promotion_id: text(),
+	promotion_version: integer(),
+	provider_offer_id: text(),
+	promotion_paid_count: integer().default(0).notNull(),
+	promotion_applied_at: timestamp({ withTimezone: true, mode: 'string' }),
 }, (table) => [
 	foreignKey({
 			columns: [table.checkout_session_id],
@@ -997,10 +1053,16 @@ export const billing_subscription = pgTable("billing_subscription", {
 			foreignColumns: [commercial_plan_version.plan_id, commercial_plan_version.version],
 			name: "billing_subscription_plan_id_plan_version_fkey"
 		}),
+	foreignKey({
+			columns: [table.promotion_id, table.promotion_version],
+			foreignColumns: [promotion_version.promotion_id, promotion_version.version],
+			name: "billing_subscription_promotion_id_version_fkey"
+		}),
 	unique("billing_subscription_provider_subscription_id_key").on(table.provider_subscription_id),
 	check("billing_subscription_provider_check", sql`provider = ANY (ARRAY['razorpay'::text, 'stripe'::text, 'paypal'::text])`),
 	check("billing_subscription_scheduled_seats_check", sql`scheduled_seats > 0`),
 	check("billing_subscription_seats_check", sql`seats > 0`),
+	check("billing_subscription_promotion_paid_count_check", sql`promotion_paid_count >= 0`),
 ]);
 
 export const organization_subscription = pgTable("organization_subscription", {
@@ -1152,6 +1214,10 @@ export const payment_transaction = pgTable("payment_transaction", {
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	top_up_session_id: uuid(),
+	list_amount_minor: bigint({ mode: "number" }),
+	discount_amount_minor: bigint({ mode: "number" }),
+	promotion_id: text(),
+	promotion_version: integer(),
 }, (table) => [
 	foreignKey({
 			columns: [table.checkout_session_id],
@@ -1168,8 +1234,15 @@ export const payment_transaction = pgTable("payment_transaction", {
 			foreignColumns: [top_up_payment_session.id],
 			name: "payment_transaction_top_up_session_id_fkey"
 		}),
+	foreignKey({
+			columns: [table.promotion_id, table.promotion_version],
+			foreignColumns: [promotion_version.promotion_id, promotion_version.version],
+			name: "payment_transaction_promotion_id_version_fkey"
+		}),
 	unique("payment_transaction_provider_payment_id_key").on(table.provider_payment_id),
 	check("payment_transaction_amount_minor_check", sql`amount_minor >= 0`),
+	check("payment_transaction_list_amount_minor_check", sql`list_amount_minor IS NULL OR list_amount_minor >= amount_minor`),
+	check("payment_transaction_discount_amount_minor_check", sql`discount_amount_minor IS NULL OR discount_amount_minor >= 0`),
 	check("payment_transaction_provider_check", sql`provider = ANY (ARRAY['razorpay'::text, 'stripe'::text, 'paypal'::text])`),
 	check("payment_transaction_session_check", sql`((checkout_session_id IS NOT NULL) AND (top_up_session_id IS NULL)) OR ((checkout_session_id IS NULL) AND (top_up_session_id IS NOT NULL))`),
 ]);
@@ -1199,6 +1272,7 @@ export const payment_checkout_session = pgTable("payment_checkout_session", {
 	billing_country: text().default('IN').notNull(),
 	provider_plan_id: text(),
 	billing_interval: text().default('month').notNull(),
+	catalog_version: text(),
 }, (table) => [
 	index("payment_checkout_expiry_idx").using("btree", table.expires_at.asc().nullsLast()).where(sql`(status = ANY (ARRAY['created'::text, 'checkout_ready'::text, 'processing'::text]))`),
 	index("payment_checkout_org_idx").using("btree", table.organization_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
@@ -1225,6 +1299,49 @@ export const payment_checkout_session = pgTable("payment_checkout_session", {
 	check("payment_checkout_session_provider_check", sql`provider = ANY (ARRAY['razorpay'::text, 'stripe'::text, 'paypal'::text])`),
 	check("payment_checkout_session_seats_check", sql`seats > 0`),
 	check("payment_checkout_session_status_check", sql`status = ANY (ARRAY['created'::text, 'checkout_ready'::text, 'processing'::text, 'paid'::text, 'failed'::text, 'expired'::text, 'cancelled'::text])`),
+]);
+
+export const promotion_redemption = pgTable("promotion_redemption", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	promotion_id: text().notNull(),
+	promotion_version: integer().notNull(),
+	organization_id: text().notNull(),
+	user_id: text().notNull(),
+	checkout_session_id: uuid().notNull(),
+	provider_subscription_id: text(),
+	status: text().default('reserved').notNull(),
+	trial_ends_at: timestamp({ withTimezone: true, mode: 'string' }),
+	reserved_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	reservation_expires_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+	applied_at: timestamp({ withTimezone: true, mode: 'string' }),
+	released_at: timestamp({ withTimezone: true, mode: 'string' }),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("promotion_redemption_promotion_status_idx").on(table.promotion_id, table.status, table.reservation_expires_at),
+	index("promotion_redemption_organization_idx").on(table.organization_id, table.promotion_id, table.created_at),
+	foreignKey({
+		columns: [table.promotion_id, table.promotion_version],
+		foreignColumns: [promotion_version.promotion_id, promotion_version.version],
+		name: "promotion_redemption_promotion_id_version_fkey",
+	}),
+	foreignKey({
+		columns: [table.organization_id],
+		foreignColumns: [organization.id],
+		name: "promotion_redemption_organization_id_fkey",
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.user_id],
+		foreignColumns: [user.id],
+		name: "promotion_redemption_user_id_fkey",
+	}).onDelete("restrict"),
+	foreignKey({
+		columns: [table.checkout_session_id],
+		foreignColumns: [payment_checkout_session.id],
+		name: "promotion_redemption_checkout_session_id_fkey",
+	}).onDelete("cascade"),
+	unique("promotion_redemption_checkout_session_id_key").on(table.checkout_session_id),
+	check("promotion_redemption_status_check", sql`status = ANY (ARRAY['reserved'::text, 'applied'::text, 'released'::text])`),
 ]);
 
 export const funnel_stepsInCascade = cascade.table("funnel_steps", {

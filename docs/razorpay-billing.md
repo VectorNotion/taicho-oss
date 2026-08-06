@@ -39,6 +39,8 @@ payment session.
      customers.
    - Billing Top Ups for each supported country. Each record owns its code, credits,
      price in currency subunits, validity, and publication state.
+   - Billing Promotions for trial extensions and subscription coupon rules. A
+     discount promotion stores the matching environment-specific Razorpay Offer ID.
 
    Existing environment mappings can be imported once with
    `pnpm billing:import-razorpay` in the CMS repository. They are not used by the
@@ -113,7 +115,8 @@ The operator console at `/internal/commercial` shows queued, scheduled, applied,
 blocked, and skipped counts. It can synchronize a market, process the queue
 immediately, or retry exceptions. eMandate subscriptions and subscriptions with a
 different pending change remain visible as exceptions; they are never silently
-treated as migrated.
+treated as migrated. Subscriptions with an active coupon also remain blocked until
+the finite offer ends or Billing Operations coordinates a forever-offer change.
 
 ## Application flow
 
@@ -165,6 +168,16 @@ out-of-order activation events.
 7. A signed `payment.captured` or `order.paid` webhook performs the same transaction
    when the browser callback is lost. Duplicate event IDs and duplicate payment
    evidence cannot add credits twice.
+
+### Subscription coupons and promotional trials
+
+Payload publishes versioned promotion rules through billing catalog version 3.
+Taicho quotes and reserves a coupon before creating the provider Subscription,
+then passes the bound Razorpay `offer_id` for a discount or a future `start_at`
+for a trial. Signed subscription webhooks consume the reservation and record the
+list amount, discount, captured amount, and promotion version. See
+[Promotions and coupons](./promotions-and-coupons.md) for the CMS contract and
+operator workflow.
 
 ## Test-mode checklist
 
