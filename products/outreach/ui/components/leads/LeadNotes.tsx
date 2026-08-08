@@ -176,6 +176,8 @@ export function LeadNotes({
                     onSelect: () => setConfirmDeleteId(note.id),
                   },
                 ]}
+                className="scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30"
+                id={`note-${note.id}`}
                 key={note.id}
                 meta={[formatDate(note.createdAt)]}
                 title={stripHtml(note.content)}

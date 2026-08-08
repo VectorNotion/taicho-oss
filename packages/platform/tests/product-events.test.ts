@@ -105,6 +105,7 @@ test("the frozen v1 vocabulary contains product outcomes, not funnel delivery ev
   // automation owns delivery and can report channel-neutral outcomes.
   assert.deepEqual([...PRODUCT_EVENT_NAMES], [
     "lead.created", "lead.researched", "lead.qualified",
+    "lead.meeting.scheduled", "lead.transcript.updated", "lead.insights.updated",
     "outreach.generated", "outreach.sent", "lead.replied",
     "draft.ready", "post.scheduled", "post.published", "post.failed",
     "content.angle.emerged",

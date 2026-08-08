@@ -21,6 +21,7 @@ const log = createLogger('platform.events.emit');
  */
 export const PRODUCT_EVENT_NAMES = [
   'lead.created', 'lead.researched', 'lead.qualified',
+  'lead.meeting.scheduled', 'lead.transcript.updated', 'lead.insights.updated',
   'outreach.generated', 'outreach.sent', 'lead.replied',
   'draft.ready', 'post.scheduled', 'post.published', 'post.failed',
   'content.angle.emerged',

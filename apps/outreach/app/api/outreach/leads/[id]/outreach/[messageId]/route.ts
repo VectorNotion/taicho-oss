@@ -1,10 +1,15 @@
+import { getAuthorizationContext } from '@content-automation/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { headers } from 'next/headers';
+import { generateLeadInsights } from '@/products/outreach/agent/lead-insights';
 import {
   getOutreachById,
   updateOutreachMessage,
   deleteOutreachMessage,
 } from '@/products/outreach/data/lead-repository';
 import { deleteReport } from '@/products/outreach/agent/payload-cms';
+
+export const maxDuration = 600;
 
 // GET /api/outreach/leads/[id]/outreach/[messageId] - Get single outreach message
 export async function GET(
@@ -34,16 +39,37 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; messageId: string }> }
 ) {
+  const authorization = await getAuthorizationContext(await headers());
+  if (!authorization) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   try {
-    const { messageId } = await params;
+    const { id, messageId } = await params;
     const body = await request.json();
-
+    const existing = await getOutreachById(messageId);
+    if (!existing || existing.leadId !== id) {
+      return NextResponse.json({ error: 'Message not found' }, { status: 404 });
+    }
     const message = await updateOutreachMessage(messageId, body);
     if (!message) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 });
     }
 
-    return NextResponse.json(message);
+    let insightStatus = 'unchanged';
+    if (body?.status === 'sent' && existing.status !== 'sent') {
+      insightStatus = 'refreshed';
+      try {
+        await generateLeadInsights({
+          organizationId: authorization.organizationId,
+          leadId: id,
+          reason: 'outreach_sent',
+          createdBy: authorization.session.user.id,
+        });
+      } catch {
+        insightStatus = 'pending';
+      }
+    }
+    return NextResponse.json(message, {
+      headers: { 'X-Lead-Insight-Status': insightStatus },
+    });
   } catch (error) {
     console.error('Error updating outreach message:', error);
     return NextResponse.json(

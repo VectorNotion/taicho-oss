@@ -21,7 +21,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ResearchMastra } from "@/components/leads/research-mastra";
 
-import { LeadHero, QuickInfo, ResearchSection, OutreachHistory, ActivityTimeline, AddActivityDialog, LeadNotes, type Activity } from "@/components/leads";
+import { LeadHero, QuickInfo, ResearchSection, OutreachHistory, ActivityTimeline, AddActivityDialog, LeadNotes, LeadIntelligenceTabs, type Activity } from "@/components/leads";
 import { QualificationCard } from "@/components/leads/QualificationCard";
 import { useActionStream } from "@/hooks/use-action-stream";
 import { ResearchSectionSkeleton } from "@/components/leads/ResearchSkeleton";
@@ -342,6 +342,8 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
       const updated = await response.json();
       setLead(updated);
+      const activityResponse = await fetch(`/api/outreach/leads/${leadId}/activities`);
+      if (activityResponse.ok) setActivities(await activityResponse.json());
       toast.success("Status updated");
     } catch (error) {
       console.error("Error updating status:", error);
@@ -452,6 +454,10 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
       setOutreachMessages((prev) =>
         prev.map((m) => (m.id === message.id ? updated : m))
       );
+      if (newStatus === "sent") {
+        const activityResponse = await fetch(`/api/outreach/leads/${leadId}/activities`);
+        if (activityResponse.ok) setActivities(await activityResponse.json());
+      }
       toast.success(newStatus === "sent" ? "Message marked as sent externally" : "Message moved back to drafts");
     } catch (error) {
       console.error("Error updating message status:", error);
@@ -673,8 +679,26 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         />
       </div>
 
-      {/* Main Content - Two Column Layout */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <LeadIntelligenceTabs
+        leadId={leadId}
+        leadName={lead.name}
+        notesVersion={[
+          notes.map((note) => `${note.id}:${note.updatedAt ?? note.createdAt}`).join(","),
+          activities.map((activity) => `${activity.id}:${activity.updatedAt ?? activity.createdAt}`).join(","),
+          outreachMessages.map((message) => `${message.id}:${message.status}:${message.sentAt ?? ""}`).join(","),
+          lead.status,
+        ].join("|")}
+        notes={(
+          <LeadNotes
+            notes={notes}
+            isLoading={notesLoading}
+            onAddNote={handleAddNote}
+            onDeleteNote={handleDeleteNote}
+          />
+        )}
+        overview={(
+          /* Main Content - Two Column Layout */
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Left Column - Quick Info, Qualification & Research */}
         <div className="space-y-4">
           <QuickInfo lead={lead} />
@@ -757,14 +781,6 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             </Card>
           )}
 
-          {/* Notes */}
-          <LeadNotes
-            notes={notes}
-            isLoading={notesLoading}
-            onAddNote={handleAddNote}
-            onDeleteNote={handleDeleteNote}
-          />
-
           {/* Outreach History */}
           <OutreachHistory
             messages={outreachMessages}
@@ -773,7 +789,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             onDelete={(messageId) => setConfirmDelete({ type: "message", id: messageId })}
           />
         </div>
-      </div>
+          </div>
+        )}
+      />
 
       {/* Add Activity Dialog */}
       <AddActivityDialog

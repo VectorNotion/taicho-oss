@@ -152,6 +152,29 @@ Production validation also rejects every deterministic test escape hatch:
 `ASSISTANT_MODEL_MODE=stub` and `CONTENT_MIGRATION_SKIP_GRAPH=1`. These values belong only to local or CI E2E
 processes and must not appear in `/root/content-automation/.env`.
 
+### Self-hosted meeting capture
+
+Outreach meeting capture uses a separately deployed Attendee service. Point
+`ATTENDEE_API_URL` at its internal Kubernetes service and set
+`ATTENDEE_WEBHOOK_URL` to the public
+`https://cloud.taicho.ai/api/outreach/attendee/webhook` endpoint. The
+application also requires an Attendee project API key and base64 webhook
+secret. Keep Attendee's PostgreSQL, Redis, meeting-platform, and transcription
+credentials in the Attendee namespace; they are not Taicho application
+secrets. `ATTENDEE_TRANSCRIPTION_SETTINGS` is optional JSON passed to bot
+creation when a project-specific provider or model must be selected.
+
+Lead semantic search writes source-linked embeddings for profiles, sent
+outreach, activities, notes, manual updates, and transcript utterances into
+each organization's FalkorDB graph. By default it reuses
+`OPENROUTER_API_KEY` with `nvidia/nemotron-3-embed-1b:free` at 2,048
+dimensions. `OUTREACH_EMBEDDING_URL`, `OUTREACH_EMBEDDING_API_KEY`,
+`OUTREACH_EMBEDDING_MODEL`, `OUTREACH_EMBEDDING_DIMENSIONS`, and the optional
+query/document input-type variables can point the same code at a self-hosted
+compatible embedding endpoint. A model or dimension change requires the
+existing `LeadKnowledgeChunk.embedding` vector index to be rebuilt before the
+new configuration is deployed.
+
 The unified container runs the same complete validation before any migration
 or web process starts. This prevents a partially configured release from
 changing schemas and then serving traffic. Before deployment, attach the

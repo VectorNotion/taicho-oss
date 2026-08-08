@@ -6,6 +6,7 @@
   "exports": {
     "./data/graph": "./data/graph.ts",
     "./data/organization-context": "./data/organization-context.ts",
+    "./data/tenant-database": "./data/tenant-database.ts",
     "./events/emit": "./events/emit.ts",
     "./events/repository": "./events/repository.ts",
     "./events/schema": "./events/schema.ts",

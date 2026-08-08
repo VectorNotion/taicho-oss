@@ -2,11 +2,14 @@ import { getAuthorizationContext } from "@content-automation/auth/server";
 import { headers } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { generateLeadInsights } from "@/products/outreach/agent/lead-insights";
 import {
   deleteLead,
   getLeadById,
   updateLead,
 } from "@/products/outreach/data/lead-repository";
+
+export const maxDuration = 600;
 
 const optionalNullableText = z.string().trim().max(20_000).nullable().optional()
   .transform((value) => value === null ? "" : value);
@@ -82,10 +85,26 @@ export async function PATCH(
   }
   try {
     const { id } = await params;
+    const previous = parsed.data.status ? await getLeadById(id) : null;
     const lead = await updateLead(id, parsed.data);
-    return lead
-      ? NextResponse.json(lead)
-      : NextResponse.json({ error: "Lead not found" }, { status: 404 });
+    if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+    let insightStatus = "unchanged";
+    if (parsed.data.status && previous?.status !== parsed.data.status) {
+      insightStatus = "refreshed";
+      try {
+        await generateLeadInsights({
+          organizationId: context.organizationId,
+          leadId: id,
+          reason: "activity_update",
+          createdBy: context.session.user.id,
+        });
+      } catch {
+        insightStatus = "pending";
+      }
+    }
+    return NextResponse.json(lead, {
+      headers: { "X-Lead-Insight-Status": insightStatus },
+    });
   } catch (error) {
     console.error("Error updating lead:", error);
     return NextResponse.json({ error: "Failed to update lead" }, { status: 500 });

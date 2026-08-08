@@ -19,7 +19,14 @@ import {
   setProductEventSinkForTests,
 } from '@content-automation/platform/events/emit';
 import type { ProductEventInsert } from '@content-automation/platform/events/repository';
-import { createLead, createLeadActivity } from '../data/lead-repository';
+import {
+  createLead,
+  createLeadActivity,
+  createOutreachMessage,
+  getLeadActivities,
+  updateLead,
+  updateOutreachMessage,
+} from '../data/lead-repository';
 
 const ORGANIZATION_ID = `outreach-activity-events-${process.pid}`;
 
@@ -52,6 +59,8 @@ test('recording a reply_received activity emits lead.replied, other activity typ
   });
   try {
     const lead = await createLead({ name: 'Ada Lovelace', company: 'Analytical', source: 'manual' });
+    await drainProductEvents();
+    recorded.length = 0; // This test isolates activity events from lead.created.
 
     await createLeadActivity(lead.id, { type: 'call', title: 'Intro call' });
     await drainProductEvents();
@@ -67,4 +76,36 @@ test('recording a reply_received activity emits lead.replied, other activity typ
   } finally {
     setProductEventSinkForTests(null);
   }
+});
+
+test('marking outreach sent records one durable lead activity', async () => {
+  const lead = await createLead({ name: 'Grace Hopper', company: 'Navy', source: 'manual' });
+  const message = await createOutreachMessage({
+    leadId: lead.id,
+    medium: 'email',
+    subject: 'Technical review',
+    content: 'Would Tuesday work for a technical review?',
+  });
+
+  await updateOutreachMessage(message.id, { status: 'sent' });
+  await updateOutreachMessage(message.id, { status: 'sent' });
+
+  const activities = await getLeadActivities(lead.id);
+  assert.equal(activities.length, 1);
+  assert.equal(activities[0]?.type, 'outreach_sent');
+  assert.equal(activities[0]?.title, 'Sent: Technical review');
+  assert.equal(activities[0]?.notes, 'Would Tuesday work for a technical review?');
+  assert.equal(activities[0]?.metadata?.outreachMessageId, message.id);
+});
+
+test('changing lead status records the transition once', async () => {
+  const lead = await createLead({ name: 'Katherine Johnson', company: 'NASA', source: 'manual' });
+  await updateLead(lead.id, { status: 'qualified' });
+  await updateLead(lead.id, { status: 'qualified' });
+
+  const activities = await getLeadActivities(lead.id);
+  assert.equal(activities.length, 1);
+  assert.equal(activities[0]?.type, 'status_change');
+  assert.equal(activities[0]?.title, 'Status changed to qualified');
+  assert.equal(activities[0]?.notes, 'Moved from new to qualified');
 });

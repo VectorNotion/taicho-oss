@@ -17,6 +17,9 @@ import {
   GitBranch,
   Pencil,
   Trash2,
+  ThumbsUp,
+  UserCheck,
+  UserPlus,
 } from "lucide-react";
 import type { LeadActivity, LeadActivityType } from "@/products/outreach/domain/types";
 
@@ -53,6 +56,10 @@ export const ACTIVITY_CONFIG: Record<
   ActivityType,
   { icon: React.ComponentType<{ className?: string }>; color: string; bgColor: string; label: string }
 > = {
+  reaction_sent: { icon: ThumbsUp, color: "text-sky-600", bgColor: "bg-sky-500/10", label: "Reaction sent" },
+  comment_sent: { icon: MessageSquare, color: "text-violet-600", bgColor: "bg-violet-500/10", label: "Comment sent" },
+  connection_request_sent: { icon: UserPlus, color: "text-blue-600", bgColor: "bg-blue-500/10", label: "Connection request" },
+  connection_accepted: { icon: UserCheck, color: "text-emerald-600", bgColor: "bg-emerald-500/10", label: "Connection accepted" },
   outreach_sent: { icon: Mail, color: "text-muted-foreground", bgColor: "bg-muted", label: "Outreach sent" },
   reply_received: { icon: MessageSquare, color: "text-chart-2", bgColor: "bg-chart-2/10", label: "Reply received" },
   call: { icon: Phone, color: "text-muted-foreground", bgColor: "bg-muted", label: "Call" },
@@ -152,6 +159,8 @@ export function ActivityTimeline({
                       }]
                     : []),
                 ]}
+                className="scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30"
+                id={`activity-${activity.id}`}
                 key={activity.id}
                 leading={
                   <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">

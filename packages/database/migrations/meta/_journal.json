@@ -78,6 +78,20 @@
       "when": 1785910200000,
       "tag": "0010_add_billing_promotions",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786200000000,
+      "tag": "0011_add_outreach_meeting_intelligence",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786210000000,
+      "tag": "0012_expand_lead_insight_reasons",
+      "breakpoints": true
     }
   ]
 }

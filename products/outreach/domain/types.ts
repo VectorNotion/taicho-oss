@@ -268,6 +268,10 @@ export const INSIGHT_CATEGORY_CONFIG: Record<
 // ============= LEAD ACTIVITIES =============
 
 export type LeadActivityType =
+  | "reaction_sent"
+  | "comment_sent"
+  | "connection_request_sent"
+  | "connection_accepted"
   | "outreach_sent"
   | "reply_received"
   | "call"
@@ -288,6 +292,9 @@ export interface LeadActivity {
     oldStatus?: string;
     newStatus?: string;
     outreachMedium?: string;
+    outreachMessageId?: string;
+    platform?: string;
+    reaction?: string;
     postUrl?: string;
     funnelId?: string;
     funnelName?: string;
@@ -304,6 +311,9 @@ export interface CreateActivityInput {
     oldStatus?: string;
     newStatus?: string;
     outreachMedium?: string;
+    outreachMessageId?: string;
+    platform?: string;
+    reaction?: string;
     postUrl?: string;
     funnelId?: string;
     funnelName?: string;
@@ -317,6 +327,9 @@ export interface UpdateActivityInput {
     oldStatus?: string;
     newStatus?: string;
     outreachMedium?: string;
+    outreachMessageId?: string;
+    platform?: string;
+    reaction?: string;
     postUrl?: string;
     funnelId?: string;
     funnelName?: string;
@@ -327,6 +340,10 @@ export const ACTIVITY_TYPE_CONFIG: Record<
   LeadActivityType,
   { label: string; color: string; bgColor: string }
 > = {
+  reaction_sent: { label: "Reaction sent", color: "text-sky-600", bgColor: "bg-sky-500/10" },
+  comment_sent: { label: "Comment sent", color: "text-violet-600", bgColor: "bg-violet-500/10" },
+  connection_request_sent: { label: "Connection request", color: "text-blue-600", bgColor: "bg-blue-500/10" },
+  connection_accepted: { label: "Connection accepted", color: "text-emerald-600", bgColor: "bg-emerald-500/10" },
   outreach_sent: { label: "Outreach sent", color: "text-muted-foreground", bgColor: "bg-muted" },
   reply_received: { label: "Reply received", color: "text-chart-2", bgColor: "bg-chart-2/10" },
   call: { label: "Call", color: "text-muted-foreground", bgColor: "bg-muted" },

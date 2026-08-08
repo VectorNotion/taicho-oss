@@ -137,6 +137,8 @@ export function OutreachHistory({
                 },
               ]}
               badge={<Badge variant={statusConfig.variant}>{statusConfig.label}</Badge>}
+              className="scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30"
+              id={`outreach-${message.id}`}
               key={message.id}
               leading={
                 <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">

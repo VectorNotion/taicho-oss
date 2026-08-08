@@ -44,6 +44,7 @@ export function ListRows({ className, ...props }: React.ComponentProps<"ul">) {
  *   fold the rest into a ⋯ menu (destructive actions last)
  */
 export function ListRow({
+  id,
   title,
   href,
   external = false,
@@ -53,6 +54,7 @@ export function ListRow({
   actions = [],
   className,
 }: {
+  id?: string;
   title: React.ReactNode;
   href?: string;
   external?: boolean;
@@ -74,7 +76,7 @@ export function ListRow({
     : orderedActions.slice(1);
 
   return (
-    <li className={cn("flex items-center gap-4 px-6 py-3.5 transition-colors hover:bg-accent", className)}>
+    <li className={cn("flex items-center gap-4 px-6 py-3.5 transition-colors hover:bg-accent", className)} id={id}>
       {leading && <div className="shrink-0">{leading}</div>}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">

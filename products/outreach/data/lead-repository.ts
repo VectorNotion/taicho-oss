@@ -310,7 +310,12 @@ export async function updateLead(
   try {
     // Build SET clause dynamically based on provided fields
     const setClauses: string[] = ['l.updatedAt = localdatetime()'];
-    const params: Record<string, unknown> = { id };
+    const params: Record<string, unknown> = {
+      id,
+      recordStatusActivity: false,
+      nextStatus: null,
+      statusActivityMetadata: null,
+    };
 
     if (data.name !== undefined) {
       setClauses.push('l.name = $name');
@@ -363,6 +368,9 @@ export async function updateLead(
     if (data.status !== undefined) {
       setClauses.push('l.status = $status');
       params.status = data.status;
+      params.recordStatusActivity = true;
+      params.nextStatus = data.status;
+      params.statusActivityMetadata = JSON.stringify({ newStatus: data.status });
     }
     if (data.source !== undefined) {
       setClauses.push('l.source = $source');
@@ -404,7 +412,21 @@ export async function updateLead(
     const result = await session.run(
       `
       MATCH (l:Lead {id: $id})
+      WITH l, l.status AS previousStatus
       SET ${setClauses.join(', ')}
+      FOREACH (_ IN CASE WHEN $recordStatusActivity AND previousStatus <> $nextStatus THEN [1] ELSE [] END |
+        CREATE (a:LeadActivity {
+          id: randomUUID(),
+          leadId: l.id,
+          type: 'status_change',
+          title: 'Status changed to ' + $nextStatus,
+          notes: 'Moved from ' + previousStatus + ' to ' + $nextStatus,
+          metadata: $statusActivityMetadata,
+          createdAt: localdatetime(),
+          updatedAt: localdatetime()
+        })
+        CREATE (l)-[:HAS_ACTIVITY]->(a)
+      )
       RETURN l
       `,
       params
@@ -712,7 +734,11 @@ export async function updateOutreachMessage(
 
   try {
     const setClauses: string[] = ['m.updatedAt = localdatetime()'];
-    const params: Record<string, unknown> = { messageId };
+    const params: Record<string, unknown> = {
+      messageId,
+      recordSentActivity: false,
+      sentActivityMetadata: null,
+    };
 
     if (data.subject !== undefined) {
       setClauses.push('m.subject = $subject');
@@ -732,13 +758,29 @@ export async function updateOutreachMessage(
       // If marking as sent, set sentAt timestamp
       if (data.status === 'sent') {
         setClauses.push('m.sentAt = localdatetime()');
+        params.recordSentActivity = true;
+        params.sentActivityMetadata = JSON.stringify({ outreachMessageId: messageId });
       }
     }
 
     const result = await session.run(
       `
-      MATCH (m:OutreachMessage {id: $messageId})
+      MATCH (l:Lead)-[:HAS_OUTREACH]->(m:OutreachMessage {id: $messageId})
+      WITH l, m, m.status AS previousStatus
       SET ${setClauses.join(', ')}
+      FOREACH (_ IN CASE WHEN $recordSentActivity AND previousStatus <> 'sent' THEN [1] ELSE [] END |
+        CREATE (a:LeadActivity {
+          id: randomUUID(),
+          leadId: l.id,
+          type: 'outreach_sent',
+          title: CASE WHEN m.subject IS NOT NULL AND m.subject <> '' THEN 'Sent: ' + m.subject ELSE 'Sent ' + m.medium END,
+          notes: m.content,
+          metadata: $sentActivityMetadata,
+          createdAt: localdatetime(),
+          updatedAt: localdatetime()
+        })
+        CREATE (l)-[:HAS_ACTIVITY]->(a)
+      )
       RETURN m
       `,
       params

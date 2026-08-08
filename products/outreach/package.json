@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@content-automation/content-generator": "workspace:*",
+    "@content-automation/database": "workspace:*",
     "@content-automation/observability": "workspace:*",
     "@content-automation/platform": "workspace:*",
     "@content-automation/ui": "workspace:*",
@@ -22,6 +23,7 @@
     "@mastra/pg": "1.0.0",
     "ai": "6.0.39",
     "date-fns": "^4.1.0",
+    "drizzle-orm": "0.45.2",
     "lucide-react": "^0.554.0",
     "next": "16.3.0-preview.7",
     "react": "19.2.7",

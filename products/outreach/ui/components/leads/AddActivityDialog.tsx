@@ -18,11 +18,12 @@ import {
   Phone,
   MessageSquare,
   Eye,
-  Search,
   FileText,
-  ArrowRight,
   Calendar,
   Loader2,
+  ThumbsUp,
+  UserCheck,
+  UserPlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type ActivityType, type Activity, ACTIVITY_CONFIG } from "./ActivityTimeline";
@@ -36,6 +37,10 @@ interface AddActivityDialogProps {
 }
 
 const ACTIVITY_TYPES: { type: ActivityType; label: string; icon: React.ComponentType<{ className?: string }>; defaultTitle: string }[] = [
+  { type: "reaction_sent", label: "Liked / reacted", icon: ThumbsUp, defaultTitle: "Reacted to their post" },
+  { type: "comment_sent", label: "Commented", icon: MessageSquare, defaultTitle: "Commented on their post" },
+  { type: "connection_request_sent", label: "Connect sent", icon: UserPlus, defaultTitle: "Sent a connection request" },
+  { type: "connection_accepted", label: "Connected", icon: UserCheck, defaultTitle: "Connection request accepted" },
   { type: "outreach_sent", label: "Outreach sent", icon: Mail, defaultTitle: "Sent outreach" },
   { type: "reply_received", label: "Reply received", icon: MessageSquare, defaultTitle: "Received reply" },
   { type: "call", label: "Call", icon: Phone, defaultTitle: "Had a call" },
@@ -57,8 +62,16 @@ export function AddActivityDialog({
   const [title, setTitle] = useState(editActivity?.title || "");
   const [notes, setNotes] = useState(editActivity?.notes || "");
   const [postUrl, setPostUrl] = useState(editActivity?.metadata?.postUrl || "");
+  const [platform, setPlatform] = useState(editActivity?.metadata?.platform || "LinkedIn");
+  const [reaction, setReaction] = useState(editActivity?.metadata?.reaction || "Thumbs up");
 
   const isEditing = !!editActivity;
+  const isSocialTouchpoint = [
+    "reaction_sent",
+    "comment_sent",
+    "connection_request_sent",
+    "connection_accepted",
+  ].includes(selectedType);
 
   const handleTypeSelect = (type: ActivityType) => {
     setSelectedType(type);
@@ -70,11 +83,16 @@ export function AddActivityDialog({
   };
 
   const handleSubmit = () => {
+    const metadata = {
+      ...(postUrl ? { postUrl } : {}),
+      ...(isSocialTouchpoint && platform.trim() ? { platform: platform.trim() } : {}),
+      ...(selectedType === "reaction_sent" && reaction.trim() ? { reaction: reaction.trim() } : {}),
+    };
     onSubmit({
       type: selectedType,
       title: title || ACTIVITY_TYPES.find((t) => t.type === selectedType)?.defaultTitle || "Activity",
       notes: notes || undefined,
-      metadata: postUrl ? { postUrl } : undefined,
+      metadata: Object.keys(metadata).length ? metadata : undefined,
     });
 
     // Reset form
@@ -83,6 +101,8 @@ export function AddActivityDialog({
       setTitle("");
       setNotes("");
       setPostUrl("");
+      setPlatform("LinkedIn");
+      setReaction("Thumbs up");
     }
   };
 
@@ -93,6 +113,8 @@ export function AddActivityDialog({
       setTitle(editActivity?.title || "");
       setNotes(editActivity?.notes || "");
       setPostUrl(editActivity?.metadata?.postUrl || "");
+      setPlatform(editActivity?.metadata?.platform || "LinkedIn");
+      setReaction(editActivity?.metadata?.reaction || "Thumbs up");
     }
     onOpenChange(newOpen);
   };
@@ -105,7 +127,7 @@ export function AddActivityDialog({
           <DialogDescription>
             {isEditing
               ? "Update this activity entry."
-              : "Log a call, observation, or note about this person."}
+              : "Log every touchpoint so the AI relationship timeline stays complete."}
           </DialogDescription>
         </DialogHeader>
 
@@ -167,11 +189,26 @@ export function AddActivityDialog({
             />
           </div>
 
-          {/* URL field for observations */}
-          {selectedType === "observation" && (
+          {isSocialTouchpoint && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="activity-platform" className="text-xs text-muted-foreground">Platform</Label>
+                <Input id="activity-platform" value={platform} onChange={(event) => setPlatform(event.target.value)} placeholder="LinkedIn" />
+              </div>
+              {selectedType === "reaction_sent" && (
+                <div className="space-y-2">
+                  <Label htmlFor="activity-reaction" className="text-xs text-muted-foreground">Reaction</Label>
+                  <Input id="activity-reaction" value={reaction} onChange={(event) => setReaction(event.target.value)} placeholder="Thumbs up" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* URL field for observed and social touchpoints */}
+          {(selectedType === "observation" || isSocialTouchpoint) && (
             <div className="space-y-2">
               <Label htmlFor="postUrl" className="text-xs text-muted-foreground">
-                Link (optional)
+                {selectedType.startsWith("connection_") ? "Profile link (optional)" : "Post link (optional)"}
               </Label>
               <Input
                 id="postUrl"
