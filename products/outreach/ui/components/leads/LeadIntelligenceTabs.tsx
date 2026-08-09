@@ -51,6 +51,11 @@ import type {
   LeadSemanticSearchResponse,
   LeadTimelineItem,
 } from "../../../domain/lead-intelligence";
+import {
+  groupTranscriptEvidence,
+  transcriptSpeakerLabel,
+  type TranscriptGroup,
+} from "./transcript-groups";
 
 type LeadTab = "overview" | LeadInsightSourceTab | "timeline" | "insights";
 const LEAD_TABS = new Set<LeadTab>(["overview", "timeline", "transcription", "notes", "insights"]);
@@ -106,7 +111,7 @@ function EmptyState({ icon: Icon, children }: { icon: typeof FileText; children:
   );
 }
 
-function TranscriptRow({ item }: { item: LeadEvidence }) {
+function TranscriptRow({ item, speakerLabel }: { item: LeadEvidence; speakerLabel: string }) {
   const seconds = item.offsetMs == null ? null : Math.floor(item.offsetMs / 1000);
   const offset = seconds == null
     ? null
@@ -118,11 +123,59 @@ function TranscriptRow({ item }: { item: LeadEvidence }) {
     >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <UserRound className="h-3.5 w-3.5" />
-        <span className="truncate font-medium text-foreground">{item.speakerName || "Unknown speaker"}</span>
+        <span className="truncate font-medium text-foreground">{speakerLabel}</span>
         {offset && <span>{offset}</span>}
       </div>
       <p className="whitespace-pre-wrap text-sm leading-6">{item.content}</p>
     </div>
+  );
+}
+
+function durationLabel(durationMs: number | null) {
+  if (durationMs == null) return null;
+  const seconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+}
+
+function transcriptGroupTitle(group: TranscriptGroup) {
+  if (group.kind === "meeting") return meetingHost(group.meeting?.meetingUrl ?? null);
+  if (group.kind === "desktop_recording") return "Desktop recording";
+  return "Imported transcript";
+}
+
+function transcriptGroupSource(group: TranscriptGroup) {
+  if (group.kind === "desktop_recording") return "Microphone + system audio";
+  if (group.kind !== "meeting") return "External transcript";
+  return group.meeting?.provider === "recall" ? "Recall meeting" : "Attendee meeting";
+}
+
+function TranscriptGroupSection({ group, leadName }: { group: TranscriptGroup; leadName: string }) {
+  const duration = durationLabel(group.durationMs);
+  const source = transcriptGroupSource(group);
+  const reference = group.externalRecordingId ?? group.meeting?.id ?? null;
+  return (
+    <section className="overflow-hidden rounded-xl border bg-card shadow-sm" data-transcript-group={group.key}>
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/30 px-4 py-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold"><FileText className="h-4 w-4 text-primary" />{transcriptGroupTitle(group)}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {dateTime(group.startedAt)} · {source}{duration ? ` · ${duration}` : ""}{reference ? ` · ${reference.slice(0, 8)}` : ""}
+          </p>
+        </div>
+        <Badge variant="secondary">{group.utterances.length} utterance{group.utterances.length === 1 ? "" : "s"}</Badge>
+      </header>
+      <div className="px-4">
+        {group.utterances.map((item) => (
+          <TranscriptRow
+            item={item}
+            key={item.id}
+            speakerLabel={transcriptSpeakerLabel(item, group, leadName)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -439,6 +492,10 @@ export function LeadIntelligenceTabs({ leadId, leadName, notesVersion, overview,
     () => workspace?.evidence.filter((item) => item.kind === "transcript_utterance") ?? [],
     [workspace],
   );
+  const transcriptGroups = useMemo(
+    () => groupTranscriptEvidence(transcripts, workspace?.meetings ?? []),
+    [transcripts, workspace?.meetings],
+  );
   const manualUpdates = useMemo(
     () => [...(workspace?.evidence.filter((item) => item.kind === "manual_update") ?? [])].reverse(),
     [workspace],
@@ -611,9 +668,9 @@ export function LeadIntelligenceTabs({ leadId, leadName, notesVersion, overview,
         ) : null}
 
         <Card>
-          <CardHeader><CardTitle>Transcript</CardTitle><CardDescription>Speaker-attributed utterances stored as immutable lead evidence.</CardDescription></CardHeader>
-          <CardContent>
-            {loading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : transcripts.length ? transcripts.map((item) => <TranscriptRow item={item} key={item.id} />) : <EmptyState icon={FileText}>No transcript yet. Start a meeting capture; the transcript appears here after Recall finishes processing it.</EmptyState>}
+          <CardHeader><CardTitle>Transcripts</CardTitle><CardDescription>Each meeting and desktop recording is kept as a separate, chronologically ordered transcript.</CardDescription></CardHeader>
+          <CardContent className="space-y-5">
+            {loading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : transcriptGroups.length ? transcriptGroups.map((group) => <TranscriptGroupSection group={group} key={group.key} leadName={leadName} />) : <EmptyState icon={FileText}>No transcript yet. Record a call or start a meeting capture; each transcript will appear in its own section.</EmptyState>}
           </CardContent>
         </Card>
 
