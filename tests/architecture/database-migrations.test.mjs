@@ -73,6 +73,7 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0010_add_billing_promotions",
       "0011_add_outreach_meeting_intelligence",
       "0012_expand_lead_insight_reasons",
+      "0013_add_recall_meeting_provider",
     ],
   );
 });

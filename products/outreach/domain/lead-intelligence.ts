@@ -9,7 +9,7 @@ export type LeadMeetingStatus =
 export interface LeadMeeting {
   id: string;
   leadId: string;
-  provider: 'attendee';
+  provider: 'attendee' | 'recall';
   providerBotId: string | null;
   meetingUrl: string;
   status: LeadMeetingStatus;
@@ -201,6 +201,7 @@ export interface LeadIntelligenceWorkspace {
   evidence: LeadEvidence[];
   insights: LeadInsightSnapshot[];
   timeline: LeadRelationshipTimeline | null;
-  attendeeConfigured: boolean;
+  meetingCaptureConfigured: boolean;
+  meetingCaptureProvider: 'recall' | null;
   semanticSearchConfigured: boolean;
 }

@@ -13,12 +13,17 @@ import {
 import type { LeadMeetingStatus } from '../domain/lead-intelligence';
 import {
   attendeeUtteranceSourceKey,
-  createAttendeeBot,
   getAttendeeTranscript,
   parseAttendeeTranscriptUtterance,
   type AttendeeTranscriptUtterance,
   type AttendeeWebhookPayload,
 } from '../integrations/attendee';
+import {
+  createRecallBot,
+  getRecallTranscript,
+  recallTranscriptInput,
+  type RecallWebhookPayload,
+} from '../integrations/recall';
 
 const log = createLogger('outreach.lead-meeting');
 
@@ -47,11 +52,12 @@ export async function createMeetingCapture(input: {
   const meeting = await createLeadMeeting({
     organizationId: input.organizationId,
     leadId: input.leadId,
+    provider: 'recall',
     meetingUrl: validateMeetingUrl(input.meetingUrl),
     createdBy: input.createdBy,
   });
   try {
-    const bot = await createAttendeeBot({
+    const bot = await createRecallBot({
       organizationId: input.organizationId,
       meetingId: meeting.id,
       meetingUrl: meeting.meetingUrl,
@@ -67,7 +73,7 @@ export async function createMeetingCapture(input: {
       organizationId: input.organizationId,
       name: 'lead.meeting.scheduled',
       refs: { leadId: input.leadId },
-      payload: { meetingId: meeting.id, provider: 'attendee' },
+      payload: { meetingId: meeting.id, provider: 'recall' },
     });
     return attached;
   } catch (error) {
@@ -79,6 +85,137 @@ export async function createMeetingCapture(input: {
     }).catch(() => undefined);
     throw error;
   }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function recallStatus(payload: RecallWebhookPayload): {
+  status: LeadMeetingStatus | null;
+  detail: string | null;
+  occurredAt: string | null;
+} {
+  if (payload.event === 'transcript.done') {
+    return { status: 'post_processing', detail: 'Transcript ready for ingestion', occurredAt: null };
+  }
+  if (payload.event === 'transcript.failed') {
+    const artifactStatus = recordValue(payload.data.data);
+    return {
+      status: 'failed',
+      detail: stringValue(artifactStatus?.sub_code) ?? 'Transcript processing failed',
+      occurredAt: stringValue(artifactStatus?.updated_at),
+    };
+  }
+  if (payload.event !== 'bot.status_change') {
+    return { status: null, detail: null, occurredAt: null };
+  }
+  const providerStatus = recordValue(payload.data.status);
+  const code = stringValue(providerStatus?.code)?.toLowerCase() ?? '';
+  const occurredAt = stringValue(providerStatus?.created_at);
+  const detail = stringValue(providerStatus?.message)
+    ?? stringValue(providerStatus?.sub_code)
+    ?? stringValue(providerStatus?.code);
+  if (code === 'fatal' || code.includes('fail')) return { status: 'failed', detail, occurredAt };
+  if (code === 'call_ended' || code === 'done') return { status: 'post_processing', detail, occurredAt };
+  if (code === 'in_call_recording' || code === 'in_call_not_recording') {
+    return { status: 'in_meeting', detail, occurredAt };
+  }
+  if (code === 'joining_call' || code === 'in_waiting_room') {
+    return { status: 'joining', detail, occurredAt };
+  }
+  return { status: null, detail, occurredAt };
+}
+
+export async function receiveRecallWebhook(input: {
+  organizationId: string;
+  meetingId: string;
+  providerBotId: string;
+  providerDeliveryId: string;
+  payload: RecallWebhookPayload;
+}) {
+  const mapped = recallStatus(input.payload);
+  const received = await recordLeadMeetingEvent({
+    organizationId: input.organizationId,
+    meetingId: input.meetingId,
+    providerBotId: input.providerBotId,
+    providerDeliveryId: input.providerDeliveryId,
+    trigger: input.payload.event,
+    eventType: mapped.detail,
+    payload: input.payload.data,
+    occurredAt: mapped.occurredAt,
+  });
+  if (!received.meeting || received.duplicate || !mapped.status) return received;
+  await setLeadMeetingStatus({
+    organizationId: input.organizationId,
+    meetingId: input.meetingId,
+    status: mapped.status,
+    detail: mapped.detail,
+    ...(mapped.status === 'in_meeting' && mapped.occurredAt ? { startedAt: mapped.occurredAt } : {}),
+    ...(mapped.status === 'post_processing'
+      && mapped.occurredAt
+      && input.payload.event === 'bot.status_change'
+      ? { endedAt: mapped.occurredAt }
+      : {}),
+  });
+  return received;
+}
+
+export async function finalizeRecallMeetingCapture(input: {
+  organizationId: string;
+  meetingId: string;
+  transcriptId: string;
+  meetingEventId?: string;
+}) {
+  return runWithExecutionContext({
+    organizationId: input.organizationId,
+    actorType: 'system',
+    eventOrigin: 'external_connector',
+    connectorId: 'recall',
+  }, () => runWithGraphOrganization(input.organizationId, async () => {
+    const meeting = await getLeadMeeting(input.organizationId, input.meetingId);
+    if (!meeting?.providerBotId || meeting.provider !== 'recall') return null;
+    const transcript = await getRecallTranscript(input.transcriptId);
+    const utterances = transcript.map(recallTranscriptInput).filter((item) => Boolean(item.content.trim()));
+    const inserted = await insertTranscriptUtterances({
+      organizationId: input.organizationId,
+      leadId: meeting.leadId,
+      meetingId: meeting.id,
+      meetingEventId: input.meetingEventId,
+      utterances,
+    });
+    await setLeadMeetingStatus({
+      organizationId: input.organizationId,
+      meetingId: input.meetingId,
+      status: 'completed',
+      detail: `${utterances.length} transcript segments attached`,
+      endedAt: meeting.endedAt ?? new Date().toISOString(),
+    });
+    if (inserted > 0) {
+      emitProductEvent({
+        organizationId: input.organizationId,
+        name: 'lead.transcript.updated',
+        refs: { leadId: meeting.leadId },
+        payload: { meetingId: meeting.id, transcriptId: input.transcriptId, inserted },
+      });
+    }
+    try {
+      return await generateLeadInsights({
+        organizationId: input.organizationId,
+        leadId: meeting.leadId,
+        reason: 'meeting_completed',
+      });
+    } catch (error) {
+      log.error('outreach.meeting.insight_generation_failed', error, {
+        meeting_id: meeting.id,
+        lead_id: meeting.leadId,
+        provider: 'recall',
+      });
+      return null;
+    }
+  }));
 }
 
 function stringValue(value: unknown): string | null {
@@ -188,7 +325,7 @@ export async function finalizeMeetingCapture(input: {
     connectorId: 'attendee',
   }, () => runWithGraphOrganization(input.organizationId, async () => {
     const meeting = await getLeadMeeting(input.organizationId, input.meetingId);
-    if (!meeting?.providerBotId) return null;
+    if (!meeting?.providerBotId || meeting.provider !== 'attendee') return null;
     const utterances = await getAttendeeTranscript(meeting.providerBotId);
     const validUtterances = utterances.filter((utterance) =>
       Boolean(utterance.transcription?.transcript.trim()));

@@ -33,6 +33,7 @@ export async function proxy(request: NextRequest) {
     || pathname === "/access-denied"
     || pathname.startsWith("/api/auth")
     || pathname === "/api/outreach/attendee/webhook"
+    || pathname === "/api/outreach/recall/webhook"
     || pathname === "/api/onboarding"
   ) return continueWithAttribution(request, {}, correlationHeaders);
   const decision = await authorizeRequest(

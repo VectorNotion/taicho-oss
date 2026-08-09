@@ -1,7 +1,7 @@
 import { getAuthorizationContext } from '@content-automation/auth/server';
 import { getLeadIntelligenceWorkspace } from '@/products/outreach/data/lead-intelligence-repository';
 import { getLeadById } from '@/products/outreach/data/lead-repository';
-import { attendeeIsConfigured } from '@/products/outreach/integrations/attendee';
+import { recallIsConfigured } from '@/products/outreach/integrations/recall';
 import { leadSemanticSearchIsConfigured } from '@/products/outreach/services/lead-semantic-search';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -18,7 +18,7 @@ export async function GET(
   const workspace = await getLeadIntelligenceWorkspace(
     authorization.organizationId,
     id,
-    attendeeIsConfigured(),
+    recallIsConfigured(),
     leadSemanticSearchIsConfigured(),
   );
   return NextResponse.json(workspace);

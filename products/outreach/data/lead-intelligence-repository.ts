@@ -155,6 +155,7 @@ function insight(row: InsightRow): LeadInsightSnapshot {
 export async function createLeadMeeting(input: {
   organizationId: string;
   leadId: string;
+  provider: LeadMeeting['provider'];
   meetingUrl: string;
   scheduledFor?: string;
   createdBy?: string;
@@ -164,7 +165,7 @@ export async function createLeadMeeting(input: {
     .values({
       organization_id: input.organizationId,
       lead_id: input.leadId,
-      provider: 'attendee',
+      provider: input.provider,
       meeting_url: input.meetingUrl,
       scheduled_for: input.scheduledFor,
       created_by: input.createdBy,
@@ -432,7 +433,7 @@ export async function commitLeadInsight(input: {
 export async function getLeadIntelligenceWorkspace(
   organizationId: string,
   leadId: string,
-  attendeeConfigured = false,
+  meetingCaptureConfigured = false,
   semanticSearchConfigured = false,
 ): Promise<LeadIntelligenceWorkspace> {
   const database = tenantDatabase(organizationId);
@@ -473,7 +474,8 @@ export async function getLeadIntelligenceWorkspace(
       sourceRefs: currentInsight.sourceRefs,
       generatedAt: currentInsight.createdAt,
     } : null,
-    attendeeConfigured,
+    meetingCaptureConfigured,
+    meetingCaptureProvider: meetingCaptureConfigured ? 'recall' : null,
     semanticSearchConfigured,
   };
 }

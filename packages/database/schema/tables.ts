@@ -1809,7 +1809,7 @@ export const outreach_lead_meetings = pgTable("outreach_lead_meetings", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	organization_id: text().default(organizationIdDefault).notNull(),
 	lead_id: text().notNull(),
-	provider: text().default('attendee').notNull(),
+	provider: text().default('recall').notNull(),
 	provider_bot_id: text(),
 	meeting_url: text().notNull(),
 	status: text().default('provisioning').notNull(),
@@ -1830,7 +1830,7 @@ export const outreach_lead_meetings = pgTable("outreach_lead_meetings", {
 		name: "outreach_lead_meetings_organization_fk",
 	}).onDelete("cascade"),
 	pgPolicy("outreach_lead_meetings_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
-	check("outreach_lead_meetings_provider_check", sql`provider = 'attendee'`),
+	check("outreach_lead_meetings_provider_check", sql`provider = ANY (ARRAY['attendee'::text, 'recall'::text])`),
 	check("outreach_lead_meetings_status_check", sql`status = ANY (ARRAY['provisioning'::text, 'joining'::text, 'in_meeting'::text, 'post_processing'::text, 'completed'::text, 'failed'::text])`),
 ]).enableRLS();
 

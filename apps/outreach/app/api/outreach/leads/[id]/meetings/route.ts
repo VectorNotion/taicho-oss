@@ -2,9 +2,9 @@ import { getAuthorizationContext } from '@content-automation/auth/server';
 import { getLeadById } from '@/products/outreach/data/lead-repository';
 import { createMeetingCapture } from '@/products/outreach/services/lead-meeting-service';
 import {
-  AttendeeConfigurationError,
-  AttendeeProviderError,
-} from '@/products/outreach/integrations/attendee';
+  RecallConfigurationError,
+  RecallProviderError,
+} from '@/products/outreach/integrations/recall';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -36,11 +36,11 @@ export async function POST(
     });
     return NextResponse.json(meeting, { status: 201 });
   } catch (error) {
-    if (error instanceof AttendeeConfigurationError) {
-      return NextResponse.json({ error: error.message, code: 'ATTENDEE_NOT_CONFIGURED' }, { status: 503 });
+    if (error instanceof RecallConfigurationError) {
+      return NextResponse.json({ error: error.message, code: 'RECALL_NOT_CONFIGURED' }, { status: 503 });
     }
-    if (error instanceof AttendeeProviderError) {
-      return NextResponse.json({ error: error.message, code: 'ATTENDEE_UNAVAILABLE' }, { status: 502 });
+    if (error instanceof RecallProviderError) {
+      return NextResponse.json({ error: error.message, code: 'RECALL_UNAVAILABLE' }, { status: 502 });
     }
     return NextResponse.json({
       error: error instanceof Error ? error.message : 'The meeting bot could not be started.',

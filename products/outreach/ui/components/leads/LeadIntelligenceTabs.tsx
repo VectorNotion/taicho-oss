@@ -561,8 +561,8 @@ export function LeadIntelligenceTabs({ leadId, leadName, notesVersion, overview,
       <TabsContent value="transcription" className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Bot className="h-5 w-5" />Send Taicho to a meeting</CardTitle>
-            <CardDescription>Paste a Zoom, Google Meet, or Microsoft Teams link. The self-hosted Attendee bot joins immediately and sends signed transcript updates back to this lead.</CardDescription>
+            <CardTitle className="flex items-center gap-2"><Bot className="h-5 w-5" />Start a meeting capture</CardTitle>
+            <CardDescription>Paste a Zoom, Google Meet, or Microsoft Teams link. Taicho sends a Recall bot now, then attaches the speaker-attributed transcript to this lead when the meeting ends.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
@@ -576,14 +576,14 @@ export function LeadIntelligenceTabs({ leadId, leadName, notesVersion, overview,
                   value={meetingUrl}
                 />
               </div>
-              <Button className="self-end" disabled={startingMeeting || !meetingUrl.trim() || workspace?.attendeeConfigured === false} onClick={startMeeting}>
+              <Button className="self-end" disabled={startingMeeting || !meetingUrl.trim() || workspace?.meetingCaptureConfigured === false} onClick={startMeeting}>
                 {startingMeeting ? <Loader2 className="animate-spin" /> : <Bot />}
-                Join meeting
+                Start meeting
               </Button>
             </div>
-            {workspace?.attendeeConfigured === false && (
+            {workspace?.meetingCaptureConfigured === false && (
               <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-                The Attendee service connection is not configured in this environment yet. Existing transcripts and insights remain available.
+                Recall meeting capture is not configured in this environment yet. Existing transcripts and insights remain available.
               </p>
             )}
           </CardContent>
@@ -602,7 +602,7 @@ export function LeadIntelligenceTabs({ leadId, leadName, notesVersion, overview,
                     <div className="flex items-center gap-2"><Link2 className="h-4 w-4 text-muted-foreground" /><span className="text-sm font-medium">{meetingHost(meeting.meetingUrl)}</span></div>
                     <Badge variant={statusVariant(meeting.status)}>{statusLabel(meeting.status)}</Badge>
                   </div>
-                  <p className="mt-2 text-xs text-muted-foreground">Created {dateTime(meeting.createdAt)} · Attendee bot {meeting.providerBotId ?? "pending"}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">Created {dateTime(meeting.createdAt)} · {meeting.provider === "recall" ? "Recall" : "Attendee"} bot {meeting.providerBotId ?? "pending"}</p>
                   {meeting.statusDetail && <p className="mt-1 text-xs text-muted-foreground">{meeting.statusDetail}</p>}
                 </div>
               ))}
@@ -613,7 +613,7 @@ export function LeadIntelligenceTabs({ leadId, leadName, notesVersion, overview,
         <Card>
           <CardHeader><CardTitle>Transcript</CardTitle><CardDescription>Speaker-attributed utterances stored as immutable lead evidence.</CardDescription></CardHeader>
           <CardContent>
-            {loading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : transcripts.length ? transcripts.map((item) => <TranscriptRow item={item} key={item.id} />) : <EmptyState icon={FileText}>No transcript yet. Send the bot to a meeting; utterances appear here as Attendee delivers them.</EmptyState>}
+            {loading ? <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : transcripts.length ? transcripts.map((item) => <TranscriptRow item={item} key={item.id} />) : <EmptyState icon={FileText}>No transcript yet. Start a meeting capture; the transcript appears here after Recall finishes processing it.</EmptyState>}
           </CardContent>
         </Card>
 
