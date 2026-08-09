@@ -30,7 +30,6 @@ export async function POST(
     const meeting = await createMeetingCapture({
       organizationId: authorization.organizationId,
       leadId: id,
-      leadName: lead.name,
       meetingUrl: parsed.data.meetingUrl,
       createdBy: authorization.session.user.id,
     });

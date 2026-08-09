@@ -49,7 +49,6 @@ test('Recall bot creation requests transcription and signed workspace metadata',
     organizationId: 'workspace_test',
     meetingId: '9be4a2ad-bd99-4622-9e3f-7ff5e4ce7793',
     meetingUrl: 'https://meet.google.com/abc-defg-hij',
-    botName: 'Taicho · Test lead',
   });
   assert.equal(created.id, 'bot_123');
   assert.equal(captured?.url, 'https://us-east-1.recall.ai/api/v1/bot/');
@@ -57,7 +56,7 @@ test('Recall bot creation requests transcription and signed workspace metadata',
   assert.equal(new Headers(captured?.init?.headers).get('Authorization'), 'recall-api-key-for-tests');
   const body = JSON.parse(String(captured?.init?.body)) as Record<string, unknown>;
   assert.equal(body.meeting_url, 'https://meet.google.com/abc-defg-hij');
-  assert.equal(body.bot_name, 'Taicho · Test lead');
+  assert.equal(body.bot_name, 'Taicho Note Taker');
   const metadata = body.metadata as Record<string, unknown>;
   assert.equal(metadata.taicho_environment, 'https://cloud-dev.taicho.test');
   assert.deepEqual(parseRecallWorkspaceToken(String(metadata.taicho_workspace), secret), {

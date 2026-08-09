@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 const WORKSPACE_METADATA_KEY = 'taicho_workspace';
 const ENVIRONMENT_METADATA_KEY = 'taicho_environment';
+const RECALL_BOT_NAME = 'Taicho Note Taker';
 const WEBHOOK_TOLERANCE_SECONDS = 5 * 60;
 
 const participantSchema = z.object({
@@ -251,13 +252,12 @@ export async function createRecallBot(input: {
   organizationId: string;
   meetingId: string;
   meetingUrl: string;
-  botName: string;
   joinAt?: string;
 }) {
   const config = recallConfig();
   const body: Record<string, unknown> = {
     meeting_url: input.meetingUrl,
-    bot_name: input.botName,
+    bot_name: RECALL_BOT_NAME,
     metadata: {
       [WORKSPACE_METADATA_KEY]: createRecallWorkspaceToken({
         organizationId: input.organizationId,

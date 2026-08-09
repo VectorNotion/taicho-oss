@@ -45,7 +45,6 @@ export function validateMeetingUrl(value: string): string {
 export async function createMeetingCapture(input: {
   organizationId: string;
   leadId: string;
-  leadName: string;
   meetingUrl: string;
   createdBy?: string;
 }) {
@@ -61,7 +60,6 @@ export async function createMeetingCapture(input: {
       organizationId: input.organizationId,
       meetingId: meeting.id,
       meetingUrl: meeting.meetingUrl,
-      botName: `Taicho · ${input.leadName}`.slice(0, 100),
     });
     const attached = await attachProviderBot({
       organizationId: input.organizationId,
