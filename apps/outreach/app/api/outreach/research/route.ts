@@ -1,95 +1,114 @@
-import { outreachMastra } from '@/products/outreach/agent/runtime';
-import { storeLeadResearch } from '@/products/outreach/data/lead-repository';
-import { leadResearchSchema, type LeadResearchResult } from '@/products/outreach/domain/research-schema';
+import { getLeadById, storeLeadResearch } from '@/products/outreach/data/lead-repository';
+import {
+  buildResearchInput,
+  generateLeadResearch,
+} from '@/products/outreach/agent/lead-research';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { commercialErrorResponse, reserveVariableCost } from '@content-automation/auth/commercial';
 import { releaseReservation, settleReservation } from '@content-automation/platform/commercial';
 import { createLogger, observeOperation } from '@content-automation/observability';
 
-export const maxDuration = 600;
+export const maxDuration = 300;
 const log = createLogger('outreach-research-api');
+const RESEARCH_TIMEOUT_MS = 2 * 60_000;
+
+function failureMessage(requestAborted: boolean, researchAborted: boolean): string {
+  if (requestAborted) return 'Research was cancelled.';
+  if (researchAborted) return 'Research timed out. Please try again.';
+  return 'Research could not be completed. Please try again.';
+}
 
 export async function POST(req: Request) {
   let reservationId: string | null = null;
   try {
-    const { messages, leadId, leadInfo } = await req.json();
-    const billing = await reserveVariableCost(req, { action: 'outreach_research_stream', credits: 80, capability: 'outreach' }); reservationId = billing.reservationId;
+    const { leadId } = await req.json();
+    if (typeof leadId !== 'string' || !leadId.trim()) {
+      return Response.json({ error: 'A lead is required.' }, { status: 400 });
+    }
 
-    const agent = outreachMastra.getAgent('leadResearchAgent');
+    const lead = await getLeadById(leadId);
+    if (!lead) return Response.json({ error: 'Lead not found.' }, { status: 404 });
 
-    // Build the prompt from messages or use the leadInfo directly
-    const prompt =
-      messages?.[messages.length - 1]?.content ||
-      `Research ${leadInfo?.name} at ${leadInfo?.company} (${leadInfo?.title || 'Unknown title'}, ${leadInfo?.location || 'Unknown location'})`;
-
-    const stream = await agent.stream(prompt, {
-      structuredOutput: { schema: leadResearchSchema },
-      modelSettings: { maxOutputTokens: 32768 },
-      providerOptions: { openrouter: { reasoning: { effort: 'medium' } } },
+    const billing = await reserveVariableCost(req, {
+      action: 'outreach_research_stream',
+      credits: 80,
+      capability: 'outreach',
     });
+    reservationId = billing.reservationId;
+    const researchSignal = AbortSignal.any([
+      req.signal,
+      AbortSignal.timeout(RESEARCH_TIMEOUT_MS),
+    ]);
 
     const uiMessageStream = createUIMessageStream({
       execute: async ({ writer }) => {
-        let reasoning = '';
-        let finalResult: LeadResearchResult | null = null;
+        writer.write({
+          type: 'data-research-status',
+          id: 'status',
+          data: { phase: 'starting' },
+        } as never);
         try {
           await observeOperation('ai.outreach.research_stream', {
-            runId: typeof leadId === 'string' ? leadId : undefined,
-            attributes: { lead_id: typeof leadId === 'string' ? leadId : undefined },
+            runId: leadId,
+            attributes: { lead_id: leadId },
           }, async () => {
-            for await (const raw of stream.fullStream as AsyncIterable<{
-              type: string;
-              payload?: { text?: string };
-              object?: unknown;
-              data?: unknown;
-            }>) {
-              if (raw.type === 'reasoning-delta') {
-                reasoning += raw.payload?.text ?? '';
-                writer.write({ type: 'data-reasoning', id: 'reasoning', data: { text: reasoning } } as never);
-              } else if (raw.type === 'object') {
-                writer.write({ type: 'data-research-partial', id: 'partial', data: raw.object } as never);
-              } else if (raw.type === 'object-result') {
-                finalResult = raw.object as LeadResearchResult;
-              } else if (raw.type.startsWith('data-')) {
-                // Tool writer custom parts already use the exact client contract.
-                writer.write(raw as never);
-              }
-            }
-            if (!finalResult) throw new Error('research produced no structured result');
-            const validated = leadResearchSchema.parse(finalResult) as LeadResearchResult;
-            if (leadId) await storeLeadResearch(leadId, validated);
-            await settleReservation({ reservationId: billing.reservationId, actualCredits: billing.estimatedCredits, idempotencyKey: `outreach-research:${billing.reservationId}`, usageKind: 'agent_action' });
-            writer.write({ type: 'data-research-result', id: 'result', data: validated } as never);
+            // Retrieval is deterministic and concurrent; the model performs one
+            // bounded synthesis pass after all five evidence sets arrive.
+            const validated = await generateLeadResearch(buildResearchInput(lead), {
+              signal: researchSignal,
+              onSearchProgress: (topic, status, detail) => {
+                writer.write({
+                  type: 'data-tool-progress',
+                  id: `search-${topic}`,
+                  data: { topic, status, ...detail },
+                } as never);
+              },
+              onSynthesisStarted: () => {
+                writer.write({
+                  type: 'data-research-status',
+                  id: 'status',
+                  data: { phase: 'synthesizing' },
+                } as never);
+              },
+            });
+            await storeLeadResearch(leadId, validated);
+            await settleReservation({
+              reservationId: billing.reservationId,
+              actualCredits: billing.estimatedCredits,
+              idempotencyKey: `outreach-research:${billing.reservationId}`,
+              usageKind: 'agent_action',
+            });
+            writer.write({
+              type: 'data-research-result',
+              id: 'result',
+              data: validated,
+            } as never);
           });
         } catch (error) {
           await releaseReservation(billing.reservationId).catch(() => undefined);
           log.error('outreach.research_stream.failed', error, {
-            lead_id: typeof leadId === 'string' ? leadId : undefined,
+            lead_id: leadId,
+            request_aborted: req.signal.aborted,
+            research_aborted: researchSignal.aborted,
           });
-          writer.write({
-            type: 'data-research-error',
-            id: 'error',
-            data: { error: 'Research failed' },
-          } as never);
+          if (!req.signal.aborted) {
+            writer.write({
+              type: 'data-research-error',
+              id: 'error',
+              data: { error: failureMessage(req.signal.aborted, researchSignal.aborted) },
+            } as never);
+          }
         }
       },
+      onError: () => 'Research could not be completed. Please try again.',
     });
 
-    return createUIMessageStreamResponse({
-      stream: uiMessageStream,
-    });
+    return createUIMessageStreamResponse({ stream: uiMessageStream });
   } catch (error) {
     if (reservationId) await releaseReservation(reservationId).catch(() => undefined);
-    const commercial = commercialErrorResponse(error); if (commercial) return commercial;
+    const commercial = commercialErrorResponse(error);
+    if (commercial) return commercial;
     log.error('outreach.research_api.failed', error);
-    return new Response(
-      JSON.stringify({
-        error: 'Research failed',
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+    return Response.json({ error: 'Research failed' }, { status: 500 });
   }
 }

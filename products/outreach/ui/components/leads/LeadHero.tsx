@@ -193,6 +193,7 @@ export function LeadHero({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
+                  aria-label="Draft email"
                   size="sm"
                   variant="outline"
                   onClick={() => onGenerateOutreach("email")}
@@ -207,6 +208,7 @@ export function LeadHero({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
+                  aria-label="Draft content comment"
                   size="sm"
                   variant="outline"
                   onClick={onOpenCommentDialog}
@@ -221,7 +223,7 @@ export function LeadHero({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button size="sm" variant="outline" asChild>
-                  <Link href="/contacts">
+                  <Link aria-label="Manage person in People" href="/contacts">
                     <Pencil className="h-4 w-4" />
                   </Link>
                 </Button>
@@ -232,6 +234,7 @@ export function LeadHero({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
+                  aria-label="Remove from Outreach"
                   size="sm"
                   variant="outline"
                   onClick={onDelete}

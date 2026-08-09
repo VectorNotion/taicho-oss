@@ -19,9 +19,10 @@ import {
 } from "@/components/ui/dialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ResearchMastra } from "@/components/leads/research-mastra";
+import { ResearchMastra, type ResearchRunState } from "@/components/leads/research-mastra";
+import { ResearchLiveSurface } from "@/components/leads/ResearchLiveSurface";
 
-import { LeadHero, QuickInfo, ResearchSection, OutreachHistory, ActivityTimeline, AddActivityDialog, LeadNotes, LeadIntelligenceTabs, type Activity } from "@/components/leads";
+import { LeadHero, QuickInfo, OutreachHistory, ActivityTimeline, AddActivityDialog, LeadNotes, LeadIntelligenceTabs, type Activity } from "@/components/leads";
 import { QualificationCard } from "@/components/leads/QualificationCard";
 import { useActionStream } from "@/hooks/use-action-stream";
 import { ResearchSectionSkeleton } from "@/components/leads/ResearchSkeleton";
@@ -70,6 +71,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [research, setResearch] = useState<LeadResearch | null>(null);
   const [researchLoading, setResearchLoading] = useState(true);
   const [isResearchStreaming, setIsResearchStreaming] = useState(false);
+  const [researchRun, setResearchRun] = useState<ResearchRunState | null>(null);
   const [qualification, setQualification] = useState<LeadQualification | null>(null);
   const [qualificationLoading, setQualificationLoading] = useState(true);
   const [notes, setNotes] = useState<LeadNote[]>([]);
@@ -424,16 +426,23 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         body: JSON.stringify(body),
       });
 
-      if (!response.ok) throw new Error("Failed to start outreach generation");
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(failure?.error || "Failed to generate outreach");
+      }
 
-      const result = await response.json();
-      toast.success(result.message || "Outreach generation started — refresh to see results when it completes");
+      const result = await response.json() as OutreachMessage;
+      setOutreachMessages((current) => [
+        result,
+        ...current.filter(({ id }) => id !== result.id),
+      ]);
+      toast.success("Outreach draft ready");
 
       setContentCommentDialogOpen(false);
       setTargetContent("");
     } catch (error) {
       console.error("Failed to generate outreach:", error);
-      toast.error("Could not generate outreach — try again");
+      toast.error(error instanceof Error ? error.message : "Could not generate outreach — try again");
     } finally {
       setIsGeneratingOutreach(false);
     }
@@ -666,6 +675,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 location: lead.location || '',
               }}
               onStarted={handleResearchStarted}
+              onRunUpdate={setResearchRun}
               onComplete={handleResearchComplete}
               onError={handleResearchError}
             />
@@ -697,98 +707,100 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           />
         )}
         overview={(
-          /* Main Content - Two Column Layout */
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Left Column - Quick Info, Qualification & Research */}
-        <div className="space-y-4">
-          <QuickInfo lead={lead} />
-          <QualificationCard
-            qualification={qualification}
-            isLoading={qualificationLoading}
-            onRequalify={() => qualifyStream.start()}
-            live={{
-              score: qualifyStream.partial?.score ?? null,
-              notes: qualifyStream.partial?.notes ?? "",
-              reasoning: qualifyStream.reasoning,
-              isStreaming: qualifyStream.isStreaming,
-            }}
-          />
-          {/* Research section with Mastra streaming */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <CardTitle>Research</CardTitle>
-                {research && !isResearchStreaming && (
-                  <Badge variant="outline" className="text-xs">
-                    {research.industry}
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {/* Show skeleton while streaming research */}
-              {isResearchStreaming && <ResearchSectionSkeleton />}
-
-              {/* Show existing research if available and not streaming */}
-              {!isResearchStreaming && research && !researchLoading && (
-                <ResearchSection research={research} isLoading={false} inline />
-              )}
-
-              {/* Show empty state if no research and not streaming */}
-              {!isResearchStreaming && !research && !researchLoading && (
-                <div className="flex flex-col items-center gap-2 py-6 text-center">
-                  <Search className="h-8 w-8 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">
-                    No research yet — run research to gather insights about this person
+          <div className="space-y-4">
+            <Card className={isResearchStreaming ? "border-primary/20 shadow-sm" : undefined}>
+              <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CardTitle>Research</CardTitle>
+                    {research && !isResearchStreaming && (
+                      <Badge variant="outline" className="text-xs">
+                        {research.industry}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Evidence-grounded company and market brief
                   </p>
                 </div>
-              )}
-
-              {/* Show loading state for initial page load */}
-              {!isResearchStreaming && researchLoading && <ResearchSectionSkeleton />}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Right Column - Activity, Notes & Outreach History */}
-        <div className="space-y-4 lg:col-span-2">
-          {/* Activity Timeline */}
-          <ActivityTimeline
-            activities={activities}
-            isLoading={activitiesLoading}
-            onAddActivity={() => {
-              setEditingActivity(null);
-              setAddActivityDialogOpen(true);
-            }}
-            onEditActivity={(activity) => {
-              setEditingActivity(activity);
-              setAddActivityDialogOpen(true);
-            }}
-            onDeleteActivity={(activityId) =>
-              setConfirmDelete({ type: "activity", id: activityId })
-            }
-          />
-
-          {/* About (LinkedIn bio) */}
-          {lead.about && (
-            <Card>
-              <CardHeader>
-                <CardTitle>About</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm whitespace-pre-wrap text-muted-foreground">{lead.about}</p>
+                {!researchLoading && (researchRun || research) && (
+                  <ResearchLiveSurface
+                    leadName={lead.name}
+                    research={research}
+                    run={researchRun}
+                  />
+                )}
+
+                {!researchRun && !research && !researchLoading && (
+                  <div className="flex flex-col items-center gap-2 py-8 text-center">
+                    <div className="rounded-full border bg-muted/40 p-3">
+                      <Search className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <p className="text-sm font-medium">No research brief yet</p>
+                    <p className="max-w-md text-sm text-muted-foreground">
+                      Run research to retrieve live evidence and build a grounded outreach point of view.
+                    </p>
+                  </div>
+                )}
+
+                {!isResearchStreaming && researchLoading && <ResearchSectionSkeleton />}
               </CardContent>
             </Card>
-          )}
 
-          {/* Outreach History */}
-          <OutreachHistory
-            messages={outreachMessages}
-            isLoading={outreachLoading}
-            onToggleStatus={handleToggleMessageStatus}
-            onDelete={(messageId) => setConfirmDelete({ type: "message", id: messageId })}
-          />
-        </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="space-y-4">
+                <QuickInfo lead={lead} />
+                <QualificationCard
+                  qualification={qualification}
+                  isLoading={qualificationLoading}
+                  onRequalify={() => qualifyStream.start()}
+                  live={{
+                    score: qualifyStream.partial?.score ?? null,
+                    notes: qualifyStream.partial?.notes ?? "",
+                    reasoning: qualifyStream.reasoning,
+                    isStreaming: qualifyStream.isStreaming,
+                  }}
+                />
+              </div>
+
+              <div className="space-y-4 lg:col-span-2">
+                <ActivityTimeline
+                  activities={activities}
+                  isLoading={activitiesLoading}
+                  onAddActivity={() => {
+                    setEditingActivity(null);
+                    setAddActivityDialogOpen(true);
+                  }}
+                  onEditActivity={(activity) => {
+                    setEditingActivity(activity);
+                    setAddActivityDialogOpen(true);
+                  }}
+                  onDeleteActivity={(activityId) =>
+                    setConfirmDelete({ type: "activity", id: activityId })
+                  }
+                />
+
+                {lead.about && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>About</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm whitespace-pre-wrap text-muted-foreground">{lead.about}</p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                <OutreachHistory
+                  messages={outreachMessages}
+                  isLoading={outreachLoading}
+                  onToggleStatus={handleToggleMessageStatus}
+                  onDelete={(messageId) => setConfirmDelete({ type: "message", id: messageId })}
+                />
+              </div>
+            </div>
           </div>
         )}
       />

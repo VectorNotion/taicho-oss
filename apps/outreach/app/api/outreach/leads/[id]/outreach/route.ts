@@ -11,6 +11,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+export const maxDuration = 300;
+const OUTREACH_TIMEOUT_MS = 3 * 60_000;
+
 export async function OPTIONS() {
   return NextResponse.json({}, { headers: corsHeaders });
 }
@@ -76,6 +79,7 @@ export async function POST(
         medium: medium as OutreachMedium,
         targetContent,
         tenantId,
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(OUTREACH_TIMEOUT_MS)]),
       });
 
       if (!result.success) {

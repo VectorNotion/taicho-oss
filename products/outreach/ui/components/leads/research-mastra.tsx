@@ -1,15 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { Button } from '@/components/ui/button';
-import { Loader2, Search, FlaskConical } from 'lucide-react';
+import { Loader2, Search } from 'lucide-react';
 import type { LeadResearchResult } from '@/products/outreach/domain/research-schema';
-import {
-  useResearchProgressToast,
-  type TopicStatus,
-} from './ResearchProgressToast';
+import type { TopicStatus } from './ResearchProgressToast';
 
 interface LeadInfo {
   name: string;
@@ -18,193 +15,176 @@ interface LeadInfo {
   location?: string;
 }
 
+export const RESEARCH_TOPIC_CONFIG = [
+  { topic: 'company', label: 'Company overview' },
+  { topic: 'news', label: 'Recent news' },
+  { topic: 'ai', label: 'AI initiatives' },
+  { topic: 'competitors', label: 'Competitive field' },
+  { topic: 'industry', label: 'Industry signals' },
+] as const;
+
+export type ResearchTopic = (typeof RESEARCH_TOPIC_CONFIG)[number]['topic'];
+
+export interface ResearchSourcePreview {
+  title: string;
+  url: string;
+  publishedDate?: string | null;
+}
+
+export interface ResearchTopicProgress {
+  topic: ResearchTopic;
+  status: TopicStatus;
+  query?: string;
+  resultCount?: number;
+  sources?: ResearchSourcePreview[];
+}
+
+export interface ResearchRunState {
+  phase: 'searching' | 'synthesizing' | 'complete' | 'error';
+  topics: ResearchTopicProgress[];
+  error?: string;
+}
+
 interface ToolProgressData {
-  topic: string;
+  topic: ResearchTopic;
   status: 'searching' | 'complete';
   query?: string;
   resultCount?: number;
+  sources?: ResearchSourcePreview[];
 }
 
 interface ResearchMastraProps {
   leadId: string;
   lead: LeadInfo;
   onProgressUpdate?: (topic: string, status: TopicStatus) => void;
+  onRunUpdate?: (run: ResearchRunState) => void;
   onComplete?: (result: LeadResearchResult) => void;
   onError?: (error: string) => void;
   onStarted?: () => void;
+}
+
+function initialTopics(): ResearchTopicProgress[] {
+  return RESEARCH_TOPIC_CONFIG.map(({ topic }) => ({ topic, status: 'pending' }));
 }
 
 export function ResearchMastra({
   leadId,
   lead,
   onProgressUpdate,
+  onRunUpdate,
   onComplete,
   onError,
   onStarted,
 }: ResearchMastraProps) {
-  const { showProgress, showSuccess, showError, dismiss } = useResearchProgressToast();
-  const progressRef = useRef<Map<string, TopicStatus>>(new Map());
   const hasCompletedRef = useRef(false);
-
-  const { messages, sendMessage, status, error } = useChat({
-    transport: new DefaultChatTransport({
-      api: '/api/outreach/research',
-      prepareSendMessagesRequest({ messages }) {
-        return {
-          body: { messages, leadId, leadInfo: lead },
-        };
-      },
-    }),
-    onFinish: () => {
-      // Final completion handled in useEffect when we get the result
+  const runMessageOffsetRef = useRef(0);
+  const callbacksRef = useRef({ onComplete, onError, onProgressUpdate, onRunUpdate });
+  const transport = useMemo(() => new DefaultChatTransport({
+    api: '/api/outreach/research',
+    prepareSendMessagesRequest({ messages }) {
+      return {
+        body: { messages, leadId, leadInfo: lead },
+      };
     },
-  });
+  }), [lead.company, lead.location, lead.name, lead.title, leadId]);
 
+  const { messages, sendMessage, status, error } = useChat({ transport });
   const isStreaming = status === 'submitted' || status === 'streaming';
 
-  // Process messages and extract progress/results
   useEffect(() => {
+    callbacksRef.current = { onComplete, onError, onProgressUpdate, onRunUpdate };
+  }, [onComplete, onError, onProgressUpdate, onRunUpdate]);
+
+  useEffect(() => {
+    const topics = new Map<ResearchTopic, ResearchTopicProgress>(
+      initialTopics().map((topic) => [topic.topic, topic]),
+    );
+    let phase: ResearchRunState['phase'] = 'searching';
     let researchData: LeadResearchResult | null = null;
     let researchError: string | null = null;
-    const newProgress = new Map<string, TopicStatus>();
+    let hasRunData = false;
 
-    messages.forEach((message) => {
-      if (message.role === 'assistant') {
-        message.parts?.forEach((part) => {
-          const partType = (part as { type: string }).type;
-
-          if (partType === 'data-tool-progress') {
-            const data = (part as { data: ToolProgressData }).data;
-            newProgress.set(data.topic, data.status as TopicStatus);
-            onProgressUpdate?.(data.topic, data.status as TopicStatus);
-          } else if (partType === 'data-research-result') {
-            researchData = (part as { data: LeadResearchResult }).data;
-          } else if (partType === 'data-research-error') {
-            researchError = (part as { data: { error: string } }).data.error;
-          }
-        });
+    for (const message of messages.slice(runMessageOffsetRef.current)) {
+      if (message.role !== 'assistant') continue;
+      for (const part of message.parts ?? []) {
+        const partType = (part as { type: string }).type;
+        if (partType === 'data-tool-progress') {
+          const data = (part as { data: ToolProgressData }).data;
+          if (!topics.has(data.topic)) continue;
+          hasRunData = true;
+          topics.set(data.topic, {
+            topic: data.topic,
+            status: data.status,
+            query: data.query,
+            resultCount: data.resultCount,
+            sources: data.sources,
+          });
+          callbacksRef.current.onProgressUpdate?.(data.topic, data.status);
+        } else if (partType === 'data-research-status') {
+          hasRunData = true;
+          const data = (part as { data: { phase?: string } }).data;
+          if (data.phase === 'synthesizing') phase = 'synthesizing';
+        } else if (partType === 'data-research-result') {
+          hasRunData = true;
+          phase = 'complete';
+          researchData = (part as { data: LeadResearchResult }).data;
+        } else if (partType === 'data-research-error') {
+          hasRunData = true;
+          phase = 'error';
+          researchError = (part as { data: { error: string } }).data.error;
+        }
       }
-    });
-
-    // Update progress map and show toast
-    if (newProgress.size > 0) {
-      progressRef.current = newProgress;
-
-      // Check if all 5 topics complete but no result yet = analyzing
-      const allComplete = ['company', 'news', 'ai', 'competitors', 'industry'].every(
-        (t) => newProgress.get(t) === 'complete'
-      );
-
-      showProgress(newProgress, allComplete && !researchData && !researchError);
     }
 
-    // Handle completion
+    if (!hasRunData) return;
+    const run: ResearchRunState = {
+      phase,
+      topics: [...topics.values()],
+      ...(researchError ? { error: researchError } : {}),
+    };
+    callbacksRef.current.onRunUpdate?.(run);
+
     if (researchData && !hasCompletedRef.current) {
       hasCompletedRef.current = true;
-      showSuccess();
-      onComplete?.(researchData);
-    }
-
-    // Handle error
-    if (researchError && !hasCompletedRef.current) {
+      callbacksRef.current.onComplete?.(researchData);
+    } else if (researchError && !hasCompletedRef.current) {
       hasCompletedRef.current = true;
-      showError(researchError);
-      onError?.(researchError);
+      callbacksRef.current.onError?.(researchError);
     }
-  }, [messages, onProgressUpdate, onComplete, onError, showProgress, showSuccess, showError]);
+  }, [messages]);
 
-  // Handle transport errors
   useEffect(() => {
-    if (error) {
-      showError(error.message || 'Research failed');
-      onError?.(error.message || 'Research failed');
-    }
-  }, [error, showError, onError]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      dismiss();
-    };
-  }, [dismiss]);
+    if (!error || hasCompletedRef.current) return;
+    const message = error.message || 'Research failed';
+    hasCompletedRef.current = true;
+    callbacksRef.current.onRunUpdate?.({ phase: 'error', topics: initialTopics(), error: message });
+    callbacksRef.current.onError?.(message);
+  }, [error]);
 
   const startResearch = () => {
-    // Reset state for new research
     hasCompletedRef.current = false;
-    progressRef.current = new Map();
-
-    // Notify parent that research started
+    runMessageOffsetRef.current = messages.length;
     onStarted?.();
-
-    // Initialize all topics as pending
-    const initialProgress = new Map<string, TopicStatus>();
-    ['company', 'news', 'ai', 'competitors', 'industry'].forEach((topic) => {
-      initialProgress.set(topic, 'pending');
-    });
-    showProgress(initialProgress);
-
-    sendMessage({
-      parts: [
-        {
-          type: 'text',
-          text: `Research ${lead.name} at ${lead.company} (${lead.title || 'Unknown title'}, ${lead.location || 'Unknown location'})`,
-        },
-      ],
+    onRunUpdate?.({ phase: 'searching', topics: initialTopics() });
+    void sendMessage({
+      parts: [{
+        type: 'text',
+        text: `Research ${lead.name} at ${lead.company} (${lead.title || 'Unknown title'}, ${lead.location || 'Unknown location'})`,
+      }],
       role: 'user',
     });
   };
 
-  const [isTesting, setIsTesting] = useState(false);
-
-  const testToast = () => {
-    if (isTesting) return;
-    setIsTesting(true);
-
-    const topics = ['company', 'news', 'ai', 'competitors', 'industry'] as const;
-    const progress = new Map<string, TopicStatus>();
-
-    // Initialize all as pending
-    topics.forEach((t) => progress.set(t, 'pending'));
-    showProgress(new Map(progress));
-
-    // Simulate each topic completing one by one
-    topics.forEach((topic, idx) => {
-      // Start searching
-      setTimeout(() => {
-        progress.set(topic, 'searching');
-        showProgress(new Map(progress));
-      }, idx * 800);
-
-      // Complete
-      setTimeout(() => {
-        progress.set(topic, 'complete');
-        const allDone = topics.every((t) => progress.get(t) === 'complete');
-        showProgress(new Map(progress), allDone);
-      }, idx * 800 + 400);
-    });
-
-    // Dismiss after all done
-    setTimeout(() => {
-      dismiss();
-      setIsTesting(false);
-    }, topics.length * 800 + 500);
-  };
-
   return (
-    <div className="flex gap-1">
-      <Button onClick={startResearch} disabled={isStreaming} size="sm" variant="secondary">
-        {isStreaming ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Search className="h-4 w-4" />
-        )}
-        <span className="ml-1.5 hidden sm:inline">
-          {isStreaming ? 'Researching...' : 'Research'}
-        </span>
-      </Button>
-      <Button onClick={testToast} disabled={isTesting} size="sm" variant="ghost" title="Test toast">
-        <FlaskConical className="h-4 w-4" />
-      </Button>
-    </div>
+    <Button onClick={startResearch} disabled={isStreaming} size="sm" variant="secondary">
+      {isStreaming ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <Search className="h-4 w-4" />
+      )}
+      <span className="ml-1.5 hidden sm:inline">
+        {isStreaming ? 'Researching...' : 'Research'}
+      </span>
+    </Button>
   );
 }
