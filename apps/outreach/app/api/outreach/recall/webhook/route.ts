@@ -2,13 +2,14 @@ import { createLogger } from '@content-automation/observability';
 import { readBoundedRequestText, RequestBodyTooLargeError } from '@content-automation/platform/network/request-body';
 import { setLeadMeetingStatus } from '@/products/outreach/data/lead-intelligence-repository';
 import {
-  getRecallBotWorkspaceToken,
+  getRecallBotTarget,
   parseRecallWorkspaceToken,
   recallConfig,
   recallWebhookBotId,
   recallWebhookPayloadSchema,
   recallWebhookTranscriptId,
-  recallWorkspaceTokenFromWebhook,
+  recallTargetFromWebhook,
+  recallWebhookTargetsEnvironment,
   verifyRecallWebhook,
 } from '@/products/outreach/integrations/recall';
 import {
@@ -71,19 +72,30 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Webhook transcript is missing.' }, { status: 400 });
   }
 
-  let workspaceToken = recallWorkspaceTokenFromWebhook(parsed.data);
-  if (!workspaceToken) {
+  let target = recallTargetFromWebhook(parsed.data);
+  if (!target.workspaceToken || !target.environment) {
     try {
-      workspaceToken = await getRecallBotWorkspaceToken(botId);
+      target = await getRecallBotTarget(botId);
     } catch (error) {
       log.error('outreach.recall.bot_metadata_lookup_failed', error, { bot_id: botId });
       return Response.json({ error: 'Webhook target is temporarily unavailable.' }, { status: 503 });
     }
   }
-  const workspace = workspaceToken
-    ? parseRecallWorkspaceToken(workspaceToken, config.webhookSecret)
+  if (!recallWebhookTargetsEnvironment(target, config.webhookEnvironment)) {
+    return Response.json({ accepted: true, ignored: true }, { status: 202 });
+  }
+  const workspace = target.workspaceToken
+    ? parseRecallWorkspaceToken(target.workspaceToken, config.webhookSecret)
     : null;
-  if (!workspace) return Response.json({ error: 'Invalid webhook target.' }, { status: 401 });
+  if (!workspace) {
+    // Bots created before environment metadata was added may carry a workspace token
+    // signed by the other Taicho deployment. The Recall signature already authenticates
+    // the delivery, so acknowledge that legacy foreign event without triggering retries.
+    if (!target.environment) {
+      return Response.json({ accepted: true, ignored: true }, { status: 202 });
+    }
+    return Response.json({ error: 'Invalid webhook target.' }, { status: 401 });
+  }
 
   const received = await receiveRecallWebhook({
     ...workspace,

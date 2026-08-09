@@ -156,9 +156,24 @@ processes and must not appear in `/root/content-automation/.env`.
 
 Outreach meeting capture uses Recall. Set `RECALL_REGION` (for example,
 `us-east-1`), `RECALL_API_KEY`, and the `whsec_`-prefixed
-`RECALL_WEBHOOK_SECRET` copied from Recall. In the Recall dashboard, register
-`https://cloud.taicho.ai/api/outreach/recall/webhook` and subscribe it to
-`bot.status_change`, `transcript.done`, and `transcript.failed`.
+`RECALL_WEBHOOK_SECRET` copied from Recall. Register both deployment endpoints
+in the Recall dashboard and subscribe each one to all `bot.*` lifecycle events,
+`transcript.done`, and `transcript.failed`:
+
+- Staging: `https://cloud-dev.taicho.ai/api/outreach/recall/webhook`
+- Production: `https://cloud.taicho.ai/api/outreach/recall/webhook`
+
+For Recall workspaces created on or after December 15, 2025, generate the
+workspace verification secret under **Developers → API Keys & Secrets** and
+install that same value as `RECALL_WEBHOOK_SECRET` in both deployments. Legacy
+workspaces use the endpoint-specific Svix secret instead, so install the staging
+endpoint secret only in staging and the production endpoint secret only in
+production.
+New bots are tagged with the deployment's `PUBLIC_APP_URL`; both endpoints can
+receive every subscribed event, while the non-owning deployment returns a
+successful ignored response before resolving workspace data. Legacy bots
+without the deployment tag are accepted only by the deployment that can verify
+their signed workspace token.
 
 Taicho requests Recall's accuracy-prioritized streaming transcript with
 automatic language detection and separate-stream diarization. Bot status is

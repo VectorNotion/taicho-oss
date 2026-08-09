@@ -93,7 +93,7 @@ function recordValue(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function recallStatus(payload: RecallWebhookPayload): {
+export function recallMeetingStatusFromWebhook(payload: RecallWebhookPayload): {
   status: LeadMeetingStatus | null;
   detail: string | null;
   occurredAt: string | null;
@@ -109,12 +109,18 @@ function recallStatus(payload: RecallWebhookPayload): {
       occurredAt: stringValue(artifactStatus?.updated_at),
     };
   }
-  if (payload.event !== 'bot.status_change') {
+  if (payload.event !== 'bot.status_change' && !payload.event.startsWith('bot.')) {
     return { status: null, detail: null, occurredAt: null };
   }
-  const providerStatus = recordValue(payload.data.status);
-  const code = stringValue(providerStatus?.code)?.toLowerCase() ?? '';
-  const occurredAt = stringValue(providerStatus?.created_at);
+  const modernStatus = recordValue(payload.data.data);
+  const legacyStatus = recordValue(payload.data.status);
+  const providerStatus = modernStatus ?? legacyStatus;
+  const eventCode = payload.event.startsWith('bot.')
+    ? payload.event.slice('bot.'.length).toLowerCase()
+    : '';
+  const code = eventCode || stringValue(providerStatus?.code)?.toLowerCase() || '';
+  const occurredAt = stringValue(providerStatus?.updated_at)
+    ?? stringValue(providerStatus?.created_at);
   const detail = stringValue(providerStatus?.message)
     ?? stringValue(providerStatus?.sub_code)
     ?? stringValue(providerStatus?.code);
@@ -136,7 +142,7 @@ export async function receiveRecallWebhook(input: {
   providerDeliveryId: string;
   payload: RecallWebhookPayload;
 }) {
-  const mapped = recallStatus(input.payload);
+  const mapped = recallMeetingStatusFromWebhook(input.payload);
   const received = await recordLeadMeetingEvent({
     organizationId: input.organizationId,
     meetingId: input.meetingId,
@@ -156,7 +162,7 @@ export async function receiveRecallWebhook(input: {
     ...(mapped.status === 'in_meeting' && mapped.occurredAt ? { startedAt: mapped.occurredAt } : {}),
     ...(mapped.status === 'post_processing'
       && mapped.occurredAt
-      && input.payload.event === 'bot.status_change'
+      && (input.payload.event === 'bot.status_change' || input.payload.event.startsWith('bot.'))
       ? { endedAt: mapped.occurredAt }
       : {}),
   });

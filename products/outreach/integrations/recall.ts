@@ -3,6 +3,7 @@ import { safeFetchPublicUrl } from '@content-automation/platform/network/safe-fe
 import { z } from 'zod';
 
 const WORKSPACE_METADATA_KEY = 'taicho_workspace';
+const ENVIRONMENT_METADATA_KEY = 'taicho_environment';
 const WEBHOOK_TOLERANCE_SECONDS = 5 * 60;
 
 const participantSchema = z.object({
@@ -65,6 +66,7 @@ type RecallConfig = {
   apiUrl: string;
   apiKey: string;
   webhookSecret: string;
+  webhookEnvironment: string;
 };
 
 type WorkspaceTokenPayload = { organizationId: string; meetingId: string };
@@ -102,6 +104,20 @@ function apiUrl(): string {
   return `https://${region}.recall.ai`;
 }
 
+function webhookEnvironment(): string {
+  const publicAppUrl = process.env.PUBLIC_APP_URL?.trim();
+  if (!publicAppUrl) {
+    throw new RecallConfigurationError('PUBLIC_APP_URL is required for Recall webhook routing.');
+  }
+  try {
+    const url = new URL(publicAppUrl);
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error('invalid');
+    return url.origin;
+  } catch {
+    throw new RecallConfigurationError('PUBLIC_APP_URL must be a public HTTPS origin for Recall webhook routing.');
+  }
+}
+
 export function recallIsConfigured(): boolean {
   if (!process.env.RECALL_API_KEY?.trim() || !process.env.RECALL_WEBHOOK_SECRET?.trim()) return false;
   try {
@@ -117,7 +133,12 @@ export function recallConfig(): RecallConfig {
   const webhookSecret = process.env.RECALL_WEBHOOK_SECRET?.trim();
   if (!apiKey || !webhookSecret) throw new RecallConfigurationError();
   signingKey(webhookSecret);
-  return { apiUrl: apiUrl(), apiKey, webhookSecret };
+  return {
+    apiUrl: apiUrl(),
+    apiKey,
+    webhookSecret,
+    webhookEnvironment: webhookEnvironment(),
+  };
 }
 
 export function createRecallWorkspaceToken(
@@ -242,6 +263,7 @@ export async function createRecallBot(input: {
         organizationId: input.organizationId,
         meetingId: input.meetingId,
       }, config.webhookSecret),
+      [ENVIRONMENT_METADATA_KEY]: config.webhookEnvironment,
     },
     recording_config: {
       transcript: {
@@ -277,6 +299,29 @@ function workspaceTokenFromMetadata(value: unknown): string | null {
   return stringValue(objectValue(value)?.[WORKSPACE_METADATA_KEY]);
 }
 
+function environmentFromMetadata(value: unknown): string | null {
+  return stringValue(objectValue(value)?.[ENVIRONMENT_METADATA_KEY]);
+}
+
+export type RecallWebhookTarget = {
+  workspaceToken: string | null;
+  environment: string | null;
+};
+
+export function recallWebhookTargetsEnvironment(
+  target: RecallWebhookTarget,
+  environment: string,
+): boolean {
+  return !target.environment || target.environment === environment;
+}
+
+function targetFromMetadata(value: unknown): RecallWebhookTarget {
+  return {
+    workspaceToken: workspaceTokenFromMetadata(value),
+    environment: environmentFromMetadata(value),
+  };
+}
+
 export function recallWebhookBotId(payload: RecallWebhookPayload): string | null {
   return stringValue(payload.data.bot_id) ?? stringValue(objectValue(payload.data.bot)?.id);
 }
@@ -286,18 +331,32 @@ export function recallWebhookTranscriptId(payload: RecallWebhookPayload): string
 }
 
 export function recallWorkspaceTokenFromWebhook(payload: RecallWebhookPayload): string | null {
+  return recallTargetFromWebhook(payload).workspaceToken;
+}
+
+export function recallTargetFromWebhook(payload: RecallWebhookPayload): RecallWebhookTarget {
   const data = payload.data;
-  return workspaceTokenFromMetadata(objectValue(data.bot)?.metadata)
-    ?? workspaceTokenFromMetadata(data.metadata)
-    ?? workspaceTokenFromMetadata(objectValue(data.recording)?.metadata)
-    ?? workspaceTokenFromMetadata(objectValue(data.transcript)?.metadata);
+  for (const metadata of [
+    objectValue(data.bot)?.metadata,
+    data.metadata,
+    objectValue(data.recording)?.metadata,
+    objectValue(data.transcript)?.metadata,
+  ]) {
+    const target = targetFromMetadata(metadata);
+    if (target.workspaceToken || target.environment) return target;
+  }
+  return { workspaceToken: null, environment: null };
 }
 
 export async function getRecallBotWorkspaceToken(botId: string): Promise<string | null> {
+  return (await getRecallBotTarget(botId)).workspaceToken;
+}
+
+export async function getRecallBotTarget(botId: string): Promise<RecallWebhookTarget> {
   const config = recallConfig();
   const response = await recallRequest(config, `/api/v1/bot/${encodeURIComponent(botId)}/`);
   const bot = retrieveBotResponseSchema.parse(await response.json());
-  return workspaceTokenFromMetadata(bot.metadata);
+  return targetFromMetadata(bot.metadata);
 }
 
 export async function getRecallTranscript(transcriptId: string): Promise<RecallTranscriptUtterance[]> {
