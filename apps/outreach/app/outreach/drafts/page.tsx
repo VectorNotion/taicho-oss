@@ -15,7 +15,7 @@ export default async function DraftsPage() {
       <PageHeader
         actions={
           <Button asChild variant="outline">
-            <Link href="/outreach/pipeline">
+            <Link href="/outreach/prospects">
               Open pipeline
               <ExternalLink className="size-4" />
             </Link>

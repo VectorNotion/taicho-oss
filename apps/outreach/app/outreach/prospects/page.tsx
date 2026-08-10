@@ -231,7 +231,7 @@ export default function PipelinePage() {
   const statCards = [
     {
       featured: true,
-      label: "Pipeline",
+      label: "Prospects",
       value: total.toLocaleString(),
       description: "People matching the current filters",
     },
@@ -268,7 +268,7 @@ export default function PipelinePage() {
           </Button>
         }
         description="Research, qualify, prepare outreach, and track the people selected from your shared workspace."
-        title="Pipeline"
+        title="Prospects"
       />
 
       <StatRow isLoading={loading} stats={statCards} />
@@ -376,9 +376,9 @@ export default function PipelinePage() {
         isLoadingMore={loadingMore}
         onLoadMore={() => void loadMore()}
         onSearchChange={setSearchQuery}
-        searchPlaceholder="Search people…"
+        searchPlaceholder="Search prospects…"
         searchValue={searchQuery}
-        title="Outreach pipeline"
+        title="Prospects"
       >
         {!loading && prospects.length > 0 ? (
           <ListRows>
@@ -414,7 +414,7 @@ export default function PipelinePage() {
                       </Badge>
                     </span>
                   }
-                  href={`/outreach/pipeline/${prospect.id}`}
+                  href={`/outreach/prospects/${prospect.id}`}
                   key={prospect.id}
                   leading={
                     <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">

@@ -27,3 +27,6 @@ export async function withProspectOrg(
   }
   return runWithGraphOrganization(context.organizationId, () => handler(context));
 }
+
+/** Generic alias — the same auth + graph-org boundary for non-prospect outreach routes (accounts). */
+export const withOrgScope = withProspectOrg;

@@ -571,7 +571,7 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
       if (!response.ok) throw new Error("Failed to delete");
 
       toast.success("Person removed from Outreach");
-      router.push("/outreach/pipeline");
+      router.push("/outreach/prospects");
     } catch (error) {
       console.error("Error deleting prospect:", error);
       toast.error("Could not remove the person from Outreach — try again");
@@ -600,7 +600,7 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     confirmDelete?.type === "prospect"
       ? {
           title: "Remove from Outreach",
-          description: `This removes ${prospect?.name ?? "this person"} from the Outreach pipeline. Their shared People record remains available to the workspace.`,
+          description: `This removes ${prospect?.name ?? "this person"} from your Outreach prospects. Their shared People record remains available to the workspace.`,
           action: "Remove from Outreach",
         }
       : confirmDelete?.type === "activity"
@@ -644,10 +644,10 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
         <div className="flex flex-col items-center gap-3 py-24 text-center">
           <UserX className="h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            This person is not currently in the Outreach pipeline
+            This person is not currently in the Outreach prospects list
           </p>
           <Button variant="outline" asChild>
-            <Link href="/outreach/pipeline">Back to pipeline</Link>
+            <Link href="/outreach/prospects">Back to prospects</Link>
           </Button>
         </div>
       </div>
@@ -660,9 +660,9 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
       <div>
         <Link
           className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-          href="/outreach/pipeline"
+          href="/outreach/prospects"
         >
-          <ArrowLeft className="size-4" /> Pipeline
+          <ArrowLeft className="size-4" /> Prospects
         </Link>
         <ProspectHero
           prospect={prospect}

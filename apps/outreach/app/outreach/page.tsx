@@ -51,7 +51,7 @@ export default async function OutreachOverviewPage() {
 
   const metrics = [
     {
-      label: "Pipeline",
+      label: "Prospects",
       value: counts.total.toLocaleString(),
       description: "People with an Outreach role",
       featured: true,
@@ -77,14 +77,14 @@ export default async function OutreachOverviewPage() {
     {
       count: counts.byStatus.new ?? 0,
       description: "Gather context before deciding how to approach them.",
-      href: "/outreach/pipeline",
+      href: "/outreach/prospects",
       icon: Search,
       label: "Research new people",
     },
     {
       count: readyForNextStep,
       description: "Review fit and prepare the right outreach angle.",
-      href: "/outreach/pipeline",
+      href: "/outreach/prospects",
       icon: Sparkles,
       label: "Act on researched people",
     },
@@ -98,7 +98,7 @@ export default async function OutreachOverviewPage() {
     {
       count: counts.byStatus.contacted ?? 0,
       description: "Keep the conversation moving while the context is fresh.",
-      href: "/outreach/pipeline",
+      href: "/outreach/prospects",
       icon: CircleDot,
       label: "Follow up with contacted people",
     },
@@ -113,8 +113,8 @@ export default async function OutreachOverviewPage() {
               <Link href="/contacts">Find people</Link>
             </Button>
             <Button asChild>
-              <Link href="/outreach/pipeline">
-                Open pipeline
+              <Link href="/outreach/prospects">
+                Open prospects
                 <ArrowRight className="size-4" />
               </Link>
             </Button>
@@ -127,7 +127,7 @@ export default async function OutreachOverviewPage() {
       <StatRow stats={metrics} />
 
       <ListCard
-        description="The next useful actions across the current pipeline."
+        description="The next useful actions across your current prospects."
         title="Your outreach queue"
       >
         <ListRows>
@@ -166,7 +166,7 @@ export default async function OutreachOverviewPage() {
             <div className="grid min-h-56 place-items-center px-6 text-center">
               <div className="max-w-sm">
                 <Users className="mx-auto size-8 text-muted-foreground" />
-                <p className="mt-3 font-medium">No one is in the pipeline yet</p>
+                <p className="mt-3 font-medium">No prospects yet</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
                   Add people to the shared directory, then start Outreach for
                   the people you want to research and contact.
@@ -181,7 +181,7 @@ export default async function OutreachOverviewPage() {
               {recent.prospects.map((prospect) => (
                 <ListRow
                   actions={[{
-                    href: `/outreach/pipeline/${prospect.id}`,
+                    href: `/outreach/prospects/${prospect.id}`,
                     iconName: "arrow-right",
                     label: `Open ${prospect.name}`,
                   }]}
@@ -190,7 +190,7 @@ export default async function OutreachOverviewPage() {
                       {PROSPECT_STATUS_CONFIG[prospect.status].label}
                     </Badge>
                   }
-                  href={`/outreach/pipeline/${prospect.id}`}
+                  href={`/outreach/prospects/${prospect.id}`}
                   key={prospect.id}
                   leading={
                     <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
@@ -220,7 +220,7 @@ export default async function OutreachOverviewPage() {
                 <p className="mt-3 font-medium">The review queue is clear</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
                   New messages appear here after you prepare outreach from a
-                  person&apos;s pipeline record.
+                  person&apos;s prospect record.
                 </p>
               </div>
             </div>
@@ -230,11 +230,11 @@ export default async function OutreachOverviewPage() {
                 {drafts.slice(0, 5).map(({ prospect, message }) => (
                   <ListRow
                     actions={[{
-                      href: `/outreach/pipeline/${prospect.id}`,
+                      href: `/outreach/prospects/${prospect.id}`,
                       iconName: "arrow-right",
                       label: `Review draft for ${prospect.name}`,
                     }]}
-                    href={`/outreach/pipeline/${prospect.id}`}
+                    href={`/outreach/prospects/${prospect.id}`}
                     key={message.id}
                     leading={
                       <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">

@@ -6,5 +6,5 @@ export default async function LegacyProspectPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  redirect(`/outreach/pipeline/${id}`);
+  redirect(`/outreach/prospects/${id}`);
 }
