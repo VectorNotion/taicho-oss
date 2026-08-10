@@ -276,7 +276,7 @@ export interface TranscriptUtteranceInput {
 export async function insertTranscriptUtterances(input: {
   organizationId: string;
   leadId: string;
-  meetingId: string;
+  meetingId?: string;
   meetingEventId?: string;
   utterances: TranscriptUtteranceInput[];
 }): Promise<number> {

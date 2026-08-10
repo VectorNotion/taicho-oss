@@ -45,6 +45,7 @@ import type {
   LeadResearch,
   LeadActivity,
 } from "@/products/outreach/domain/types";
+import { callRecordingLeadUrl } from "@/products/outreach/ui/call-recording-link";
 
 type ConfirmDelete =
   | { type: "lead" }
@@ -658,6 +659,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         </Link>
         <LeadHero
           lead={lead}
+          callRecordingUrl={callRecordingLeadUrl(lead.id)}
           isGeneratingOutreach={isGeneratingOutreach}
           isDeleting={isDeleting}
           updatingStatus={updatingStatus}

@@ -99,6 +99,34 @@
       "when": 1786296400000,
       "tag": "0013_add_recall_meeting_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786380000000,
+      "tag": "0014_add_call_recording",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786381000000,
+      "tag": "0015_register_call_recording_oauth_client",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1786382000000,
+      "tag": "0016_use_call_recording_loopback_oauth",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786383000000,
+      "tag": "0017_drop_call_recording_backend",
+      "breakpoints": true
     }
   ]
 }

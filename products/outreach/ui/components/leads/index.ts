@@ -6,4 +6,11 @@ export { ActivityTimeline } from "./ActivityTimeline";
 export { AddActivityDialog } from "./AddActivityDialog";
 export { LeadNotes } from "./LeadNotes";
 export { LeadIntelligenceTabs } from "./LeadIntelligenceTabs";
+export {
+  OutreachGenerationExperience,
+  ResearchGenerationExperience,
+  type GenerationProgress,
+  type ResearchPreview,
+  type ResearchTopicProgress,
+} from "./LeadGenerationExperience";
 export type { Activity, ActivityType } from "./ActivityTimeline";

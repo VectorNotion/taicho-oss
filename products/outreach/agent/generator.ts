@@ -34,7 +34,7 @@ import { z } from 'zod';
 const log = createLogger('outreach-generator');
 
 // Schema for parsing agent output
-const outreachOutputSchema = z.object({
+export const outreachOutputSchema = z.object({
   subject: z.string().optional().nullable(),
   content: z.string(),
   reportUrl: z.string().optional().nullable(),
@@ -57,6 +57,22 @@ export interface GenerateOutreachResult {
   message?: OutreachMessage;
   error?: string;
 }
+
+export interface OutreachStreamCallbacks {
+  onProgress?: (step: {
+    id: 'context' | 'draft' | 'save';
+    label: string;
+    state: 'running' | 'complete';
+  }) => void;
+  onPartial?: (partial: Partial<OutreachOutput>) => void;
+  onReasoning?: (text: string) => void;
+}
+
+type OutreachStreamChunk = {
+  type: string;
+  payload?: { text?: string; error?: unknown };
+  object?: unknown;
+};
 
 /**
  * Build prompt for the outreach agent based on medium and lead context.
@@ -263,6 +279,37 @@ Generate the outreach now. Remember: ONLY reference real work from your identity
 Output ONLY a JSON object with: subject (if applicable), content, reportUrl/reportSlug/reportId (if report created).`;
 }
 
+async function saveGeneratedOutreach(
+  input: GenerateOutreachInput,
+  parsed: OutreachOutput,
+): Promise<OutreachMessage> {
+  const message = await createOutreachMessage({
+    leadId: input.leadId,
+    medium: input.medium,
+    subject: parsed.subject ?? undefined,
+    content: parsed.content,
+    targetContent: input.targetContent,
+    landingPageUrl: parsed.reportUrl ?? undefined,
+    landingPageSlug: parsed.reportSlug ?? undefined,
+    reportId: parsed.reportId ?? undefined,
+    status: 'draft',
+  });
+
+  log.info('outreach.message.saved', {
+    lead_id: input.leadId,
+    message_id: message.id,
+    medium: input.medium,
+  });
+
+  emitProductEventFromContext({
+    name: 'outreach.generated',
+    refs: { leadId: input.leadId },
+    payload: { messageId: message.id, medium: input.medium },
+  });
+
+  return message;
+}
+
 /**
  * Generate outreach message synchronously using Mastra agent.
  * Fetches user's identity/voice/mission from Settings for personalized outreach.
@@ -336,32 +383,102 @@ export async function generateOutreach(
     };
   }
 
-  // Save to Neo4j (convert null to undefined)
-  const message = await createOutreachMessage({
-    leadId,
-    medium,
-    subject: parsed.subject ?? undefined,
-    content: parsed.content,
-    targetContent,
-    landingPageUrl: parsed.reportUrl ?? undefined,
-    landingPageSlug: parsed.reportSlug ?? undefined,
-    reportId: parsed.reportId ?? undefined,
-    status: 'draft',
-  });
-
-  log.info('outreach.message.saved', {
-    lead_id: leadId,
-    message_id: message.id,
-    medium,
-  });
-
-  emitProductEventFromContext({
-    name: 'outreach.generated',
-    refs: { leadId },
-    payload: { messageId: message.id, medium },
-  });
+  const message = await saveGeneratedOutreach(input, parsed);
 
   return { success: true, message };
+}
+
+/**
+ * Generate and persist an outreach draft over one long-lived AI SDK stream.
+ * The caller owns the transport; this function emits the structured artifact
+ * as it grows and never asks the browser to poll for completion.
+ */
+export async function streamOutreach(
+  input: GenerateOutreachInput,
+  callbacks: OutreachStreamCallbacks = {},
+): Promise<OutreachMessage> {
+  const { leadId, medium, targetContent, tenantId } = input;
+
+  log.info('outreach.generation_stream.started', { lead_id: leadId, medium });
+  callbacks.onProgress?.({
+    id: 'context',
+    label: 'Grounding in lead research and your proven work',
+    state: 'running',
+  });
+
+  const lead = await getLeadById(leadId);
+  if (!lead) throw new Error(`Lead not found: ${leadId}`);
+
+  const [research, settings] = await Promise.all([
+    getLeadResearch(leadId),
+    getSettings(),
+  ]);
+  const prompt = buildOutreachPrompt(lead, research, medium, targetContent, tenantId);
+  const agent = createOutreachAgent({
+    identity: settings.identity,
+    voice: settings.voice,
+    mission: settings.mission,
+  });
+
+  callbacks.onProgress?.({
+    id: 'context',
+    label: 'Grounding in lead research and your proven work',
+    state: 'complete',
+  });
+  callbacks.onProgress?.({
+    id: 'draft',
+    label: 'Writing a truthful, personalized draft',
+    state: 'running',
+  });
+
+  const parsed = await observeOperation('ai.outreach.generate_stream', {
+    runId: leadId,
+    attributes: { lead_id: leadId, medium },
+  }, async () => {
+    const result = await agent.stream(prompt, {
+      structuredOutput: { schema: outreachOutputSchema },
+    });
+    let finalResult: unknown;
+    let reasoning = '';
+
+    for await (const chunk of result.fullStream as AsyncIterable<OutreachStreamChunk>) {
+      if (chunk.type === 'reasoning-delta') {
+        if (callbacks.onReasoning) {
+          reasoning += chunk.payload?.text ?? '';
+          callbacks.onReasoning(reasoning);
+        }
+      } else if (chunk.type === 'object') {
+        callbacks.onPartial?.(chunk.object as Partial<OutreachOutput>);
+      } else if (chunk.type === 'object-result') {
+        finalResult = chunk.object;
+      } else if (chunk.type === 'error') {
+        throw new Error(`Outreach stream failed: ${JSON.stringify(chunk.payload ?? chunk)}`);
+      }
+    }
+
+    if (!finalResult) throw new Error('Outreach stream produced no structured result');
+    return outreachOutputSchema.parse(finalResult);
+  });
+
+  callbacks.onPartial?.(parsed);
+  callbacks.onProgress?.({
+    id: 'draft',
+    label: 'Writing a truthful, personalized draft',
+    state: 'complete',
+  });
+  callbacks.onProgress?.({
+    id: 'save',
+    label: 'Saving to outreach drafts',
+    state: 'running',
+  });
+
+  const message = await saveGeneratedOutreach(input, parsed);
+  callbacks.onProgress?.({
+    id: 'save',
+    label: 'Saved to outreach drafts',
+    state: 'complete',
+  });
+  return message;
 }
 
 /**

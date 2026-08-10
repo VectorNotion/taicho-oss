@@ -28,6 +28,7 @@
     "./intelligence/repository": "./intelligence/repository.ts",
     "./jobs/reconcilers": "./jobs/reconcilers.ts",
     "./jobs/repository": "./jobs/repository.ts",
+    "./jobs/pool": "./jobs/pool.ts",
     "./metrics/ingest-tokens": "./metrics/ingest-tokens.ts",
     "./metrics/ingest-verification": "./metrics/ingest-verification.ts",
     "./metrics/rollup": "./metrics/rollup.ts",

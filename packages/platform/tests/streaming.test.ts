@@ -35,9 +35,9 @@ test('structured streaming accumulates reasoning, exposes partials, and validate
   const generate = streamingStructuredGenerate((part) => emitted.push(part), { agentStream });
   assert.deepEqual(await generate(baseArgs), { answer: 'complete' });
   assert.deepEqual(emitted, [
-    { type: 'data-reasoning', id: 'reasoning', data: { text: 'First ' } },
-    { type: 'data-reasoning', id: 'reasoning', data: { text: 'First second' } },
-    { type: 'data-partial', id: 'partial', data: { answer: 'par' } },
+    { type: 'data-reasoning', id: 'default', data: { text: 'First ' } },
+    { type: 'data-reasoning', id: 'default', data: { text: 'First second' } },
+    { type: 'data-partial', id: 'default', data: { answer: 'par' } },
   ]);
 });
 

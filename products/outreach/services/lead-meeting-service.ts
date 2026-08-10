@@ -24,6 +24,7 @@ import {
   recallTranscriptInput,
   type RecallWebhookPayload,
 } from '../integrations/recall';
+import { getLeadById } from '../data/lead-repository';
 
 const log = createLogger('outreach.lead-meeting');
 
@@ -360,4 +361,73 @@ export async function finalizeMeetingCapture(input: {
       return null;
     }
   }));
+}
+
+/**
+ * The versioned OAuth API uses this narrow service to attach a transcript
+ * produced by an external product to a Taicho lead. Taicho persists only the
+ * transcript evidence; the external product remains the recording system of
+ * record and no Taicho meeting or recording is created here.
+ */
+export async function updateLeadTranscript(input: {
+  organizationId: string;
+  leadId: string;
+  externalRecordingId: string;
+  startedAt: string;
+  endedAt: string;
+  utterances: Array<{
+    sourceKey: string;
+    content: string;
+    speakerName?: string | null;
+    speakerExternalId?: string | null;
+    speakerIsHost?: boolean | null;
+    offsetMs?: number | null;
+    durationMs?: number | null;
+    confidence?: number | null;
+    words?: unknown[];
+  }>;
+}) {
+  return runWithGraphOrganization(input.organizationId, async () => {
+    const lead = await getLeadById(input.leadId);
+    if (!lead) return null;
+    const inserted = await insertTranscriptUtterances({
+      organizationId: input.organizationId,
+      leadId: input.leadId,
+      utterances: input.utterances.map((utterance) => ({
+        sourceKey: `call_recording:${input.externalRecordingId}:${utterance.sourceKey}`,
+        content: utterance.content,
+        speakerName: utterance.speakerName,
+        speakerExternalId: utterance.speakerExternalId,
+        speakerIsHost: utterance.speakerIsHost,
+        offsetMs: utterance.offsetMs,
+        durationMs: utterance.durationMs,
+        occurredAt: typeof utterance.offsetMs === 'number'
+          ? new Date(new Date(input.startedAt).getTime() + utterance.offsetMs).toISOString()
+          : input.startedAt,
+        metadata: {
+          provider: 'call_recording',
+          externalRecordingId: input.externalRecordingId,
+          recordingStartedAt: input.startedAt,
+          recordingEndedAt: input.endedAt,
+          confidence: utterance.confidence ?? null,
+          words: utterance.words ?? null,
+        },
+      })),
+    });
+    emitProductEvent({
+      organizationId: input.organizationId,
+      name: 'lead.transcript.updated',
+      refs: { leadId: input.leadId },
+      payload: {
+        provider: 'call_recording',
+        externalRecordingId: input.externalRecordingId,
+        insertedUtterances: inserted,
+      },
+    });
+    return {
+      leadId: input.leadId,
+      externalRecordingId: input.externalRecordingId,
+      insertedUtterances: inserted,
+    };
+  });
 }

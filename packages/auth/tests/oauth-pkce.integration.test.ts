@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import test from "node:test";
-import { auth, getApiAuthorizationContext, getMcpAuthorizationContext, MCP_RESOURCE_URL } from "../server";
+import {
+  API_RESOURCE_URL,
+  auth,
+  getApiAuthorizationContext,
+  getMcpAuthorizationContext,
+  MCP_RESOURCE_URL,
+} from "../server";
 import { authPool } from "../database";
 
 const enabled = process.env.RUN_MCP_OAUTH_INTEGRATION_TESTS === "1";
@@ -68,7 +74,75 @@ function request(path: string, init: RequestInit = {}) {
   return fetch(new URL(path, baseUrl), { ...init, redirect: "manual" });
 }
 
-test("authorization code with PKCE binds the user and organization and rotates refresh tokens", { skip: !enabled }, async () => {
+async function verifyCallRecordingClient(activeCookie: string, membership: Membership) {
+  const clientId = "taicho-call-recording-native-v1";
+  const redirectUri = "http://127.0.0.1:38123/oauth/callback";
+  const scope = "openid profile email offline_access vn:outreach:read vn:outreach:write";
+  const verifier = Buffer.from(crypto.getRandomValues(new Uint8Array(48))).toString("base64url");
+  const challenge = Buffer.from(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+  ).toString("base64url");
+  const authorize = new URL("/api/auth/oauth2/authorize", baseUrl);
+  authorize.searchParams.set("client_id", clientId);
+  authorize.searchParams.set("redirect_uri", redirectUri);
+  authorize.searchParams.set("response_type", "code");
+  authorize.searchParams.set("scope", scope);
+  authorize.searchParams.set("state", "call-recording-pkce-state");
+  authorize.searchParams.set("code_challenge", challenge);
+  authorize.searchParams.set("code_challenge_method", "S256");
+  authorize.searchParams.set("resource", API_RESOURCE_URL);
+
+  const authorization = await fetch(authorize, {
+    headers: { Cookie: activeCookie },
+    redirect: "manual",
+  });
+  assert.ok(authorization.status === 200 || authorization.status === 302);
+  const consentLocation = authorization.status === 302
+    ? authorization.headers.get("location")
+    : String((await authorization.json() as JsonObject).url ?? "");
+  assert.ok(consentLocation?.startsWith("/oauth/consent?") || consentLocation?.startsWith(`${baseUrl}/oauth/consent?`));
+  const consentQuery = new URL(consentLocation!, baseUrl).search.slice(1);
+
+  const consent = await json(await request("/api/auth/oauth2/consent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: activeCookie, Origin: baseUrl },
+    body: JSON.stringify({ accept: true, scope, oauth_query: consentQuery }),
+  }));
+  const callback = new URL(String(consent.url));
+  assert.equal(`${callback.protocol}//${callback.host}${callback.pathname}`, redirectUri);
+  assert.equal(callback.searchParams.get("state"), "call-recording-pkce-state");
+  const code = callback.searchParams.get("code");
+  assert.ok(code);
+
+  const token = await json(await request("/api/auth/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      code,
+      code_verifier: verifier,
+      redirect_uri: redirectUri,
+      resource: API_RESOURCE_URL,
+    }),
+  }));
+  assert.equal(token.token_type, "Bearer");
+  assert.ok(typeof token.access_token === "string");
+  assert.ok(typeof token.refresh_token === "string");
+
+  const context = await getApiAuthorizationContext(
+    new Headers({ Authorization: `Bearer ${token.access_token}` }),
+  );
+  assert.equal(context.organizationId, membership.organizationId);
+  assert.equal(context.actor.type, "user");
+  assert.equal(context.actor.userId, membership.userId);
+  assert.deepEqual(
+    [...context.scopes].sort(),
+    ["vn:outreach:read", "vn:outreach:write"],
+  );
+}
+
+test("OAuth PKCE binds Taicho identity for first-party and dynamically registered clients", { skip: !enabled }, async () => {
   const server = handlerServer();
   await listen(server);
   let membership: Membership | undefined;
@@ -121,6 +195,8 @@ test("authorization code with PKCE binds the user and organization and rotates r
     });
     assert.equal(active.status, 200);
     const activeCookie = [cookie, cookieValue(active)].filter(Boolean).join("; ");
+
+    await verifyCallRecordingClient(activeCookie, membership);
 
     const scope = "openid profile email offline_access vn:read";
     const redirectUri = "http://127.0.0.1:3112/oauth/callback";

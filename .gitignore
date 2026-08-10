@@ -28,6 +28,14 @@
 
 # production
 /build
+**/dist/
+
+# Rust and Python local build environments
+**/target/
+**/.venv/
+**/.pytest_cache/
+**/__pycache__/
+*.pyc
 
 # misc
 .DS_Store

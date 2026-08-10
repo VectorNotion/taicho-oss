@@ -1881,6 +1881,7 @@ export const outreach_lead_evidence = pgTable("outreach_lead_evidence", {
 }, (table) => [
 	index("outreach_lead_evidence_lead_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast(), table.created_at.asc().nullsLast()),
 	uniqueIndex("outreach_lead_evidence_source_key").using("btree", table.organization_id.asc().nullsLast(), table.meeting_id.asc().nullsLast(), table.source_key.asc().nullsLast()).where(sql`(source_key IS NOT NULL)`),
+	uniqueIndex("outreach_lead_evidence_external_source_key").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast(), table.source_key.asc().nullsLast()).where(sql`(source_key IS NOT NULL AND meeting_id IS NULL)`),
 	unique("outreach_lead_evidence_id_organization_key").on(table.id, table.organization_id),
 	foreignKey({
 		columns: [table.meeting_id, table.organization_id],

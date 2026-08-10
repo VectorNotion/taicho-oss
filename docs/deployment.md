@@ -184,6 +184,37 @@ generates a fresh insight revision. Existing Attendee records and signed
 Attendee deliveries remain supported during migration, but new meeting
 captures use Recall.
 
+Call Recording is a desktop application backed directly by one Modal ASGI
+service; there is no standalone Node service or Call Recording database. It does
+not maintain users, device identities, pairing credentials, or a second login.
+Every Modal request is authorized with a Taicho OAuth access token, and the
+verified Taicho subject and organization claims scope the recording. Modal
+writes raw tracks, manifests, lifecycle state, previews, and transcription
+results only to the private Cloudflare R2 bucket configured by
+`CALL_RECORDING_R2_*`. R2 automatically encrypts every object and its metadata
+with AES-256-GCM at rest; the bucket must not be public.
+
+Migrations 0014 and 0015 install the desktop as the first-party public Taicho
+OAuth client `taicho-call-recording-native-v1`, with PKCE, offline access,
+`vn:outreach:read`, `vn:outreach:write`, and the native loopback callback
+`http://127.0.0.1/oauth/callback`. The desktop binds a fresh ephemeral port for
+each attempt; Taicho accepts only the registered literal IP and callback path.
+The client has no owning user or organization;
+Taicho binds each consent and token to the actual Taicho user and selected
+organization. `CALL_RECORDING_OAUTH_CLIENT_ID` may override the public client ID
+for an isolated deployment. `TAICHO_OAUTH_ISSUER`, `TAICHO_API_URL`, and
+`CALL_RECORDING_MODAL_URL` select the Taicho authorization server, the narrow
+lead API, and the Modal ASGI service respectively. None of these
+settings creates a Call Recording identity; every grant remains a Taicho grant.
+
+Transcription and diarization run only in the Modal app under
+`services/call-processing`. Create the Modal secret named `call-recording` with
+the four `CALL_RECORDING_R2_*` values, the production Taicho issuer/API URLs,
+and the gated `HF_TOKEN`, then deploy `modal_app.py`. The desktop uploads and
+polls that Modal URL directly; after completion it submits the attributed
+transcript to Taicho's lead-transcript endpoint. Modal never calls Taicho and
+there is no inbound webhook or reconciler.
+
 Lead semantic search writes source-linked embeddings for profiles, sent
 outreach, activities, notes, manual updates, and transcript utterances into
 each organization's FalkorDB graph. By default it reuses

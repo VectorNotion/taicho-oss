@@ -27,6 +27,7 @@ import {
   ChevronDown,
   Sparkles,
   FileText,
+  Mic,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -47,10 +48,12 @@ interface LeadHeroProps {
   onGenerateOutreach: (medium: OutreachMedium) => void;
   onOpenCommentDialog: () => void;
   onDelete: () => void;
-  /** Slot for custom research button (e.g., ResearchMastra component) */
+  /** Slot for the lead research stream trigger. */
   researchButton?: React.ReactNode;
   /** Optional cross-product action, present when Nurture is available. */
   nurtureAction?: React.ReactNode;
+  /** Opens the standalone Call Recording app with this lead selected. */
+  callRecordingUrl?: string;
 }
 
 export function LeadHero({
@@ -64,6 +67,7 @@ export function LeadHero({
   onDelete,
   researchButton,
   nurtureAction,
+  callRecordingUrl,
 }: LeadHeroProps) {
   const priorityConfig = LEAD_PRIORITY_CONFIG[lead.priority];
 
@@ -149,6 +153,20 @@ export function LeadHero({
           )}
 
           {nurtureAction}
+
+          {callRecordingUrl && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="sm" variant="outline" asChild>
+                  <a aria-label={`Record call with ${lead.name}`} href={callRecordingUrl}>
+                    <Mic className="h-4 w-4" />
+                    <span className="hidden sm:inline">Record call</span>
+                  </a>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Open Call Recording with this lead selected</TooltipContent>
+            </Tooltip>
+          )}
 
           <DropdownMenu>
             <Tooltip>
