@@ -1,274 +1,292 @@
 /**
- * Lead qualification orchestrator (Mastra migration of the `qualify_lead` action).
+ * Prospect qualification orchestrator (docs/icp-update-v2.md §3, §11, §14).
  *
- * Flow (spec §8): getLeadById + getLeadResearch → getPersonas(true).
- * If there are no active personas → status 'skipped', no write.
- * Otherwise score the lead against each active persona (temp 0.2, structured
- * output) and persist the highest-scoring match.
+ * Behind the existing `qualify_lead` action id:
+ *   account resolution → freshness-lapsed dimension research (full/refresh) →
+ *   fit match evaluation → deterministic scoring → qualification decision →
+ *   persistence + `lead.qualified` event.
  *
- * Agents are never on the hot path: this runs offline via the job runner.
- * Dependencies are injectable (`deps`) so the orchestration can be unit-tested
- * without touching Neo4j or the model API.
+ * Fit gates. Timing ranks. Agents are never on the hot path; every dependency
+ * is injectable (`deps`) so the orchestration is unit-testable without a graph
+ * or model API.
  */
-import { Agent } from '@mastra/core/agent';
+import { randomUUID } from 'node:crypto';
 import { createLogger, observeOperation } from '@content-automation/observability';
-import { registerObservedAgent } from '@content-automation/observability/ai';
-import { routerModel } from '@content-automation/platform/agents/model';
 import { emitProductEventFromContext } from '@content-automation/platform/events/emit';
-import { z } from 'zod';
-import { getSettings as getSettingsDefault } from '@content-automation/platform/settings/repository';
-import type { Settings } from '@content-automation/platform/settings/types';
-import { streamingStructuredGenerate, type StreamEmit } from '@content-automation/platform/agents/streaming';
+import type { StreamEmit } from '@content-automation/platform/agents/streaming';
 import {
   getLeadById as getLeadByIdDefault,
-  getLeadResearch as getLeadResearchDefault,
-  createLeadQualification as createLeadQualificationDefault,
   updateLeadPriorityByScore as updateLeadPriorityByScoreDefault,
 } from '../data/lead-repository';
-import { getPersonas as getPersonasDefault } from '../data/persona-repository';
-import type {
-  CreateQualificationInput,
-  Lead,
-  LeadQualification,
-  LeadResearch,
-  Persona,
-} from '../domain/types';
+import { resolveAccountForLead as resolveAccountForLeadDefault } from '../data/account-repository';
+import { getDimensionDefinitions as getDimensionDefinitionsDefault } from '../data/dimension-repository';
+import {
+  getObservations as getObservationsDefault,
+  hasAnyResearchRun as hasAnyResearchRunDefault,
+  recordResearchRun as recordResearchRunDefault,
+  saveMatches as saveMatchesDefault,
+  saveProspectQualification as saveProspectQualificationDefault,
+  upsertObservation as upsertObservationDefault,
+} from '../data/qualification-repository';
+import { researchDimensions as researchDimensionsDefault, type ResearchEntity } from './dimension-research';
+import { evaluateFitMatches as evaluateFitMatchesDefault } from './match-evaluator';
+import {
+  ageDays,
+  applyConfidenceRouting,
+  computeFitScore,
+  computeTimingScore,
+} from '../domain/scoring';
+import {
+  DEFAULT_THRESHOLDS,
+  type AccountRecord,
+  type DimensionDefinition,
+  type DimensionMatch,
+  type ObservationRecord,
+  type ProspectQualificationResult,
+  type QualificationThresholds,
+} from '../domain/qualification';
+import type { Lead } from '../domain/types';
 
 const log = createLogger('lead-qualification');
 
-
-/**
- * Structured-output schema for a single persona score (spec §8).
- */
-export const qualificationScoreSchema = z.object({
-  score: z.number().int().min(0).max(100),
-  notes: z.string(),
-});
-
-export type QualificationScore = z.infer<typeof qualificationScoreSchema>;
-
-export interface ScorePersonaInput {
-  persona: Persona;
-  lead: Lead;
-  research: LeadResearch | null;
-  settings: Settings;
-}
+type EntityRef = { kind: 'account' | 'prospect'; id: string };
 
 export interface QualifyLeadDeps {
   getLeadById: (id: string) => Promise<Lead | null>;
-  getLeadResearch: (leadId: string) => Promise<LeadResearch | null>;
-  getPersonas: (activeOnly?: boolean) => Promise<Persona[]>;
-  getSettings: () => Promise<Settings>;
-  createLeadQualification: (
-    leadId: string,
-    data: CreateQualificationInput
-  ) => Promise<LeadQualification>;
-  updateLeadPriorityByScore: (leadId: string, score: number) => Promise<Lead | null>;
-  scorePersona: (input: ScorePersonaInput) => Promise<QualificationScore>;
+  resolveAccountForLead: (lead: { id: string; company?: string }) => Promise<AccountRecord | null>;
+  getDimensionDefinitions: (opts?: { activeOnly?: boolean; seedIfEmpty?: boolean }) => Promise<DimensionDefinition[]>;
+  getObservations: (entity: EntityRef) => Promise<ObservationRecord[]>;
+  upsertObservation: (entity: EntityRef, obs: Omit<ObservationRecord, 'id'>) => Promise<ObservationRecord>;
+  researchDimensions: (
+    dims: DimensionDefinition[],
+    entity: ResearchEntity,
+    runId: string,
+    now: Date,
+  ) => Promise<Array<Omit<ObservationRecord, 'id'>>>;
+  evaluateFitMatches: (
+    dims: DimensionDefinition[],
+    observations: ObservationRecord[],
+    now: Date,
+  ) => Promise<DimensionMatch[]>;
+  saveMatches: (entity: EntityRef, matches: DimensionMatch[]) => Promise<void>;
+  saveProspectQualification: (leadId: string, result: ProspectQualificationResult) => Promise<void>;
+  recordResearchRun: (
+    accountId: string,
+    run: { runType: 'full' | 'refresh'; refreshedDimensions: string[] },
+  ) => Promise<unknown>;
+  hasAnyResearchRun: (accountId: string) => Promise<boolean>;
+  updateLeadPriorityByScore: (leadId: string, score: number) => Promise<unknown>;
+  now: () => Date;
+  thresholds: QualificationThresholds;
+  onProgress?: (label: string, state: 'running' | 'done') => void;
 }
 
 export interface QualifyLeadResult {
   status: 'success' | 'skipped';
-  score?: number;
-  personaName?: string;
-}
-
-/**
- * Format a persona's company-size range for the prompt.
- */
-function formatCompanySize(persona: Persona): string {
-  const { companySizeMin, companySizeMax } = persona;
-  if (companySizeMin != null && companySizeMax != null) {
-    return `${companySizeMin}-${companySizeMax} employees`;
-  }
-  if (companySizeMin != null) return `${companySizeMin}+ employees`;
-  if (companySizeMax != null) return `up to ${companySizeMax} employees`;
-  return 'any';
-}
-
-function formatList(values?: string[]): string {
-  return values && values.length > 0 ? values.join(', ') : 'any';
-}
-
-/**
- * Build the qualification system prompt (spec §8): mission/identity/voice +
- * persona fields, with a 4×0-25 rubric.
- */
-function buildQualificationInstructions(settings: Settings, persona: Persona): string {
-  return `You are a B2B sales qualification analyst.
-
-## Your context
-- Mission: ${settings.mission}
-- Identity: ${settings.identity}
-- Voice: ${settings.voice}
-
-## Target persona
-- Name: ${persona.name}
-- Description: ${persona.description}
-- Target titles: ${formatList(persona.targetTitles)}
-- Company size: ${formatCompanySize(persona)}
-- Funding stages: ${formatList(persona.fundingStages)}
-- Target domains: ${formatList(persona.targetDomains)}
-- Signals: ${formatList(persona.signals)}
-
-## Scoring rubric (0-100, four criteria worth 25 points each)
-1. Title fit (0-25): how well the lead's title matches the target titles.
-2. Company fit (0-25): industry/domain, size, and funding-stage alignment.
-3. Signals (0-25): presence of the persona's buying/interest signals.
-4. Mission alignment (0-25): how well the lead fits the mission above.
-
-Be conservative. Only award 80+ when there is strong, specific evidence across
-multiple criteria. When evidence is thin or missing, score low.
-
-Return a score (0-100 integer) and concise notes explaining the score.`;
-}
-
-/**
- * Build the qualification user message (spec §8): lead + research facts.
- */
-function buildQualificationPrompt(lead: Lead, research: LeadResearch | null): string {
-  const leadBlock = `## Lead
-- Name: ${lead.name}
-- Title: ${lead.title || 'Unknown'}
-- Company: ${lead.company || 'Unknown'}
-- Location: ${lead.location || 'Unknown'}`;
-
-  const researchBlock = research
-    ? `
-
-## Research
-- Industry: ${research.industry}
-- Company summary: ${research.companySummary}
-- Talking points: ${formatList(research.talkingPoints)}
-- Outreach angle: ${research.outreachAngle}`
-    : `
-
-## Research
-No research available for this lead.`;
-
-  return `${leadBlock}${researchBlock}
-
-Score this lead against the target persona using the rubric.`;
-}
-
-/**
- * Default per-persona scorer: a Mastra agent with structured output (temp 0.2).
- */
-async function defaultScorePersona({
-  persona,
-  lead,
-  research,
-  settings,
-}: ScorePersonaInput): Promise<QualificationScore> {
-  const agent = registerObservedAgent(new Agent({
-    id: 'lead-qualification-agent',
-    name: 'Lead Qualification Agent',
-    instructions: buildQualificationInstructions(settings, persona),
-    model: routerModel(),
-  }), 'taicho-outreach-agents');
-
-  const result = await observeOperation('ai.outreach.qualify_persona', {
-    runId: lead.id,
-    attributes: { lead_id: lead.id, persona_id: persona.id },
-  }, () => agent.generate(buildQualificationPrompt(lead, research), {
-    structuredOutput: { schema: qualificationScoreSchema },
-    modelSettings: { temperature: 0.2 },
-  }));
-
-  return result.object;
-}
-
-export function streamingScorePersona(emit: StreamEmit): QualifyLeadDeps['scorePersona'] {
-  return async (input) => {
-    const progressId = `persona-${input.persona.id}`;
-    emit({ type: 'data-progress', id: progressId, data: { label: `Scoring vs ${input.persona.name}`, state: 'running' } });
-    const result = await streamingStructuredGenerate(emit)({
-      agentId: 'lead-qualification-agent',
-      agentName: 'Lead Qualification Agent',
-      instructions: buildQualificationInstructions(input.settings, input.persona),
-      prompt: buildQualificationPrompt(input.lead, input.research),
-      schema: qualificationScoreSchema,
-      temperature: 0.2,
-    });
-    emit({ type: 'data-progress', id: progressId, data: { label: `Scored vs ${input.persona.name}`, state: 'done' } });
-    return result;
-  };
+  qualification?: ProspectQualificationResult;
+  reason?: string;
 }
 
 const defaultDeps: QualifyLeadDeps = {
   getLeadById: getLeadByIdDefault,
-  getLeadResearch: getLeadResearchDefault,
-  getPersonas: getPersonasDefault,
-  getSettings: getSettingsDefault,
-  createLeadQualification: createLeadQualificationDefault,
+  resolveAccountForLead: resolveAccountForLeadDefault,
+  getDimensionDefinitions: getDimensionDefinitionsDefault,
+  getObservations: getObservationsDefault,
+  upsertObservation: upsertObservationDefault,
+  researchDimensions: researchDimensionsDefault,
+  evaluateFitMatches: evaluateFitMatchesDefault,
+  saveMatches: saveMatchesDefault,
+  saveProspectQualification: saveProspectQualificationDefault,
+  recordResearchRun: recordResearchRunDefault,
+  hasAnyResearchRun: hasAnyResearchRunDefault,
   updateLeadPriorityByScore: updateLeadPriorityByScoreDefault,
-  scorePersona: defaultScorePersona,
+  now: () => new Date(),
+  thresholds: DEFAULT_THRESHOLDS,
 };
 
+/** Progress adapter for the qualify stream route. */
+export function streamingQualifyProgress(emit: StreamEmit): NonNullable<QualifyLeadDeps['onProgress']> {
+  return (label, state) =>
+    emit({
+      type: 'data-progress',
+      id: label.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      data: { label, state },
+    });
+}
+
+/** Dimensions whose latest observation is missing or older than its freshness window (spec §14). */
+function lapsedDimensions(
+  dims: DimensionDefinition[],
+  observations: ObservationRecord[],
+  now: Date,
+): DimensionDefinition[] {
+  const byKey = new Map(observations.map((o) => [o.dimensionKey, o]));
+  return dims.filter((dim) => {
+    const obs = byKey.get(dim.key);
+    return !obs || ageDays(obs.researchedAt, now) > dim.freshnessWindowDays;
+  });
+}
+
+async function refreshEntityObservations(
+  d: QualifyLeadDeps,
+  entity: EntityRef & ResearchEntity,
+  dims: DimensionDefinition[],
+  runId: string,
+  now: Date,
+): Promise<{ observations: ObservationRecord[]; refreshed: string[] }> {
+  const existing = await d.getObservations({ kind: entity.kind, id: entity.id });
+  const lapsed = lapsedDimensions(dims, existing, now);
+  if (lapsed.length === 0) return { observations: existing, refreshed: [] };
+
+  const fresh = await d.researchDimensions(lapsed, entity, runId, now);
+  for (const obs of fresh) {
+    await d.upsertObservation({ kind: entity.kind, id: entity.id }, obs);
+  }
+  return {
+    observations: await d.getObservations({ kind: entity.kind, id: entity.id }),
+    refreshed: lapsed.map((dim) => dim.key),
+  };
+}
+
 /**
- * Qualify a lead against all active personas, keeping the highest score.
+ * Qualify a lead through the dimension pipeline.
  *
  * @param leadId - the lead to qualify
- * @param deps - optional dependency overrides (for testing / injection)
+ * @param deps - optional dependency overrides (for testing / streaming progress)
  */
 export async function runQualifyLead(
   leadId: string,
-  deps: Partial<QualifyLeadDeps> = {}
+  deps: Partial<QualifyLeadDeps> = {},
 ): Promise<QualifyLeadResult> {
   const d: QualifyLeadDeps = { ...defaultDeps, ...deps };
-
-  const lead = await d.getLeadById(leadId);
-  if (!lead) {
-    throw new Error(`Lead not found: ${leadId}`);
-  }
-
-  const research = await d.getLeadResearch(leadId);
-  const personas = await d.getPersonas(true);
-
-  // No active personas → skip, no write (spec §8).
-  if (personas.length === 0) {
-    log.info('outreach.qualification.skipped', {
-      lead_id: leadId,
-      reason: 'no_active_personas',
-    });
-    return { status: 'skipped' };
-  }
-
-  const settings = await d.getSettings();
-
-  // Score against each persona, keep the highest.
-  let best: { score: number; notes: string; persona: Persona } | null = null;
-  for (const persona of personas) {
-    const { score, notes } = await d.scorePersona({ persona, lead, research, settings });
-    if (!best || score > best.score) {
-      best = { score, notes, persona };
+  return observeOperation('outreach.lead.qualify', { runId: leadId, attributes: { lead_id: leadId } }, async () => {
+    const lead = await d.getLeadById(leadId);
+    if (!lead) {
+      throw new Error(`Lead not found: ${leadId}`);
     }
-  }
 
-  // Unreachable given personas.length > 0, but narrows for the type checker.
-  if (!best) {
-    return { status: 'skipped' };
-  }
+    const now = d.now();
+    const runId = randomUUID();
+    const progress = d.onProgress ?? (() => undefined);
 
-  await d.createLeadQualification(leadId, {
-    matchedPersonaId: best.persona.id,
-    matchedPersonaName: best.persona.name,
-    score: best.score,
-    notes: best.notes,
+    const dims = await d.getDimensionDefinitions({ activeOnly: true, seedIfEmpty: true });
+    if (dims.length === 0) {
+      log.info('outreach.qualification.skipped', { lead_id: leadId, reason: 'no_dimensions' });
+      return { status: 'skipped', reason: 'no active dimension definitions' };
+    }
+    const accountFitDims = dims.filter((x) => x.appliesTo === 'account' && x.dimensionType === 'fit');
+    const accountTimingDims = dims.filter((x) => x.appliesTo === 'account' && x.dimensionType === 'timing');
+    const prospectFitDims = dims.filter((x) => x.appliesTo === 'prospect' && x.dimensionType === 'fit');
+
+    progress('Resolving account', 'running');
+    const account = await d.resolveAccountForLead(lead);
+    progress('Resolving account', 'done');
+
+    // ── Research (freshness-driven, spec §14) ──────────────────────────
+    let accountObservations: ObservationRecord[] = [];
+    let icpMatches: DimensionMatch[] = [];
+    let timing: ReturnType<typeof computeTimingScore> = { score: 0, breakdown: [] };
+
+    let refreshedAccountDims: string[] = [];
+    if (account) {
+      progress('Researching account', 'running');
+      const runType = (await d.hasAnyResearchRun(account.id)) ? 'refresh' : 'full';
+      const accountEntity = { kind: 'account' as const, id: account.id, name: account.name };
+      const refreshed = await refreshEntityObservations(
+        d,
+        accountEntity,
+        [...accountFitDims, ...accountTimingDims],
+        runId,
+        now,
+      );
+      accountObservations = refreshed.observations;
+      refreshedAccountDims = refreshed.refreshed;
+      await d.recordResearchRun(account.id, { runType, refreshedDimensions: refreshed.refreshed });
+      progress('Researching account', 'done');
+
+      progress('Evaluating company fit', 'running');
+      icpMatches = await d.evaluateFitMatches(accountFitDims, accountObservations, now);
+      await d.saveMatches({ kind: 'account', id: account.id }, icpMatches);
+      progress('Evaluating company fit', 'done');
+
+      timing = computeTimingScore(accountTimingDims, accountObservations, now);
+    }
+
+    progress('Researching prospect', 'running');
+    const prospectEntity = {
+      kind: 'prospect' as const,
+      id: lead.id,
+      name: lead.name,
+      company: lead.company,
+      title: lead.title,
+    };
+    const prospectRefreshed = await refreshEntityObservations(d, prospectEntity, prospectFitDims, runId, now);
+    progress('Researching prospect', 'done');
+
+    progress('Evaluating persona fit', 'running');
+    const personaMatches = await d.evaluateFitMatches(prospectFitDims, prospectRefreshed.observations, now);
+    await d.saveMatches({ kind: 'prospect', id: lead.id }, personaMatches);
+    progress('Evaluating persona fit', 'done');
+
+    // ── Deterministic scoring + decision (spec §7, §8, §11) ────────────
+    const icpScore = computeFitScore(icpMatches, accountFitDims);
+    const personaScore = computeFitScore(personaMatches, prospectFitDims);
+    const hardExcluded = [...icpMatches, ...personaMatches].some((m) => m.hardExclusion);
+
+    let status: ProspectQualificationResult['status'];
+    let reviewReason: string | undefined;
+    if (!account) {
+      // No company → account fit is unknowable; a human decides (spec §3 account resolution).
+      status = 'REVIEW';
+      reviewReason = 'lead has no company; account fit is unknown';
+    } else {
+      const routed = applyConfidenceRouting({
+        icpMatches,
+        personaMatches,
+        icpDims: accountFitDims,
+        personaDims: prospectFitDims,
+        hardExcluded,
+        thresholds: d.thresholds,
+      });
+      status = routed.status;
+      reviewReason = routed.reviewReason;
+    }
+
+    const qualification: ProspectQualificationResult = {
+      status,
+      icpScore,
+      personaScore,
+      timingScore: timing.score,
+      icpMatches,
+      personaMatches,
+      timingBreakdown: timing.breakdown,
+      reviewReason,
+      computedAt: now.toISOString(),
+    };
+
+    await d.saveProspectQualification(leadId, qualification);
+    await d.updateLeadPriorityByScore(leadId, Math.round(icpScore));
+
+    emitProductEventFromContext({
+      name: 'lead.qualified',
+      refs: { leadId },
+      payload: {
+        status,
+        icpScore,
+        personaScore,
+        timingScore: timing.score,
+        refreshedDimensions: [...refreshedAccountDims, ...prospectRefreshed.refreshed],
+      },
+    });
+
+    log.info('outreach.qualification.completed', {
+      lead_id: leadId,
+      status,
+      icp_score: icpScore,
+      persona_score: personaScore,
+      timing_score: timing.score,
+    });
+
+    return { status: 'success', qualification };
   });
-  await d.updateLeadPriorityByScore(leadId, best.score);
-
-  emitProductEventFromContext({
-    name: 'lead.qualified',
-    refs: { leadId },
-    payload: { score: best.score, personaId: best.persona.id, personaName: best.persona.name },
-  });
-
-  log.info('outreach.qualification.completed', {
-    lead_id: leadId,
-    persona_id: best.persona.id,
-    score: best.score,
-  });
-
-  return { status: 'success', score: best.score, personaName: best.persona.name };
 }

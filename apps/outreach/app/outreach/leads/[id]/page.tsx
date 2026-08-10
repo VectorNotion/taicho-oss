@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { LeadResearchResult } from "@/products/outreach/domain/research-schema";
+import type { ProspectQualificationResult } from "@/products/outreach/domain/qualification";
 import type {
   Lead,
   LeadNote,
@@ -53,6 +54,12 @@ type ConfirmDelete =
   | { type: "message"; id: string };
 
 type NurtureFunnel = { id: string; name: string };
+
+/** GET /qualify payload: new dimension-based result plus the legacy flat score. */
+type QualificationPayload = {
+  prospect: ProspectQualificationResult | null;
+  legacy: LeadQualification | null;
+};
 
 export default function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: routeLeadId } = use(params);
@@ -73,7 +80,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [researchLoading, setResearchLoading] = useState(true);
   const [isResearchStreaming, setIsResearchStreaming] = useState(false);
   const [researchRun, setResearchRun] = useState<ResearchRunState | null>(null);
-  const [qualification, setQualification] = useState<LeadQualification | null>(null);
+  const [qualification, setQualification] = useState<QualificationPayload | null>(null);
   const [qualificationLoading, setQualificationLoading] = useState(true);
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [notesLoading, setNotesLoading] = useState(true);
@@ -755,12 +762,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               <div className="space-y-4">
                 <QuickInfo lead={lead} />
                 <QualificationCard
-                  qualification={qualification}
+                  qualification={qualification?.prospect ?? null}
+                  legacy={qualification?.legacy ?? null}
                   isLoading={qualificationLoading}
                   onRequalify={() => qualifyStream.start()}
                   live={{
-                    score: qualifyStream.partial?.score ?? null,
-                    notes: qualifyStream.partial?.notes ?? "",
                     reasoning: qualifyStream.reasoning,
                     isStreaming: qualifyStream.isStreaming,
                   }}

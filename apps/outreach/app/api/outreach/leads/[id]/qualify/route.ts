@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLeadById, getLeadQualification } from '@/products/outreach/data/lead-repository';
+import { getProspectQualification } from '@/products/outreach/data/qualification-repository';
 import { commercialErrorResponse, reserveBackgroundAction } from '@content-automation/auth/commercial';
 import { releaseReservation, settleReservation } from '@content-automation/platform/commercial';
 import { runQualifyLead } from '@/products/outreach/agent/qualify-lead';
@@ -13,13 +14,18 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const qualification = await getLeadQualification(id);
+    // New dimension-based qualification first; legacy flat score as fallback
+    // for leads qualified before the ICP/Persona/Timing pipeline existed.
+    const [prospect, legacy] = await Promise.all([
+      getProspectQualification(id),
+      getLeadQualification(id),
+    ]);
 
-    if (!qualification) {
+    if (!prospect && !legacy) {
       return NextResponse.json(null);
     }
 
-    return NextResponse.json(qualification);
+    return NextResponse.json({ prospect, legacy });
   } catch (error) {
     console.error('Get lead qualification error:', error);
     return NextResponse.json(
