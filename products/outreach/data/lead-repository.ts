@@ -112,6 +112,105 @@ export async function createLead(data: CreateLeadInput): Promise<Lead> {
   }
 }
 
+/**
+ * Retry-safe create used after a provider identity has reserved a deterministic
+ * lead ID. Existing leads are returned unchanged; capture never overwrites a
+ * lead merely because the same source page was processed again.
+ */
+export async function createLeadWithIdIfMissing(
+  id: string,
+  data: CreateLeadInput,
+): Promise<{ lead: Lead; created: boolean }> {
+  const session = await getSession();
+
+  try {
+    const result = await session.run(
+      `
+      MERGE (l:Contact:Lead {id: $id})
+      ON CREATE SET
+        l.name = $name,
+        l.company = $company,
+        l.title = $title,
+        l.location = $location,
+        l.photoUrl = $photoUrl,
+        l.email = $email,
+        l.phone = $phone,
+        l.linkedinUrl = $linkedinUrl,
+        l.twitterUrl = $twitterUrl,
+        l.youtubeUrl = $youtubeUrl,
+        l.instagramUrl = $instagramUrl,
+        l.facebookUrl = $facebookUrl,
+        l.websiteUrl = $websiteUrl,
+        l.status = 'new',
+        l.source = $source,
+        l.sourceProvider = $sourceProvider,
+        l.nameWasDerived = $nameWasDerived,
+        l.priority = $priority,
+        l.tags = $tags,
+        l.customAttributes = $customAttributes,
+        l.revision = 1,
+        l.about = $about,
+        l.referredBy = $referredBy,
+        l.createdAt = localdatetime(),
+        l.updatedAt = localdatetime(),
+        l.lastContactedAt = null,
+        l.__captureCreated = true
+      WITH l, coalesce(l.__captureCreated, false) AS created
+      REMOVE l.__captureCreated
+      RETURN l, created
+      `,
+      {
+        id,
+        name: data.name,
+        company: data.company ?? null,
+        title: data.title ?? null,
+        location: data.location ?? null,
+        photoUrl: data.photoUrl ?? null,
+        email: data.email ?? null,
+        phone: data.phone ?? null,
+        linkedinUrl: data.linkedinUrl ?? null,
+        twitterUrl: data.twitterUrl ?? null,
+        youtubeUrl: data.youtubeUrl ?? null,
+        instagramUrl: data.instagramUrl ?? null,
+        facebookUrl: data.facebookUrl ?? null,
+        websiteUrl: data.websiteUrl ?? null,
+        source: data.source,
+        sourceProvider: data.sourceProvider ?? null,
+        nameWasDerived: data.nameWasDerived ?? false,
+        priority: data.priority ?? 'medium',
+        tags: data.tags ?? [],
+        customAttributes: JSON.stringify(data.customAttributes ?? {}),
+        about: data.about ?? null,
+        referredBy: data.referredBy ?? null,
+      },
+    );
+
+    const record = result.records[0];
+    if (!record) throw new Error('Lead capture projection could not be created.');
+    const lead = mapLeadFromNeo4j(record.get('l').properties);
+    const created = Boolean(record.get('created'));
+    if (created) {
+      const leadCreatedEvent = {
+        name: 'lead.created',
+        refs: { leadId: lead.id },
+        payload: {
+          source: lead.source,
+          name: lead.name,
+          company: lead.company ?? null,
+        },
+      } as const;
+      if (currentExecutionContext()?.eventOrigin === 'external_connector') {
+        await recordProductEventFromContext(leadCreatedEvent);
+      } else {
+        emitProductEventFromContext(leadCreatedEvent);
+      }
+    }
+    return { lead, created };
+  } finally {
+    await session.close();
+  }
+}
+
 export async function getLeads(filters?: LeadFilters): Promise<Lead[]> {
   const session = await getSession();
 
@@ -243,7 +342,10 @@ export async function getLeadById(id: string): Promise<Lead | null> {
   }
 }
 
-export async function getLeadByLinkedinUrl(linkedinUrl: string): Promise<Lead | null> {
+export async function getLeadByLinkedinUrl(
+  linkedinUrl: string,
+  source?: Lead['source'],
+): Promise<Lead | null> {
   const session = await getSession();
 
   try {
@@ -254,11 +356,12 @@ export async function getLeadByLinkedinUrl(linkedinUrl: string): Promise<Lead | 
       `
       MATCH (l:Lead)
       WHERE l.linkedinUrl IS NOT NULL
+        AND ($source IS NULL OR l.source = $source)
         AND replace(replace(split(l.linkedinUrl, '?')[0], '/', ''), '#', '') = replace(replace($url, '/', ''), '#', '')
       RETURN l
       LIMIT 1
       `,
-      { url: normalizedUrl }
+      { url: normalizedUrl, source: source ?? null }
     );
 
     if (result.records.length === 0) {

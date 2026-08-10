@@ -46,6 +46,7 @@ const runtimeGrantContracts = [
       ["public.external_api_rate_limit", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
       ["public.external_webhook_delivery", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
       ["public.external_webhook_endpoint", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
+      ["public.outreach_lead_source_identities", ["SELECT", "INSERT", "UPDATE"]],
     ],
   },
   {

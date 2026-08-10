@@ -1804,6 +1804,29 @@ export const funnel_routesInCascade = cascade.table("funnel_routes", {
 	check("funnel_routes_outcome_check", sql`outcome = ANY (ARRAY['completed'::text, 'interest'::text])`),
 ]).enableRLS();
 
+/** Provider-scoped identities that make Outreach lead capture duplicate-safe. */
+export const outreach_lead_source_identities = pgTable("outreach_lead_source_identities", {
+	organization_id: text().default(organizationIdDefault).notNull(),
+	provider: text().default('linkedin_sales_navigator').notNull(),
+	source_id: text().notNull(),
+	lead_id: text().notNull(),
+	linkedin_url: text(),
+	sales_navigator_url: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	last_seen_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.organization_id, table.provider, table.source_id], name: "outreach_lead_source_identities_pkey" }),
+	index("outreach_lead_source_identities_lead_idx").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast()),
+	foreignKey({
+		columns: [table.organization_id],
+		foreignColumns: [organization.id],
+		name: "outreach_lead_source_identities_organization_fk",
+	}).onDelete("cascade"),
+	pgPolicy("outreach_lead_source_identities_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+	check("outreach_lead_source_identities_provider_check", sql`provider = 'linkedin_sales_navigator'`),
+	check("outreach_lead_source_identities_source_id_check", sql`length(btrim(source_id)) > 0`),
+]).enableRLS();
+
 /** A meeting bot attached to one Outreach lead. */
 export const outreach_lead_meetings = pgTable("outreach_lead_meetings", {
 	id: uuid().defaultRandom().primaryKey().notNull(),

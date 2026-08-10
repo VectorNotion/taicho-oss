@@ -78,6 +78,7 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0015_register_call_recording_oauth_client",
       "0016_use_call_recording_loopback_oauth",
       "0017_drop_call_recording_backend",
+      "0018_add_outreach_lead_source_identities",
     ],
   );
 });
@@ -133,5 +134,19 @@ test("capability control-plane grants are migration-managed and column-restricte
   assert.match(migration, /GRANT SELECT \(/i);
   assert.match(migration, /GRANT SELECT \("expires_at"\), DELETE/i);
   assert.doesNotMatch(migration, /GRANT SELECT, INSERT, UPDATE, DELETE/i);
+  assert.doesNotMatch(migration, /BYPASSRLS|SUPERUSER/i);
+});
+
+test("Sales Navigator source identities are tenant-scoped and duplicate-safe", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0018_add_outreach_lead_source_identities.sql",
+    "utf8",
+  );
+  assert.match(migration, /PRIMARY KEY\("organization_id", "provider", "source_id"\)/);
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
+  assert.match(migration, /FORCE ROW LEVEL SECURITY/i);
+  assert.match(migration, /current_setting\('app\.organization_id'/);
+  assert.match(migration, /GRANT SELECT, INSERT, UPDATE/i);
+  assert.doesNotMatch(migration, /GRANT[^;]*DELETE/i);
   assert.doesNotMatch(migration, /BYPASSRLS|SUPERUSER/i);
 });
