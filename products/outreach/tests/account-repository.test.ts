@@ -11,10 +11,15 @@ import {
 import { createProspect } from '../data/prospect-repository';
 import {
   getAccountById,
+  getAccountCounts,
+  getAccountDetail,
   getAccountProspects,
+  getAccountsPage,
   normalizeCompanyName,
   resolveAccountForProspect,
 } from '../data/account-repository';
+import { saveProspectQualification } from '../data/qualification-repository';
+import type { ProspectQualificationResult } from '../domain/qualification';
 
 const ORGANIZATION_ID = `outreach-account-test-organization-${process.pid}`;
 
@@ -84,4 +89,66 @@ test('resolving repeatedly is idempotent (one BELONGS_TO edge)', async () => {
   } finally {
     await session.close();
   }
+});
+
+function qualification(partial: Partial<ProspectQualificationResult>): ProspectQualificationResult {
+  return {
+    status: 'QUALIFIED', icpScore: 90, personaScore: 80, timingScore: 40,
+    icpMatches: [], personaMatches: [], timingBreakdown: [],
+    computedAt: '2026-08-10T00:00:00.000Z', ...partial,
+  };
+}
+
+test('account rollup: list, counts and detail reflect prospects and qualifications', async () => {
+  await clearGraph();
+  // Target account with a qualified prospect + an unqualified one.
+  const hot = await createProspect({ name: 'Hot Lead', company: 'Northstar', title: 'COO', source: 'manual' });
+  const cold = await createProspect({ name: 'Cold Lead', company: 'Northstar', source: 'manual' });
+  const northstar = await resolveAccountForProspect(hot);
+  await resolveAccountForProspect(cold);
+  assert.ok(northstar);
+  await saveProspectQualification(hot.id, qualification({ icpScore: 82, personaScore: 91, timingScore: 60, status: 'QUALIFIED' }));
+
+  // A second account with no qualification at all.
+  const other = await createProspect({ name: 'Nobody', company: 'Quietco', source: 'manual' });
+  await resolveAccountForProspect(other);
+
+  const counts = await getAccountCounts();
+  assert.equal(counts.total, 2);
+  assert.equal(counts.targets, 1, 'Northstar ICP 82 ≥ 70');
+  assert.equal(counts.qualified, 1);
+  assert.equal(counts.warm, 1, 'Northstar timing 60 > 0');
+
+  const page = await getAccountsPage({}, { page: 1, pageSize: 10 });
+  assert.equal(page.total, 2);
+  const northstarRow = page.accounts.find((a) => a.name === 'Northstar');
+  assert.ok(northstarRow);
+  assert.equal(northstarRow.prospectCount, 2);
+  assert.equal(northstarRow.qualifiedCount, 1);
+  assert.equal(northstarRow.icpScore, 82);
+  assert.equal(northstarRow.isTarget, true);
+  const quietRow = page.accounts.find((a) => a.name === 'Quietco');
+  assert.equal(quietRow?.icpScore, null, 'no qualification → null score');
+  assert.equal(quietRow?.isTarget, false);
+
+  // Segment filters.
+  assert.equal((await getAccountsPage({ segment: 'targets' }, { page: 1, pageSize: 10 })).total, 1);
+  assert.equal((await getAccountsPage({ segment: 'qualified' }, { page: 1, pageSize: 10 })).total, 1);
+  assert.deepEqual(
+    (await getAccountsPage({ search: 'quiet' }, { page: 1, pageSize: 10 })).accounts.map((a) => a.name),
+    ['Quietco'],
+  );
+
+  const detail = await getAccountDetail(northstar.id);
+  assert.ok(detail);
+  assert.equal(detail.name, 'Northstar');
+  assert.equal(detail.icpScore, 82);
+  assert.equal(detail.timingScore, 60);
+  assert.equal(detail.prospects.length, 2);
+  const hotRow = detail.prospects.find((p) => p.id === hot.id);
+  assert.equal(hotRow?.personaScore, 91);
+  assert.equal(hotRow?.qualificationStatus, 'QUALIFIED');
+  const coldRow = detail.prospects.find((p) => p.id === cold.id);
+  assert.equal(coldRow?.personaScore, null);
+  assert.equal(coldRow?.qualificationStatus, null);
 });

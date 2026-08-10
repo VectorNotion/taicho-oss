@@ -8,6 +8,7 @@ import {
   getProspectsPage,
   createProspect,
 } from "@/products/outreach/data/prospect-repository";
+import { resolveAccountForProspect } from "@/products/outreach/data/account-repository";
 import type { ProspectFilters } from "@/products/outreach/domain/types";
 import { runProspectResearchAsync, buildResearchInput } from "@/products/outreach/agent/prospect-research";
 
@@ -106,6 +107,12 @@ export async function POST(request: NextRequest) {
     }
     const { triggerResearch, ...input } = parsed.data;
     const prospect = await createProspect(input);
+    // Link the prospect to its company Account immediately so it appears on the
+    // account page without waiting for qualification (which also MERGEs the same
+    // account idempotently). No-op when the prospect has no company.
+    if (prospect.company) {
+      await resolveAccountForProspect({ id: prospect.id, company: prospect.company });
+    }
     if (triggerResearch) {
       runProspectResearchAsync(buildResearchInput(prospect));
     }

@@ -1,15 +1,15 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Building2, Target, User } from "lucide-react";
+import { ArrowLeft, Building2, Target } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScoreRing } from "@/components/genui";
-import { ListRow, ListRows } from "@/components/ListRow";
 import { PageHeader } from "@/components/PageHeader";
+import { AccountProspectsSection } from "@/components/prospects/AccountProspectsSection";
 
 type DimensionMatch = {
   dimensionKey: string;
@@ -37,14 +37,6 @@ type AccountDetail = {
   icpMatches: DimensionMatch[];
   timingBreakdown: TimingBreakdown[];
   prospects: AccountProspect[];
-};
-
-const QUALIFICATION_BADGE: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
-  QUALIFIED: { label: "Qualified", variant: "default" },
-  CONTACT_DISCOVERY_REQUIRED: { label: "Find another contact", variant: "outline" },
-  REVIEW: { label: "Needs review", variant: "secondary" },
-  HARD_EXCLUDED: { label: "Hard excluded", variant: "destructive" },
-  UNQUALIFIED: { label: "Unqualified", variant: "secondary" },
 };
 
 function formatDimensionKey(key: string): string {
@@ -91,34 +83,30 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    void fetch(`/api/outreach/accounts/${id}`)
-      .then(async (response) => {
+  const loadAccount = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!options?.silent) setLoading(true);
+      try {
+        const response = await fetch(`/api/outreach/accounts/${id}`);
         if (response.status === 404) {
-          if (!cancelled) setNotFound(true);
-          return null;
+          setNotFound(true);
+          return;
         }
         if (!response.ok) throw new Error("Failed to fetch account");
-        return response.json();
-      })
-      .then((data) => {
-        if (cancelled || !data) return;
-        setAccount(data);
-      })
-      .catch((error) => {
-        if (cancelled) return;
+        setAccount(await response.json());
+      } catch (error) {
         console.error("Error fetching account:", error);
         toast.error("Could not load this account — refresh to try again.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+      } finally {
+        if (!options?.silent) setLoading(false);
+      }
+    },
+    [id],
+  );
+
+  useEffect(() => {
+    void loadAccount();
+  }, [loadAccount]);
 
   if (loading) return <AccountDetailSkeleton />;
 
@@ -214,47 +202,12 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         </Card>
       </div>
 
-      <Card className="py-0">
-        <CardContent className="p-0">
-          <div className="border-b px-6 py-4">
-            <h2 className="text-sm font-medium">
-              Prospects ({account.prospects.length})
-            </h2>
-            <p className="text-sm text-muted-foreground">People found at this account.</p>
-          </div>
-          {account.prospects.length > 0 ? (
-            <ListRows>
-              {account.prospects.map((prospect) => {
-                const qualification = prospect.qualificationStatus
-                  ? QUALIFICATION_BADGE[prospect.qualificationStatus]
-                  : null;
-                return (
-                  <ListRow
-                    badge={qualification ? <Badge variant={qualification.variant}>{qualification.label}</Badge> : undefined}
-                    href={`/outreach/prospects/${prospect.id}`}
-                    key={prospect.id}
-                    leading={
-                      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-                        <User className="size-4" />
-                      </span>
-                    }
-                    meta={[
-                      prospect.title || "Prospect",
-                      `Persona ${prospect.personaScore == null ? "not scored" : Math.round(prospect.personaScore)}`,
-                    ]}
-                    title={prospect.name}
-                  />
-                );
-              })}
-            </ListRows>
-          ) : (
-            <div className="grid justify-items-center gap-3 px-6 py-12 text-center">
-              <User className="size-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No prospects at this account yet.</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <AccountProspectsSection
+        accountId={account.id}
+        accountName={account.name}
+        onRefresh={() => void loadAccount({ silent: true })}
+        prospects={account.prospects}
+      />
     </div>
   );
 }
