@@ -2,9 +2,9 @@ import { getSession } from "@content-automation/platform/data/graph";
 import type { AccountRecord } from "../domain/qualification";
 
 /**
- * Account resolution (spec §2, §3): an Account is the company behind a lead.
+ * Account resolution (spec §2, §3): an Account is the company behind a prospect.
  * Accounts are MERGEd per organization graph on the normalized company name so
- * every lead from the same company lands on the same Account node.
+ * every prospect from the same company lands on the same Account node.
  */
 
 export function normalizeCompanyName(name: string): string {
@@ -21,14 +21,14 @@ function mapAccount(props: Record<string, unknown>): AccountRecord {
 }
 
 /**
- * MERGE the lead's company as an :Account and attach the lead via BELONGS_TO.
- * Returns null when the lead has no company (spec §3 — no account resolution).
+ * MERGE the prospect's company as an :Account and attach the prospect via BELONGS_TO.
+ * Returns null when the prospect has no company (spec §3 — no account resolution).
  */
-export async function resolveAccountForLead(lead: {
+export async function resolveAccountForProspect(prospect: {
   id: string;
   company?: string;
 }): Promise<AccountRecord | null> {
-  const company = lead.company?.trim();
+  const company = prospect.company?.trim();
   if (!company) return null;
 
   const session = await getSession();
@@ -40,14 +40,14 @@ export async function resolveAccountForLead(lead: {
                     a.name = $name,
                     a.createdAt = localdatetime()
       WITH a
-      MATCH (l:Lead {id: $leadId})
+      MATCH (l:Prospect {id: $prospectId})
       MERGE (l)-[:BELONGS_TO]->(a)
       RETURN a
       `,
-      { normalizedName: normalizeCompanyName(company), name: company, leadId: lead.id }
+      { normalizedName: normalizeCompanyName(company), name: company, prospectId: prospect.id }
     );
     if (result.records.length === 0) {
-      // Lead node missing (pure-account contexts): MERGE the account alone.
+      // Prospect node missing (pure-account contexts): MERGE the account alone.
       const fallback = await session.run(
         `
         MERGE (a:Account {normalizedName: $normalizedName})
@@ -77,12 +77,12 @@ export async function getAccountById(id: string): Promise<AccountRecord | null> 
   }
 }
 
-/** Ids of every lead attached to the account (contact discovery, spec §10). */
-export async function getAccountLeads(accountId: string): Promise<string[]> {
+/** Ids of every prospect attached to the account (contact discovery, spec §10). */
+export async function getAccountProspects(accountId: string): Promise<string[]> {
   const session = await getSession();
   try {
     const result = await session.run(
-      `MATCH (l:Lead)-[:BELONGS_TO]->(a:Account {id: $accountId}) RETURN l.id AS id`,
+      `MATCH (l:Prospect)-[:BELONGS_TO]->(a:Account {id: $accountId}) RETURN l.id AS id`,
       { accountId }
     );
     return result.records.map((record) => record.get("id") as string);

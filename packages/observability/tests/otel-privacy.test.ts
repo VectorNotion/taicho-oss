@@ -61,7 +61,7 @@ function span(attributes: Attributes): ReadableSpan {
 
 test("OTel export filtering removes automatic payload and error attributes", () => {
   const safe = privacySafeReadableSpan(span({
-    lead_id: "lead-private",
+    prospect_id: "prospect-private",
     "cascade.contact.id": "contact-private",
     "job.id": "job-1",
   }));
@@ -69,7 +69,7 @@ test("OTel export filtering removes automatic payload and error attributes", () 
   assert.deepEqual(safe.status, { code: SpanStatusCode.ERROR });
   assert.equal(safe.attributes["http.response.status_code"], 500);
   assert.equal(safe.attributes["taicho.execution.id"], "execution-1");
-  assert.match(safe.attributes.lead_id as string, /^entity_/);
+  assert.match(safe.attributes.prospect_id as string, /^entity_/);
   assert.match(safe.attributes["cascade.contact.id"] as string, /^entity_/);
   assert.equal(safe.attributes["job.id"], "job-1");
   assert.equal(safe.attributes["url.full"], undefined);
@@ -78,7 +78,7 @@ test("OTel export filtering removes automatic payload and error attributes", () 
   assert.equal(safe.attributes["ai.prompt"], undefined);
   assert.deepEqual(safe.events[0].attributes, { "exception.type": "Error" });
   assert.doesNotMatch(JSON.stringify(safe), /customer@example|password=|SELECT \*/);
-  assert.doesNotMatch(JSON.stringify(safe), /lead-private|contact-private/);
+  assert.doesNotMatch(JSON.stringify(safe), /prospect-private|contact-private/);
 });
 
 test("privacy exporter always sanitizes before delegating", async () => {

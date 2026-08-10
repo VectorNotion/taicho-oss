@@ -21,7 +21,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm'
-import type { ChatSurface, Citation, LeadState } from './contracts'
+import type { ChatSurface, Citation, ProspectState } from './contracts'
 
 export type ConversationActor = {
   tenantId: string
@@ -36,7 +36,7 @@ export type ConversationActor = {
 export type ConversationRecord = ConversationActor & {
   id: string
   status: 'open' | 'escalated' | 'resolved' | 'closed'
-  leadState: LeadState
+  prospectState: ProspectState
   failedAnswerCount: number
   metadata: Record<string, unknown>
 }
@@ -63,7 +63,7 @@ export type KnowledgeDocument = Citation & {
 
 export type ConversationSummary = {
   conversationId: string
-  leadState: LeadState
+  prospectState: ProspectState
   summary?: string
   updatedAt: string
 }
@@ -73,7 +73,7 @@ export interface AssistantRepository {
   findMessage(conversationId: string, requestId: string, role: StoredMessage['role']): Promise<StoredMessage | null>
   appendMessage(input: Omit<StoredMessage, 'id' | 'createdAt'>): Promise<StoredMessage>
   listMessages(conversationId: string, limit?: number): Promise<StoredMessage[]>
-  updateLeadState(conversationId: string, leadState: LeadState, metadata?: Record<string, unknown>): Promise<void>
+  updateProspectState(conversationId: string, prospectState: ProspectState, metadata?: Record<string, unknown>): Promise<void>
   incrementFailedAnswers(conversationId: string): Promise<number>
   resetFailedAnswers(conversationId: string): Promise<void>
   recordSupportFeedback(
@@ -107,7 +107,7 @@ type ConversationRow = {
   account_id: string | null
   user_id: string | null
   status: ConversationRecord['status']
-  lead_state: LeadState
+  prospect_state: ProspectState
   failed_answer_count: number
   metadata: Record<string, unknown>
 }
@@ -134,7 +134,7 @@ function conversationFromRow(row: ConversationRow): ConversationRecord {
     siteId: typeof row.metadata.siteId === 'string' ? row.metadata.siteId : undefined,
     botId: typeof row.metadata.botId === 'string' ? row.metadata.botId : undefined,
     status: row.status,
-    leadState: row.lead_state,
+    prospectState: row.prospect_state,
     failedAnswerCount: row.failed_answer_count,
     metadata: row.metadata,
   }
@@ -299,11 +299,11 @@ export class PostgresAssistantRepository implements AssistantRepository {
     return rows.map((row) => messageFromRow(row as MessageRow))
   }
 
-  async updateLeadState(conversationId: string, leadState: LeadState, metadata: Record<string, unknown> = {}): Promise<void> {
+  async updateProspectState(conversationId: string, prospectState: ProspectState, metadata: Record<string, unknown> = {}): Promise<void> {
     await this.db
       .update(conversationsTable)
       .set({
-        lead_state: leadState,
+        prospect_state: prospectState,
         metadata: sql`${conversationsTable.metadata} || ${metadata}`,
         updated_at: new Date().toISOString(),
       })
@@ -514,7 +514,7 @@ export class PostgresAssistantRepository implements AssistantRepository {
     const rows = await this.db
       .select({
         id: conversationsTable.id,
-        leadState: conversationsTable.lead_state,
+        prospectState: conversationsTable.prospect_state,
         summary: sql<string | null>`${conversationsTable.metadata}->>'salesSummary'`,
         updatedAt: conversationsTable.updated_at,
       })
@@ -531,7 +531,7 @@ export class PostgresAssistantRepository implements AssistantRepository {
       .limit(Math.max(1, Math.min(limit, 10)))
     return rows.map((row) => ({
       conversationId: row.id,
-      leadState: row.leadState as LeadState,
+      prospectState: row.prospectState as ProspectState,
       summary: row.summary ?? undefined,
       updatedAt: row.updatedAt,
     }))
@@ -671,7 +671,7 @@ export class InMemoryAssistantRepository implements AssistantRepository {
       ...actor,
       id: crypto.randomUUID(),
       status: 'open',
-      leadState: { consent: false },
+      prospectState: { consent: false },
       failedAnswerCount: 0,
       metadata: {
         ...(actor.siteId ? { siteId: actor.siteId } : {}),
@@ -700,9 +700,9 @@ export class InMemoryAssistantRepository implements AssistantRepository {
     return structuredClone(this.messages.filter((message) => message.conversationId === conversationId).slice(-limit))
   }
 
-  async updateLeadState(conversationId: string, leadState: LeadState, metadata: Record<string, unknown> = {}): Promise<void> {
+  async updateProspectState(conversationId: string, prospectState: ProspectState, metadata: Record<string, unknown> = {}): Promise<void> {
     const conversation = this.requireConversation(conversationId)
-    conversation.leadState = structuredClone(leadState)
+    conversation.prospectState = structuredClone(prospectState)
     conversation.metadata = { ...conversation.metadata, ...structuredClone(metadata) }
   }
 
@@ -774,7 +774,7 @@ export class InMemoryAssistantRepository implements AssistantRepository {
       .slice(-limit)
       .map((conversation) => ({
         conversationId: conversation.id,
-        leadState: structuredClone(conversation.leadState),
+        prospectState: structuredClone(conversation.prospectState),
         summary: typeof conversation.metadata.salesSummary === 'string' ? conversation.metadata.salesSummary : undefined,
         updatedAt: new Date().toISOString(),
       }))

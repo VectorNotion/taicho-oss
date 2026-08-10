@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BrainSearchResult } from '../types';
 import { TYPE_COLOR } from '../palette';
 
-/** Parse "+ Name[, Title][ @ Company]" → lead fields. */
-export function parseAddLead(input: string): { name: string; title?: string; company?: string } | null {
+/** Parse "+ Name[, Title][ @ Company]" → prospect fields. */
+export function parseAddProspect(input: string): { name: string; title?: string; company?: string } | null {
   const m = input.replace(/^\+\s*/, '').trim();
   if (!m) return null;
   const [beforeAt, company] = m.split('@').map((s) => s.trim());
@@ -14,9 +14,9 @@ export function parseAddLead(input: string): { name: string; title?: string; com
   return { name, title: title || undefined, company: company || undefined };
 }
 
-export function CommandBar({ onPick, onLeadAdded }: {
+export function CommandBar({ onPick, onProspectAdded }: {
   onPick: (id: string) => void;
-  onLeadAdded: (id: string) => void;
+  onProspectAdded: (id: string) => void;
 }) {
   const [openBar, setOpenBar] = useState(false);
   const [q, setQ] = useState('');
@@ -48,21 +48,21 @@ export function CommandBar({ onPick, onLeadAdded }: {
   }, [q, isAdd]);
 
   const submitAdd = useCallback(async () => {
-    const lead = parseAddLead(q);
-    if (!lead) return;
+    const prospect = parseAddProspect(q);
+    if (!prospect) return;
     setBusy(true);
     try {
-      // Contract: apps/outreach/app/api/outreach/leads/route.ts POST —
-      // requires name + source; returns the lead object spread ({...lead, existed}).
-      const res = await fetch('/api/outreach/leads', {
+      // Contract: apps/outreach/app/api/outreach/prospects/route.ts POST —
+      // requires name + source; returns the prospect object spread ({...prospect, existed}).
+      const res = await fetch('/api/outreach/prospects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...lead, source: 'manual', triggerResearch: true }),
+        body: JSON.stringify({ ...prospect, source: 'manual', triggerResearch: true }),
       });
       const data = await res.json();
-      if (data?.id) { onLeadAdded(String(data.id)); setOpenBar(false); setQ(''); }
+      if (data?.id) { onProspectAdded(String(data.id)); setOpenBar(false); setQ(''); }
     } finally { setBusy(false); }
-  }, [q, onLeadAdded]);
+  }, [q, onProspectAdded]);
 
   if (!openBar) {
     return (
@@ -70,7 +70,7 @@ export function CommandBar({ onPick, onLeadAdded }: {
         onClick={() => { setOpenBar(true); setTimeout(() => inputRef.current?.focus(), 0); }}
         className="absolute left-1/2 top-4 -translate-x-1/2 rounded-lg border border-border/50 bg-background/80 px-4 py-1.5 text-xs text-muted-foreground backdrop-blur hover:text-foreground"
       >
-        ⌘K — find anything · “+ name” to add a lead
+        ⌘K — find anything · “+ name” to add a prospect
       </button>
     );
   }
@@ -93,7 +93,7 @@ export function CommandBar({ onPick, onLeadAdded }: {
       {isAdd && (
         <div className="px-2 py-1.5 text-xs text-muted-foreground">
           {busy ? 'adding — the brain will research them…' : (() => {
-            const p = parseAddLead(q);
+            const p = parseAddProspect(q);
             return p ? `↵ add ${p.name}${p.title ? `, ${p.title}` : ''}${p.company ? ` @ ${p.company}` : ''}` : 'type a name';
           })()}
         </div>

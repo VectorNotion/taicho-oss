@@ -31,11 +31,11 @@ test('Postgres repository enforces tenant ownership, retrieval, identity links, 
     subjectId: 'anonymous:1234567890abcdef',
   }
   const conversation = await repositoryA.ensureConversation(salesActor)
-  await repositoryA.updateLeadState(conversation.id, {
+  await repositoryA.updateProspectState(conversation.id, {
     consent: true,
     company: 'Acme',
-    useCase: 'Create leads through the API',
-  }, { salesSummary: 'Acme asked about creating leads through the API.' })
+    useCase: 'Create prospects through the API',
+  }, { salesSummary: 'Acme asked about creating prospects through the API.' })
   await repositoryA.linkIdentity(
     salesActor.subjectId,
     'user:user-1',
@@ -71,7 +71,7 @@ test('Postgres repository enforces tenant ownership, retrieval, identity links, 
   )
   const linked = await repositoryA.salesContextFor('user:user-1')
   assert.equal(linked.length, 1)
-  assert.equal(linked[0].leadState.company, 'Acme')
+  assert.equal(linked[0].prospectState.company, 'Acme')
 
   const scopedConversation = await repositoryA.ensureConversation({
     ...salesActor,
@@ -88,18 +88,18 @@ test('Postgres repository enforces tenant ownership, retrieval, identity links, 
   )
 
   const document: KnowledgeDocument = {
-    sourceId: 'docs:api#leads',
-    title: 'Create leads',
-    url: 'https://docs.taicho.ai/api#create-a-lead',
-    heading: 'Create a lead through the API',
-    content: 'Send a validated lead payload to the REST API or use the MCP lead tool.',
+    sourceId: 'docs:api#prospects',
+    title: 'Create prospects',
+    url: 'https://docs.taicho.ai/api#create-a-prospect',
+    heading: 'Create a prospect through the API',
+    content: 'Send a validated prospect payload to the REST API or use the MCP prospect tool.',
     contentHash: '0123456789abcdef',
     kind: 'docs',
   }
   await repositoryA.replaceKnowledge('docs', [document])
-  const results = await repositoryA.searchKnowledge('create lead API payload', 'docs')
+  const results = await repositoryA.searchKnowledge('create prospect API payload', 'docs')
   assert.equal(results[0]?.sourceId, document.sourceId)
-  assert.equal(await repositoryB.searchKnowledge('create lead API payload', 'docs').then((rows) => rows.length), 0)
+  assert.equal(await repositoryB.searchKnowledge('create prospect API payload', 'docs').then((rows) => rows.length), 0)
   await repositoryA.replaceKnowledge('sales_fact', [{
     ...document,
     sourceId: 'taicho:pricing:pro',

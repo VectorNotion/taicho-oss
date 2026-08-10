@@ -50,16 +50,16 @@ test('sales and support are isolated policy surfaces over one repository', async
   const repository = new InMemoryAssistantRepository(tenantId)
   await repository.replaceKnowledge('sales_fact', [document()])
   await repository.replaceKnowledge('docs', [document({
-    sourceId: 'api#leads',
-    title: 'Lead API',
+    sourceId: 'api#prospects',
+    title: 'Prospect API',
     url: 'https://docs.taicho.ai/api',
-    content: 'Create leads through the REST API or MCP tools.',
+    content: 'Create prospects through the REST API or MCP tools.',
     contentHash: 'hash-2',
     kind: 'docs',
     pagePath: undefined,
   })])
   const model = new StubAssistantModel(({ system }) => (
-    system.includes('public sales') ? 'The Team plan supports shared workspaces.' : 'Use the lead API. [S1]'
+    system.includes('public sales') ? 'The Team plan supports shared workspaces.' : 'Use the prospect API. [S1]'
   ))
   const service = new AssistantService(repository, model, new InMemoryAssistantOperations(), {
     brandName: 'Taicho',
@@ -67,7 +67,7 @@ test('sales and support are isolated policy surfaces over one repository', async
   })
 
   const salesEvents = await service.chat(request('sales', 'Does the team plan support workspaces?'), actor('sales'))
-  const supportEvents = await service.chat(request('support', 'How do I create a lead?'), actor('support'))
+  const supportEvents = await service.chat(request('support', 'How do I create a prospect?'), actor('support'))
   assert.equal(salesEvents.some(({ event }) => event === 'citation.added'), false)
   assert.equal(supportEvents.some(({ event }) => event === 'citation.added'), true)
   assert.match(model.requests[0].system, /approved facts/i)
@@ -156,7 +156,7 @@ test('sales retrieval uses the signed Payload tenant, site, and bot scope', asyn
   )
 })
 
-test('sales lead creation requires explicit consent and an email', async () => {
+test('sales prospect creation requires explicit consent and an email', async () => {
   const repository = new InMemoryAssistantRepository(tenantId)
   await repository.replaceKnowledge('sales_fact', [document()])
   const operations = new InMemoryAssistantOperations()
@@ -168,14 +168,14 @@ test('sales lead creation requires explicit consent and an email', async () => {
   )
   const first = await service.chat(request('sales', 'My email is buyer@example.com'), actor('sales'))
   const conversationId = first[0].conversationId
-  assert.equal(operations.leads.length, 0)
+  assert.equal(operations.prospects.length, 0)
 
   const second = await service.chat(
     request('sales', 'Yes, please contact me', conversationId),
     actor('sales'),
   )
-  assert.equal(operations.leads.length, 1)
-  assert.equal(second.some(({ event, data }) => event === 'lead.state.updated' && data.submitted === true), true)
+  assert.equal(operations.prospects.length, 1)
+  assert.equal(second.some(({ event, data }) => event === 'prospect.state.updated' && data.submitted === true), true)
 })
 
 test('sales does not treat an explicit contact refusal as consent', async () => {
@@ -194,7 +194,7 @@ test('sales does not treat an explicit contact refusal as consent', async () => 
     actor('sales'),
   )
 
-  assert.equal(operations.leads.length, 0)
+  assert.equal(operations.prospects.length, 0)
 })
 
 test('sales routes account support requests to the signed support URL without invoking the model', async () => {
@@ -268,24 +268,24 @@ test('authenticated support receives only explicitly linked sales context', asyn
   const repository = new InMemoryAssistantRepository(tenantId)
   await repository.replaceKnowledge('sales_fact', [document()])
   await repository.replaceKnowledge('docs', [document({
-    sourceId: 'api#leads',
-    title: 'Lead API',
+    sourceId: 'api#prospects',
+    title: 'Prospect API',
     url: 'https://docs.taicho.ai/api',
-    content: 'Create leads through the REST API or MCP tools.',
+    content: 'Create prospects through the REST API or MCP tools.',
     contentHash: 'hash-2',
     kind: 'docs',
     pagePath: undefined,
   })])
-  const model = new StubAssistantModel('Use the lead API. [S1]')
+  const model = new StubAssistantModel('Use the prospect API. [S1]')
   const service = new AssistantService(repository, model, new InMemoryAssistantOperations(), { brandName: 'Taicho' })
   const sales = await service.chat(
-    request('sales', 'Company: Acme\nUse case: create leads through the API'),
+    request('sales', 'Company: Acme\nUse case: create prospects through the API'),
     actor('sales'),
   )
   const anonymous = actor('sales').subjectId
   const authenticated = actor('support').subjectId
   await repository.linkIdentity(anonymous, authenticated, 'authenticated_session')
-  await service.chat(request('support', 'How do I create a lead?'), actor('support'))
+  await service.chat(request('support', 'How do I create a prospect?'), actor('support'))
   assert.match(model.requests.at(-1)?.system ?? '', /Company: Acme/)
   assert.doesNotMatch(model.requests.at(-1)?.system ?? '', /buyer@example\.com/)
   assert.ok(sales[0].conversationId)
@@ -294,18 +294,18 @@ test('authenticated support receives only explicitly linked sales context', asyn
 test('product questions containing the verb support do not trigger human handoff', async () => {
   const repository = new InMemoryAssistantRepository(tenantId)
   await repository.replaceKnowledge('docs', [document({
-    sourceId: 'api#leads',
-    title: 'Lead API',
+    sourceId: 'api#prospects',
+    title: 'Prospect API',
     url: 'https://docs.taicho.ai/api',
-    content: 'The lead API supports validated JSON payloads.',
+    content: 'The prospect API supports validated JSON payloads.',
     contentHash: 'hash-2',
     kind: 'docs',
     pagePath: undefined,
   })])
-  const model = new StubAssistantModel('The lead API supports JSON payloads. [S1]')
+  const model = new StubAssistantModel('The prospect API supports JSON payloads. [S1]')
   const service = new AssistantService(repository, model, null, { brandName: 'Taicho' })
   const events = await service.chat(
-    request('support', 'Does the lead API support JSON?'),
+    request('support', 'Does the prospect API support JSON?'),
     actor('support'),
   )
   assert.equal(events.some(({ event }) => event === 'support.escalation.offered'), false)
@@ -317,9 +317,9 @@ test('support fuses semantic and lexical documentation without crossing the tena
   await repository.replaceKnowledge('docs', [
     document({
       sourceId: 'api#lexical',
-      title: 'Lead API troubleshooting',
+      title: 'Prospect API troubleshooting',
       url: 'https://docs.taicho.ai/api',
-      content: 'Resolve a lead payload validation error.',
+      content: 'Resolve a prospect payload validation error.',
       contentHash: 'hash-lexical',
       kind: 'docs',
       pagePath: undefined,
@@ -332,9 +332,9 @@ test('support fuses semantic and lexical documentation without crossing the tena
       return [
         document({
           sourceId: 'api#semantic',
-          title: 'Lead fields',
-          url: 'https://docs.taicho.ai/api/leads',
-          content: 'Send supported lead fields in the request body.',
+          title: 'Prospect fields',
+          url: 'https://docs.taicho.ai/api/prospects',
+          content: 'Send supported prospect fields in the request body.',
           contentHash: 'hash-semantic',
           kind: 'docs',
           pagePath: undefined,
@@ -353,13 +353,13 @@ test('support fuses semantic and lexical documentation without crossing the tena
   )
 
   const events = await service.chat(
-    request('support', 'How do I resolve a lead payload validation error?'),
+    request('support', 'How do I resolve a prospect payload validation error?'),
     actor('support'),
   )
 
   assert.deepEqual(semanticScopes, [tenantId])
-  assert.match(model.requests[0].system, /Lead fields/)
-  assert.match(model.requests[0].system, /Lead API troubleshooting/)
+  assert.match(model.requests[0].system, /Prospect fields/)
+  assert.match(model.requests[0].system, /Prospect API troubleshooting/)
   assert.equal(events.filter(({ event }) => event === 'citation.added').length, 2)
   assert.equal(events.some(({ event, data }) => (
     event === 'activity.updated' &&
@@ -462,7 +462,7 @@ test('conversation history is restored only for the owning actor and surface', a
 
   assert.equal(history.surface, 'sales')
   assert.deepEqual(history.messages.map(({ role }) => role), ['user', 'assistant'])
-  assert.deepEqual(history.leadState, { consent: false })
+  assert.deepEqual(history.prospectState, { consent: false })
   await assert.rejects(
     service.history(conversationId, { ...salesActor, subjectId: 'anonymous:different-user' }),
     /Conversation not found/,

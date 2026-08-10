@@ -26,7 +26,7 @@ export function contactFromRow(row: {
   attributes: unknown;
   subscription_status: string;
   workspace_contact_id: string | null;
-  outreach_lead_id: string | null;
+  outreach_prospect_id: string | null;
 }): Contact {
   return {
     id: row.id,
@@ -35,7 +35,7 @@ export function contactFromRow(row: {
     attributes: (row.attributes ?? {}) as Record<string, unknown>,
     subscriptionStatus: row.subscription_status as Contact["subscriptionStatus"],
     workspaceContactId: row.workspace_contact_id,
-    outreachLeadId: row.outreach_lead_id,
+    outreachProspectId: row.outreach_prospect_id,
   };
 }
 

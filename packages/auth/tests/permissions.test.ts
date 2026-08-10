@@ -28,9 +28,9 @@ test("administration access distinguishes organization and team scope", () => {
 });
 
 test("API methods resolve to explicit permissions", () => {
-  assert.deepEqual(permissionForRequest("/api/outreach/leads", "GET"), { product: "outreach", action: "read" });
-  assert.deepEqual(permissionForRequest("/api/outreach/leads/1/research", "POST"), { product: "outreach", action: "research" });
-  assert.deepEqual(permissionForRequest("/api/outreach/leads/1", "DELETE"), { product: "outreach", action: "delete" });
+  assert.deepEqual(permissionForRequest("/api/outreach/prospects", "GET"), { product: "outreach", action: "read" });
+  assert.deepEqual(permissionForRequest("/api/outreach/prospects/1/research", "POST"), { product: "outreach", action: "research" });
+  assert.deepEqual(permissionForRequest("/api/outreach/prospects/1", "DELETE"), { product: "outreach", action: "delete" });
   assert.deepEqual(permissionForRequest("/api/content/generate-ideas", "POST"), { product: "content", action: "generate" });
   assert.deepEqual(permissionForRequest("/api/content/drafts/1", "PATCH"), { product: "content", action: "update" });
   assert.deepEqual(permissionForRequest("/api/cascade/funnels/1/members", "POST"), { product: "cascade", action: "create" });

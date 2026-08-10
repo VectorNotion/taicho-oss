@@ -11,7 +11,7 @@ import { useState } from "react";
 import { parseToolResult, OutreachResult } from "./types";
 
 interface OutreachArgs {
-  lead_name: string;
+  prospect_name: string;
   company: string;
   context?: string;
 }
@@ -49,7 +49,7 @@ function OutreachRenderer({ args, result, status }: OutreachRendererProps) {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <MessageSquare className="h-4 w-4 animate-pulse" />
-              Drafting outreach for {args.lead_name}
+              Drafting outreach for {args.prospect_name}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -86,11 +86,11 @@ function OutreachRenderer({ args, result, status }: OutreachRendererProps) {
           <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
               <User className="h-3 w-3" />
-              {data.lead.name}
+              {data.prospect.name}
             </span>
             <span className="flex items-center gap-1">
               <Building className="h-3 w-3" />
-              {data.lead.company}
+              {data.prospect.company}
             </span>
           </div>
         </CardHeader>

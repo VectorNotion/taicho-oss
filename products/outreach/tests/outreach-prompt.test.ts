@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildOutreachPrompt } from '../agent/generator';
 import type {
-  Lead,
-  LeadActivity,
-  LeadNote,
-  LeadResearch,
+  Prospect,
+  ProspectActivity,
+  ProspectNote,
+  ProspectResearch,
   OutreachMessage,
 } from '../domain/types';
 
-const lead: Lead = {
-  id: 'lead-1',
+const prospect: Prospect = {
+  id: 'prospect-1',
   name: 'Ada Lovelace',
   company: 'Analytical Engines',
   title: 'Founder',
@@ -24,12 +24,12 @@ const lead: Lead = {
   updatedAt: '2026-08-08T10:00:00.000Z',
 };
 
-const research: LeadResearch = {
-  leadId: lead.id,
+const research: ProspectResearch = {
+  prospectId: prospect.id,
   industry: 'Software',
   companySummary: 'Develops analytical systems.',
   talkingPoints: ['Operational reliability'],
-  outreachAngle: 'Lead with dependable automation.',
+  outreachAngle: 'Prospect with dependable automation.',
   companyInsights: [{
     id: 'insight-1',
     category: 'ai_initiatives',
@@ -41,15 +41,15 @@ const research: LeadResearch = {
   updatedAt: '2026-08-08T10:00:00.000Z',
 };
 
-const notes: LeadNote[] = [{
+const notes: ProspectNote[] = [{
   id: 'note-1',
   content: '<p>Ada asked about a September pilot.</p>',
   createdAt: '2026-08-08T11:00:00.000Z',
 }];
 
-const activities: LeadActivity[] = [{
+const activities: ProspectActivity[] = [{
   id: 'activity-1',
-  leadId: lead.id,
+  prospectId: prospect.id,
   type: 'reply_received',
   title: 'Reply received',
   notes: 'Interested in reliability details.',
@@ -58,7 +58,7 @@ const activities: LeadActivity[] = [{
 
 const priorMessages: OutreachMessage[] = [{
   id: 'message-1',
-  leadId: lead.id,
+  prospectId: prospect.id,
   medium: 'email',
   subject: 'Automation reliability',
   content: 'Previously sent reliability introduction.',
@@ -68,15 +68,15 @@ const priorMessages: OutreachMessage[] = [{
   sentAt: '2026-08-07T12:00:00.000Z',
 }];
 
-test('outreach prompt grounds generation in the full lead history without leaking markup', () => {
-  const prompt = buildOutreachPrompt(lead, research, 'email', undefined, undefined, {
+test('outreach prompt grounds generation in the full prospect history without leaking markup', () => {
+  const prompt = buildOutreachPrompt(prospect, research, 'email', undefined, undefined, {
     notes,
     activities,
     priorMessages,
   });
 
   assert.match(prompt, /Building reliable computation for demanding teams\./);
-  assert.match(prompt, /Lead with dependable automation\./);
+  assert.match(prompt, /Prospect with dependable automation\./);
   assert.match(prompt, /Ada asked about a September pilot\./);
   assert.match(prompt, /Reply received/);
   assert.match(prompt, /Previously sent reliability introduction\./);

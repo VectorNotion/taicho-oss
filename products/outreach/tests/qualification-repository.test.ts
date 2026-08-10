@@ -8,8 +8,8 @@ import {
   getSession,
   runWithGraphOrganization,
 } from '@content-automation/platform/data/graph';
-import { createLead } from '../data/lead-repository';
-import { resolveAccountForLead } from '../data/account-repository';
+import { createProspect } from '../data/prospect-repository';
+import { resolveAccountForProspect } from '../data/account-repository';
 import {
   getMatches,
   getObservations,
@@ -63,8 +63,8 @@ function qualification(partial: Partial<ProspectQualificationResult>): ProspectQ
 }
 
 test('observations round-trip both shapes and upsert replaces same-key only', async () => {
-  const lead = await createLead({ name: 'Obs Lead', company: 'Obs Co', source: 'manual' });
-  const account = await resolveAccountForLead(lead);
+  const prospect = await createProspect({ name: 'Obs Prospect', company: 'Obs Co', source: 'manual' });
+  const account = await resolveAccountForProspect(prospect);
   assert.ok(account);
   const entity = { kind: 'account' as const, id: account.id };
 
@@ -116,8 +116,8 @@ test('observations round-trip both shapes and upsert replaces same-key only', as
 });
 
 test('matches replace-all per entity and round-trip', async () => {
-  const lead = await createLead({ name: 'Match Lead', company: 'Match Co', source: 'manual' });
-  const entity = { kind: 'prospect' as const, id: lead.id };
+  const prospect = await createProspect({ name: 'Match Prospect', company: 'Match Co', source: 'manual' });
+  const entity = { kind: 'prospect' as const, id: prospect.id };
 
   const first: DimensionMatch[] = [
     { dimensionKey: 'decision_authority', matchScore: 0.94, effectiveMatch: 0.86, classification: 'strong_match', hardExclusion: false, confidence: 0.91 },
@@ -135,9 +135,9 @@ test('matches replace-all per entity and round-trip', async () => {
 });
 
 test('prospect qualification round-trips including reviewReason', async () => {
-  const lead = await createLead({ name: 'Qual Lead', company: 'Qual Co', source: 'manual' });
+  const prospect = await createProspect({ name: 'Qual Prospect', company: 'Qual Co', source: 'manual' });
 
-  assert.equal(await getProspectQualification(lead.id), null);
+  assert.equal(await getProspectQualification(prospect.id), null);
 
   const full = qualification({
     status: 'REVIEW',
@@ -147,20 +147,20 @@ test('prospect qualification round-trips including reviewReason', async () => {
     ],
     timingBreakdown: [{ dimensionKey: 'hiring_activity', dimensionValue: 0.7, signalCount: 3 }],
   });
-  await saveProspectQualification(lead.id, full);
-  const fetched = await getProspectQualification(lead.id);
+  await saveProspectQualification(prospect.id, full);
+  const fetched = await getProspectQualification(prospect.id);
   assert.deepEqual(fetched, full);
 
   // Replacement, and reviewReason clears when absent.
-  await saveProspectQualification(lead.id, qualification({ status: 'QUALIFIED' }));
-  const replaced = await getProspectQualification(lead.id);
+  await saveProspectQualification(prospect.id, qualification({ status: 'QUALIFIED' }));
+  const replaced = await getProspectQualification(prospect.id);
   assert.equal(replaced?.status, 'QUALIFIED');
   assert.equal(replaced?.reviewReason, undefined);
 });
 
 test('research runs record and detect', async () => {
-  const lead = await createLead({ name: 'Run Lead', company: 'Run Co', source: 'manual' });
-  const account = await resolveAccountForLead(lead);
+  const prospect = await createProspect({ name: 'Run Prospect', company: 'Run Co', source: 'manual' });
+  const account = await resolveAccountForProspect(prospect);
   assert.ok(account);
 
   assert.equal(await hasAnyResearchRun(account.id), false);
@@ -172,10 +172,10 @@ test('research runs record and detect', async () => {
 
 test('touch list: QUALIFIED only, ordered by timing score desc', async () => {
   await clearGraph();
-  const hot = await createLead({ name: 'Hot', company: 'Hot Co', source: 'manual' });
-  const warm = await createLead({ name: 'Warm', company: 'Warm Co', source: 'manual' });
-  const cold = await createLead({ name: 'Cold', company: 'Cold Co', source: 'manual' });
-  const excluded = await createLead({ name: 'Excluded', company: 'Ex Co', source: 'manual' });
+  const hot = await createProspect({ name: 'Hot', company: 'Hot Co', source: 'manual' });
+  const warm = await createProspect({ name: 'Warm', company: 'Warm Co', source: 'manual' });
+  const cold = await createProspect({ name: 'Cold', company: 'Cold Co', source: 'manual' });
+  const excluded = await createProspect({ name: 'Excluded', company: 'Ex Co', source: 'manual' });
 
   await saveProspectQualification(hot.id, qualification({ timingScore: 90 }));
   await saveProspectQualification(warm.id, qualification({ timingScore: 50 }));

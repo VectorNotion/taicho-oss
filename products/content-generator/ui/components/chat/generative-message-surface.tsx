@@ -74,12 +74,12 @@ const TOOL_LABELS: Record<string, { label: string; category: WorkCategory }> = {
   searchknowledge: { label: 'Searching workspace knowledge', category: 'knowledge' },
   listprojects: { label: 'Loading projects', category: 'knowledge' },
   getproject: { label: 'Loading project context', category: 'knowledge' },
-  listleads: { label: 'Searching leads', category: 'knowledge' },
-  getlead: { label: 'Loading lead context', category: 'knowledge' },
+  listprospects: { label: 'Searching prospects', category: 'knowledge' },
+  getprospect: { label: 'Loading prospect context', category: 'knowledge' },
   getresearch: { label: 'Searching workspace research', category: 'knowledge' },
   listtopics: { label: 'Loading topic coverage', category: 'knowledge' },
   tavilysearch: { label: 'Searching current sources', category: 'web' },
-  runleadintelligence: { label: 'Running lead intelligence', category: 'action' },
+  runprospectintelligence: { label: 'Running prospect intelligence', category: 'action' },
   runoutreachintelligence: { label: 'Creating outreach artifact', category: 'action' },
 };
 
@@ -356,9 +356,9 @@ export function ContextualSuggestedActions() {
   const view = useMemo(() => viewFromEvents(eventsFromParts(parts)), [parts]);
   if (!isLast || status === 'running' || !view.acknowledgement) return null;
   const intent = view.acknowledgement.intent.toLowerCase();
-  const suggestions = intent.includes('lead')
+  const suggestions = intent.includes('prospect')
     ? [
-        { label: 'Prepare outreach', prompt: 'Create a grounded outreach artifact for this lead. Do not send it.' },
+        { label: 'Prepare outreach', prompt: 'Create a grounded outreach artifact for this prospect. Do not send it.' },
         { label: 'Explain the score', prompt: 'Explain the qualification evidence and uncertainty.' },
       ]
     : [

@@ -48,16 +48,16 @@ test('external notifications are durable, idempotent, per-user, and preference-a
     userId,
     preferences: [
       { category: '*', enabled: true },
-      { category: 'leads', enabled: true },
+      { category: 'prospects', enabled: true },
       { category: 'content_insights', enabled: false },
     ],
   });
   const preferences = await getNotificationPreferences(
     organizationId,
     userId,
-    ['leads', 'content_insights'],
+    ['prospects', 'content_insights'],
   );
-  assert.equal(preferences.find(({ category }) => category === 'leads')?.enabled, true);
+  assert.equal(preferences.find(({ category }) => category === 'prospects')?.enabled, true);
   assert.equal(preferences.find(({ category }) => category === 'content_insights')?.enabled, false);
 
   await setNotificationPreferences({
@@ -68,10 +68,10 @@ test('external notifications are durable, idempotent, per-user, and preference-a
   const masterOff = await getNotificationPreferences(
     organizationId,
     userId,
-    ['leads', 'content_insights'],
+    ['prospects', 'content_insights'],
   );
   assert.equal(masterOff.find(({ category }) => category === '*')?.enabled, false);
-  assert.equal(masterOff.find(({ category }) => category === 'leads')?.enabled, true);
+  assert.equal(masterOff.find(({ category }) => category === 'prospects')?.enabled, true);
   assert.equal(masterOff.find(({ category }) => category === 'content_insights')?.enabled, false);
   await setNotificationPreferences({
     organizationId,
@@ -81,11 +81,11 @@ test('external notifications are durable, idempotent, per-user, and preference-a
 
   const input = {
     organizationId,
-    name: 'lead.created',
+    name: 'prospect.created',
     origin: 'external_connector' as const,
     connectorId: 'test-connector',
     externalEventId: 'delivery-1',
-    refs: { leadId: 'lead-1' },
+    refs: { prospectId: 'prospect-1' },
     payload: { name: 'Aisha', company: 'Northstar' },
   };
   const first = await recordProductEvent(input);
@@ -96,7 +96,7 @@ test('external notifications are durable, idempotent, per-user, and preference-a
   const inbox = await listUserNotifications(organizationId, userId, { statuses: ['unread'] });
   assert.equal(inbox.length, 1);
   assert.equal(inbox[0]?.eventId, first.id);
-  assert.equal(inbox[0]?.category, 'leads');
+  assert.equal(inbox[0]?.category, 'prospects');
 
   const seen = await setNotificationRecipientStatus(
     organizationId,
@@ -112,9 +112,9 @@ test('external notifications are durable, idempotent, per-user, and preference-a
 
   await recordProductEvent({
     organizationId,
-    name: 'lead.created',
-    refs: { leadId: 'lead-from-ui' },
-    payload: { name: 'Quiet UI lead' },
+    name: 'prospect.created',
+    refs: { prospectId: 'prospect-from-ui' },
+    payload: { name: 'Quiet UI prospect' },
   });
   await recordProductEvent({
     organizationId,

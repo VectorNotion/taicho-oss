@@ -8,12 +8,12 @@ const nextConfig: NextConfig = {
   headers: async () => [...nextSecurityHeaderRules],
   redirects: async () => [
     {
-      source: "/outreach/leads",
+      source: "/outreach/prospects",
       destination: "/outreach/pipeline",
       permanent: true,
     },
     {
-      source: "/outreach/leads/:id",
+      source: "/outreach/prospects/:id",
       destination: "/outreach/pipeline/:id",
       permanent: true,
     },

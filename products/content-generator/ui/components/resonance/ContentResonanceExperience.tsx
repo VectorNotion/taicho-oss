@@ -1030,15 +1030,15 @@ export function ContentResonanceExperience({
                           </CardTitle>
                           {winner ? (
                             <Badge variant={runResult.winner.tooCloseToCall ? "secondary" : "tint"}>
-                              {runResult.winner.tooCloseToCall ? `${winner.label} leads` : "Winner"}
+                              {runResult.winner.tooCloseToCall ? `${winner.label} prospects` : "Winner"}
                             </Badge>
                           ) : null}
                         </div>
                         <CardDescription className="mt-1 max-w-2xl">
                           {winner
                             ? runResult.winner.tooCloseToCall
-                              ? `${winner.label} leads by ${runResult.winner.margin.toFixed(1)} points, but the evidence is too close to call confidently.`
-                              : `${winner.label} leads by ${runResult.winner.margin.toFixed(1)} points across ${runResult.audienceSize.toLocaleString()} simulated audience members.`
+                              ? `${winner.label} prospects by ${runResult.winner.margin.toFixed(1)} points, but the evidence is too close to call confidently.`
+                              : `${winner.label} prospects by ${runResult.winner.margin.toFixed(1)} points across ${runResult.audienceSize.toLocaleString()} simulated audience members.`
                             : "Run the comparison again to collect a usable result."}
                         </CardDescription>
                       </div>
@@ -1063,7 +1063,7 @@ export function ContentResonanceExperience({
                       value={winnerScore == null ? "No data" : winnerScore.toFixed(1)}
                     />
                     <RunMetric
-                      label="Lead margin"
+                      label="Prospect margin"
                       value={`${runResult.winner.margin.toFixed(1)} points`}
                     />
                     <RunMetric

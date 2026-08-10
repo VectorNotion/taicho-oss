@@ -86,7 +86,7 @@ const sourceOptions: ControlOption[] = [
   {
     value: "workspace",
     label: "Workspace",
-    description: "Projects, leads, research, and history",
+    description: "Projects, prospects, research, and history",
     icon: SearchIcon,
   },
   {

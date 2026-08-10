@@ -13,13 +13,13 @@ export interface SchedulePostPayload {
 }
 
 export interface AddToFunnelPayload {
-  leadId?: string;
+  prospectId?: string;
   contactId?: string;
   funnelId: string;
 }
 
 export interface GenerateOutreachPayload {
-  leadId: string;
+  prospectId: string;
   medium: 'inmail' | 'inmail_traditional' | 'email' | 'content_comment';
   targetContent?: string;
 }
@@ -31,14 +31,14 @@ export interface ActionPayloads {
   refine_content_idea: { idea_id: string };
   generate_content_ideas: { count: number };
   generate_content_draft: { idea_id: string; content_type: string };
-  research_lead: {
-    lead_id: string;
+  research_prospect: {
+    prospect_id: string;
     name: string;
     company: string;
     title?: string;
     location?: string;
   };
-  qualify_lead: { lead_id: string };
+  qualify_prospect: { prospect_id: string };
   schedule_post: SchedulePostPayload;
   add_to_funnel: AddToFunnelPayload;
   generate_outreach: GenerateOutreachPayload;

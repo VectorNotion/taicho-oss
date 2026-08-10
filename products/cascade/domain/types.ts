@@ -12,7 +12,7 @@ export interface Contact {
   subscriptionStatus: "subscribed" | "unsubscribed" | "suppressed";
   workspaceContactId: string | null;
   /** @deprecated Historical compatibility only. */
-  outreachLeadId: string | null;
+  outreachProspectId: string | null;
 }
 
 export interface PlainTextEmail {

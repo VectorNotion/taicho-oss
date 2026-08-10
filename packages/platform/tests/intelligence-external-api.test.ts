@@ -8,12 +8,12 @@ import {
 
 test('n8n signatures bind method, path, body, organization, and delivery id', async () => {
   const token = 'test-token';
-  const body = JSON.stringify({ input: { leadId: 'lead-1' } });
+  const body = JSON.stringify({ input: { prospectId: 'prospect-1' } });
   const timestamp = '1785660000';
   const signed = signIntelligenceApiRequest({
     token,
     method: 'POST',
-    path: '/api/intelligence/v1/workflows/lead_intelligence',
+    path: '/api/intelligence/v1/workflows/prospect_intelligence',
     body,
     deliveryId: 'n8n-run-1',
     timestamp,
@@ -28,7 +28,7 @@ test('n8n signatures bind method, path, body, organization, and delivery id', as
   const verified = await verifyIntelligenceApiRequest({
     headers,
     method: 'POST',
-    path: '/api/intelligence/v1/workflows/lead_intelligence',
+    path: '/api/intelligence/v1/workflows/prospect_intelligence',
     body,
     now: Number(timestamp),
   }, { getToken });

@@ -19,13 +19,13 @@ test('canonical workflows have stable, one-to-one artifact contracts', () => {
 });
 
 test('workflow identifiers and inputs are validated at the dispatcher boundary', () => {
-  assert.equal(isCanonicalIntelligenceWorkflow('lead_intelligence'), true);
+  assert.equal(isCanonicalIntelligenceWorkflow('prospect_intelligence'), true);
   assert.equal(isCanonicalIntelligenceWorkflow('custom_user_workflow'), false);
-  assert.deepEqual(parseWorkflowInput('lead_intelligence', { leadId: 'lead-1' }), {
-    leadId: 'lead-1',
+  assert.deepEqual(parseWorkflowInput('prospect_intelligence', { prospectId: 'prospect-1' }), {
+    prospectId: 'prospect-1',
   });
   assert.throws(
     () => parseWorkflowInput('funnel_intelligence', { funnelId: 'funnel-1' }),
-    /Provide leadId or contactId/,
+    /Provide prospectId or contactId/,
   );
 });

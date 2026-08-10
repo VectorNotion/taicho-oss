@@ -15,13 +15,13 @@ import { ListRow, ListRows } from "@/components/ListRow";
 import { PageHeader } from "@/components/PageHeader";
 import { StatRow } from "@/components/StatRow";
 import {
-  getLeadCounts,
-  getLeadsPage,
+  getProspectCounts,
+  getProspectsPage,
   getOutreachMessageCounts,
   getOutreachMessages,
-} from "@/products/outreach/data/lead-repository";
+} from "@/products/outreach/data/prospect-repository";
 import {
-  LEAD_STATUS_CONFIG,
+  PROSPECT_STATUS_CONFIG,
   OUTREACH_MEDIUM_CONFIG,
 } from "@/products/outreach/domain/types";
 
@@ -36,8 +36,8 @@ function formatMoment(value: string) {
 
 export default async function OutreachOverviewPage() {
   const [counts, recent, messageCounts, drafts] = await Promise.all([
-    getLeadCounts(),
-    getLeadsPage(undefined, { page: 1, pageSize: 6 }),
+    getProspectCounts(),
+    getProspectsPage(undefined, { page: 1, pageSize: 6 }),
     getOutreachMessageCounts(),
     getOutreachMessages({ status: "draft", limit: 5 }),
   ]);
@@ -162,7 +162,7 @@ export default async function OutreachOverviewPage() {
           description="The latest people added to Outreach."
           title="Recently added"
         >
-          {recent.leads.length === 0 ? (
+          {recent.prospects.length === 0 ? (
             <div className="grid min-h-56 place-items-center px-6 text-center">
               <div className="max-w-sm">
                 <Users className="mx-auto size-8 text-muted-foreground" />
@@ -178,31 +178,31 @@ export default async function OutreachOverviewPage() {
             </div>
           ) : (
             <ListRows>
-              {recent.leads.map((lead) => (
+              {recent.prospects.map((prospect) => (
                 <ListRow
                   actions={[{
-                    href: `/outreach/pipeline/${lead.id}`,
+                    href: `/outreach/pipeline/${prospect.id}`,
                     iconName: "arrow-right",
-                    label: `Open ${lead.name}`,
+                    label: `Open ${prospect.name}`,
                   }]}
                   badge={
-                    <Badge variant={LEAD_STATUS_CONFIG[lead.status].variant}>
-                      {LEAD_STATUS_CONFIG[lead.status].label}
+                    <Badge variant={PROSPECT_STATUS_CONFIG[prospect.status].variant}>
+                      {PROSPECT_STATUS_CONFIG[prospect.status].label}
                     </Badge>
                   }
-                  href={`/outreach/pipeline/${lead.id}`}
-                  key={lead.id}
+                  href={`/outreach/pipeline/${prospect.id}`}
+                  key={prospect.id}
                   leading={
                     <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                      {lead.name.slice(0, 1).toUpperCase()}
+                      {prospect.name.slice(0, 1).toUpperCase()}
                     </span>
                   }
                   meta={[
-                    [lead.title, lead.company].filter(Boolean).join(" · ")
-                      || lead.email
+                    [prospect.title, prospect.company].filter(Boolean).join(" · ")
+                      || prospect.email
                       || "Outreach target",
                   ]}
-                  title={lead.name}
+                  title={prospect.name}
                 />
               ))}
             </ListRows>
@@ -227,14 +227,14 @@ export default async function OutreachOverviewPage() {
           ) : (
             <>
               <ListRows>
-                {drafts.slice(0, 5).map(({ lead, message }) => (
+                {drafts.slice(0, 5).map(({ prospect, message }) => (
                   <ListRow
                     actions={[{
-                      href: `/outreach/pipeline/${lead.id}`,
+                      href: `/outreach/pipeline/${prospect.id}`,
                       iconName: "arrow-right",
-                      label: `Review draft for ${lead.name}`,
+                      label: `Review draft for ${prospect.name}`,
                     }]}
-                    href={`/outreach/pipeline/${lead.id}`}
+                    href={`/outreach/pipeline/${prospect.id}`}
                     key={message.id}
                     leading={
                       <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
@@ -247,7 +247,7 @@ export default async function OutreachOverviewPage() {
                         {formatMoment(message.updatedAt)}
                       </time>,
                     ]}
-                    title={lead.name}
+                    title={prospect.name}
                   />
                 ))}
               </ListRows>

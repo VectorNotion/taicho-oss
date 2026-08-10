@@ -17,12 +17,12 @@ import { Badge } from '@/components/ui/badge';
 
 const STEPS = [
   {
-    key: 'scout', name: 'Scout', role: 'Lead research', icon: UserRoundSearch,
+    key: 'scout', name: 'Scout', role: 'Prospect research', icon: UserRoundSearch,
     enter: 1, update: 2, complete: 3,
-    activeCopy: 'Searching leads, notes, and relationship history',
+    activeCopy: 'Searching prospects, notes, and relationship history',
     updateCopy: 'One identity match. Loading two prior touchpoints.',
     completeCopy: 'Aisha confirmed · current role verified',
-    stream: ['Searching workspace leads for “Aisha Rahman”…', 'Match: Aisha Rahman · Northstar Labs', 'Relationship: 2 prior touchpoints · last reply 18 days ago', 'Current context: role confirmed from 3 sources'],
+    stream: ['Searching workspace prospects for “Aisha Rahman”…', 'Match: Aisha Rahman · Northstar Labs', 'Relationship: 2 prior touchpoints · last reply 18 days ago', 'Current context: role confirmed from 3 sources'],
     accent: 'sky',
   },
   {
@@ -37,10 +37,10 @@ const STEPS = [
   {
     key: 'cartographer', name: 'Cartographer', role: 'Knowledge mapping', icon: BrainCircuit,
     enter: 5, update: 6, complete: 7,
-    activeCopy: 'Connecting the lead to topics and evidence',
+    activeCopy: 'Connecting the prospect to topics and evidence',
     updateCopy: 'Four useful topic clusters. One evidence gap detected.',
     completeCopy: 'Context mapped · gap flagged',
-    stream: ['Mapping lead evidence into the Brain…', 'Connected: AI operations · human approvals · reliability', 'Evidence: 4 topic links · 3 current sources', 'Gap flagged: failure-recovery proof is thin'],
+    stream: ['Mapping prospect evidence into the Brain…', 'Connected: AI operations · human approvals · reliability', 'Evidence: 4 topic links · 3 current sources', 'Gap flagged: failure-recovery proof is thin'],
     accent: 'violet',
   },
 ] as const;
@@ -192,7 +192,7 @@ export function DelegationRunwayPreview({ active, paused }: { active: boolean; p
             <span className="z-10 grid size-10 shrink-0 place-items-center rounded-full border border-emerald-300/30 bg-emerald-300/10 text-emerald-300"><GitMerge className={`size-4 ${stage === 7 ? 'animate-pulse motion-reduce:animate-none' : ''}`} /></span>
             <div className="min-w-0 flex-1 overflow-hidden rounded-xl border border-emerald-300/25 bg-emerald-300/5">
               <div className="flex items-center gap-3 px-4 py-3"><div className="min-w-0 flex-1"><p className="text-sm font-semibold">Taicho synthesis</p><p className="mt-1 text-xs text-muted-foreground">{stage >= 8 ? 'Three specialist packets resolved into one answer.' : 'Reconciling evidence, confidence, and the best next action.'}</p></div>{stage >= 8 ? <Badge>Ready</Badge> : <Sparkles className="size-4 animate-pulse text-emerald-300 motion-reduce:animate-none" />}</div>
-              {stage >= 8 && <div className="animate-in fade-in slide-in-from-bottom-1 border-t px-4 py-3 text-xs leading-5 duration-500 motion-reduce:animate-none"><strong>Answer ready:</strong> Aisha is a qualified lead with a strong AI-operations fit. Your last conversation concerned approval workflows; the best next step is a reliability-focused follow-up.</div>}
+              {stage >= 8 && <div className="animate-in fade-in slide-in-from-bottom-1 border-t px-4 py-3 text-xs leading-5 duration-500 motion-reduce:animate-none"><strong>Answer ready:</strong> Aisha is a qualified prospect with a strong AI-operations fit. Your last conversation concerned approval workflows; the best next step is a reliability-focused follow-up.</div>}
             </div>
           </div>
         </div>

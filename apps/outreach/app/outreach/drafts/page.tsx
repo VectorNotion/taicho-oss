@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ExternalLink, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
-import { getOutreachMessages } from "@/products/outreach/data/lead-repository";
+import { getOutreachMessages } from "@/products/outreach/data/prospect-repository";
 import { DraftsWorkspace } from "@/products/outreach/ui/components/drafts/DraftsWorkspace";
 
 export const dynamic = "force-dynamic";

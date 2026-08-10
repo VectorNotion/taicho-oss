@@ -23,9 +23,9 @@ export const competitorSchema = z.object({
 export type CompetitorInfo = z.infer<typeof competitorSchema>;
 
 /**
- * Complete lead research result schema.
+ * Complete prospect research result schema.
  */
-export const leadResearchSchema = z.object({
+export const prospectResearchSchema = z.object({
   industry: z.string().describe('The industry the company operates in'),
   companySummary: z.string().describe('2-3 sentence summary of the company'),
   companyInsights: z.array(companyInsightSchema).describe('3-5 key insights about the company'),
@@ -34,13 +34,13 @@ export const leadResearchSchema = z.object({
   outreachAngle: z.string().describe('Recommended approach for initial contact'),
 });
 
-export type LeadResearchResult = z.infer<typeof leadResearchSchema>;
+export type ProspectResearchResult = z.infer<typeof prospectResearchSchema>;
 
 /**
  * Input schema for the research action.
  */
 export const researchInputSchema = z.object({
-  leadId: z.string(),
+  prospectId: z.string(),
   name: z.string(),
   company: z.string(),
   title: z.string().optional(),

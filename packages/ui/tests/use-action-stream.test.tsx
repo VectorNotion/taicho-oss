@@ -53,11 +53,11 @@ describe('useActionStream', () => {
     const { result } = renderHook(() => useActionStream({ api: '/stream', body: { stable: true } }));
     expect(result.current.error).toBe('Transport failed');
     expect(result.current.isStreaming).toBe(false);
-    act(() => result.current.start({ entityId: 'lead-1' }));
+    act(() => result.current.start({ entityId: 'prospect-1' }));
     expect(setMessages).toHaveBeenCalledWith([]);
     expect(sendMessage).toHaveBeenCalledWith(
       { text: 'run' },
-      { body: { entityId: 'lead-1' } },
+      { body: { entityId: 'prospect-1' } },
     );
   });
 });

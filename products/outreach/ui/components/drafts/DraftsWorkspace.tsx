@@ -35,7 +35,7 @@ import {
   OUTREACH_MEDIUM_CONFIG,
   OUTREACH_STATUS_CONFIG,
   type OutreachMedium,
-  type OutreachMessageWithLead,
+  type OutreachMessageWithProspect,
   type OutreachStatus,
 } from "@/products/outreach/domain/types";
 
@@ -61,7 +61,7 @@ function formatMoment(value: string) {
 export function DraftsWorkspace({
   initialMessages,
 }: {
-  initialMessages: OutreachMessageWithLead[];
+  initialMessages: OutreachMessageWithProspect[];
 }) {
   const [messages, setMessages] = useState(initialMessages);
   const [search, setSearch] = useState("");
@@ -70,19 +70,19 @@ export function DraftsWorkspace({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] =
-    useState<OutreachMessageWithLead | null>(null);
+    useState<OutreachMessageWithProspect | null>(null);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return messages.filter(({ lead, message }) => {
+    return messages.filter(({ prospect, message }) => {
       if (status !== "all" && message.status !== status) return false;
       if (medium !== "all" && message.medium !== medium) return false;
       if (!query) return true;
       return [
-        lead.name,
-        lead.company,
-        lead.title,
-        lead.email,
+        prospect.name,
+        prospect.company,
+        prospect.title,
+        prospect.email,
         message.subject,
         message.content,
       ].some((value) => value?.toLowerCase().includes(query));
@@ -101,13 +101,13 @@ export function DraftsWorkspace({
     window.setTimeout(() => setCopiedId(null), 1_500);
   }
 
-  async function toggleStatus(item: OutreachMessageWithLead) {
+  async function toggleStatus(item: OutreachMessageWithProspect) {
     setBusyId(item.message.id);
     const nextStatus: OutreachStatus =
       item.message.status === "draft" ? "sent" : "draft";
     try {
       const response = await fetch(
-        `/api/outreach/leads/${item.lead.id}/outreach/${item.message.id}`,
+        `/api/outreach/prospects/${item.prospect.id}/outreach/${item.message.id}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -135,11 +135,11 @@ export function DraftsWorkspace({
     }
   }
 
-  async function deleteMessage(item: OutreachMessageWithLead) {
+  async function deleteMessage(item: OutreachMessageWithProspect) {
     setBusyId(item.message.id);
     try {
       const response = await fetch(
-        `/api/outreach/leads/${item.lead.id}/outreach/${item.message.id}`,
+        `/api/outreach/prospects/${item.prospect.id}/outreach/${item.message.id}`,
         { method: "DELETE" },
       );
       if (!response.ok) throw new Error();
@@ -240,7 +240,7 @@ export function DraftsWorkspace({
         {filtered.length > 0 ? (
           <ListRows>
           {filtered.map((item) => {
-            const { lead, message } = item;
+            const { prospect, message } = item;
             const MediumIcon = mediumIcons[message.medium];
             const isBusy = busyId === message.id;
             return (
@@ -266,7 +266,7 @@ export function DraftsWorkspace({
                     destructive: true,
                     disabled: isBusy,
                     icon: Trash2,
-                    label: `Delete message for ${lead.name}`,
+                    label: `Delete message for ${prospect.name}`,
                     onSelect: () => setPendingDelete(item),
                   },
                 ]}
@@ -279,7 +279,7 @@ export function DraftsWorkspace({
                       : OUTREACH_STATUS_CONFIG[message.status].label}
                   </Badge>
                 }
-                href={`/outreach/pipeline/${lead.id}`}
+                href={`/outreach/pipeline/${prospect.id}`}
                 key={message.id}
                 leading={
                   <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">
@@ -287,9 +287,9 @@ export function DraftsWorkspace({
                   </span>
                 }
                 meta={[
-                  lead.name,
-                  [lead.title, lead.company].filter(Boolean).join(" · ")
-                    || lead.email
+                  prospect.name,
+                  [prospect.title, prospect.company].filter(Boolean).join(" · ")
+                    || prospect.email
                     || "Outreach target",
                   OUTREACH_MEDIUM_CONFIG[message.medium].label,
                   <time dateTime={message.updatedAt} key="updated">
@@ -299,7 +299,7 @@ export function DraftsWorkspace({
                     {message.content}
                   </span>,
                 ]}
-                title={message.subject || `Message for ${lead.name}`}
+                title={message.subject || `Message for ${prospect.name}`}
               />
             );
           })}
@@ -318,7 +318,7 @@ export function DraftsWorkspace({
             <DialogTitle>Delete outreach draft</DialogTitle>
             <DialogDescription>
               This permanently deletes the prepared message for{" "}
-              {pendingDelete?.lead.name}. This cannot be undone.
+              {pendingDelete?.prospect.name}. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

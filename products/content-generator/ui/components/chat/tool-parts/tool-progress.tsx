@@ -13,14 +13,14 @@ const toolConfig: Record<string, { icon: typeof Search; label: string }> = {
   searchKnowledge: { icon: Search, label: 'Searching knowledge base' },
   listProjects: { icon: Database, label: 'Listing projects' },
   getProject: { icon: Database, label: 'Loading project' },
-  listLeads: { icon: Users, label: 'Listing leads' },
-  getLead: { icon: Users, label: 'Loading lead' },
-  findLeadContext: { icon: Users, label: 'Searching leads and relationship history' },
+  listProspects: { icon: Users, label: 'Listing prospects' },
+  getProspect: { icon: Users, label: 'Loading prospect' },
+  findProspectContext: { icon: Users, label: 'Searching prospects and relationship history' },
   getResearch: { icon: FileText, label: 'Fetching research' },
   listTopics: { icon: Tags, label: 'Loading topics' },
   getTopicMap: { icon: Tags, label: 'Mapping Brain connections' },
   tavilySearch: { icon: Search, label: 'Searching current sources' },
-  runLeadIntelligence: { icon: Sparkles, label: 'Running lead intelligence' },
+  runProspectIntelligence: { icon: Sparkles, label: 'Running prospect intelligence' },
   runOutreachIntelligence: { icon: Sparkles, label: 'Creating outreach artifact' },
 };
 

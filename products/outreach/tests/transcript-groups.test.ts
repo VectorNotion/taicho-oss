@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
-  LeadEvidence,
-  LeadMeeting,
-} from "../domain/lead-intelligence";
+  ProspectEvidence,
+  ProspectMeeting,
+} from "../domain/prospect-intelligence";
 import {
   groupTranscriptEvidence,
   transcriptSpeakerLabel,
-} from "../ui/components/leads/transcript-groups";
+} from "../ui/components/prospects/transcript-groups";
 
 function evidence(input: {
   id: string;
@@ -15,10 +15,10 @@ function evidence(input: {
   recordingId?: string;
   recordingStartedAt?: string;
   offsetMs: number;
-}): LeadEvidence {
+}): ProspectEvidence {
   return {
     id: input.id,
-    leadId: "lead-1",
+    prospectId: "prospect-1",
     meetingId: input.meetingId ?? null,
     meetingEventId: null,
     kind: "transcript_utterance",
@@ -40,9 +40,9 @@ function evidence(input: {
   };
 }
 
-const meeting: LeadMeeting = {
+const meeting: ProspectMeeting = {
   id: "meeting-1",
-  leadId: "lead-1",
+  prospectId: "prospect-1",
   provider: "recall",
   providerBotId: "bot-1",
   meetingUrl: "https://meet.google.com/example",

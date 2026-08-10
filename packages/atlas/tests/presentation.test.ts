@@ -1,21 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseAddLead } from '../components/CommandBar';
+import { parseAddProspect } from '../components/CommandBar';
 import { LABEL_TO_TYPE, TYPE_COLOR, TYPE_RING, TYPE_WORD, nodeRadius } from '../palette';
 
-test('add-lead commands parse supported name, title, and company forms', () => {
-  assert.deepEqual(parseAddLead('+ Ada Lovelace'), { name: 'Ada Lovelace', title: undefined, company: undefined });
-  assert.deepEqual(parseAddLead('+ Ada Lovelace, CTO'), { name: 'Ada Lovelace', title: 'CTO', company: undefined });
-  assert.deepEqual(parseAddLead('+ Ada Lovelace, CTO @ Analytical Engines'), {
+test('add-prospect commands parse supported name, title, and company forms', () => {
+  assert.deepEqual(parseAddProspect('+ Ada Lovelace'), { name: 'Ada Lovelace', title: undefined, company: undefined });
+  assert.deepEqual(parseAddProspect('+ Ada Lovelace, CTO'), { name: 'Ada Lovelace', title: 'CTO', company: undefined });
+  assert.deepEqual(parseAddProspect('+ Ada Lovelace, CTO @ Analytical Engines'), {
     name: 'Ada Lovelace', title: 'CTO', company: 'Analytical Engines',
   });
-  assert.equal(parseAddLead('+   '), null);
+  assert.equal(parseAddProspect('+   '), null);
 });
 
 test('database labels map only to the supported user vocabulary', () => {
   assert.equal(LABEL_TO_TYPE.Project, 'project');
   assert.equal(LABEL_TO_TYPE.AIComponent, 'capability');
-  assert.equal(LABEL_TO_TYPE.LeadQualification, 'qualification');
+  assert.equal(LABEL_TO_TYPE.ProspectQualification, 'qualification');
   assert.equal('UnknownInternalNode' in LABEL_TO_TYPE, false);
   for (const type of new Set(Object.values(LABEL_TO_TYPE))) {
     assert.ok(TYPE_COLOR[type]);

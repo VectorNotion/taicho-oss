@@ -8,8 +8,8 @@ import type { Contact } from "../domain/types";
 import { contactFromRow } from "./contact-repository";
 
 /**
- * Lead intake boundary: outreach (products/outreach) hands a lead to
- * Cascade. Upserts by email; re-imports refresh attributes and the lead
+ * Prospect intake boundary: outreach (products/outreach) hands a prospect to
+ * Cascade. Upserts by email; re-imports refresh attributes and the prospect
  * link but never resurrect an unsubscribed/suppressed contact.
  */
 export async function importWorkspaceContact(
@@ -24,14 +24,14 @@ export async function importWorkspaceContact(
   const [row] = await databaseFor(pool).insert(contactsTable).values({
     email: input.email,
     workspace_contact_id: input.workspaceContactId,
-    outreach_lead_id: input.workspaceContactId,
+    outreach_prospect_id: input.workspaceContactId,
     attributes: input.attributes ?? {},
     timezone: input.timezone ?? null,
   }).onConflictDoUpdate({
     target: [contactsTable.organization_id, contactsTable.email],
     set: {
       workspace_contact_id: sql`excluded.workspace_contact_id`,
-      outreach_lead_id: sql`excluded.outreach_lead_id`,
+      outreach_prospect_id: sql`excluded.outreach_prospect_id`,
       attributes: sql`${contactsTable.attributes} || excluded.attributes`,
       timezone: sql`coalesce(excluded.timezone, ${contactsTable.timezone})`,
     },
@@ -53,18 +53,18 @@ export async function markWorkspaceContactLinked(
 }
 
 /** @deprecated Use importWorkspaceContact with the canonical workspace ID. */
-export async function importOutreachLead(
+export async function importOutreachProspect(
   pool: Pool,
   input: {
     email: string;
-    outreachLeadId: string;
+    outreachProspectId: string;
     attributes?: Record<string, unknown>;
     timezone?: string;
   },
 ): Promise<Contact> {
   return importWorkspaceContact(pool, {
     email: input.email,
-    workspaceContactId: input.outreachLeadId,
+    workspaceContactId: input.outreachProspectId,
     attributes: input.attributes,
     timezone: input.timezone,
   });

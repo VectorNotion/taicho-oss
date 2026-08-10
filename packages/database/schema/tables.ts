@@ -1371,7 +1371,7 @@ export const contactsInCascade = cascade.table("contacts", {
 	timezone: text(),
 	subscription_status: text().default('subscribed').notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	outreach_lead_id: text(),
+	outreach_prospect_id: text(),
 	organization_id: text().default(organizationIdDefault),
 	workspace_contact_id: text(),
 	workspace_contact_linked_at: timestamp({ withTimezone: true, mode: 'string' }),
@@ -1804,34 +1804,34 @@ export const funnel_routesInCascade = cascade.table("funnel_routes", {
 	check("funnel_routes_outcome_check", sql`outcome = ANY (ARRAY['completed'::text, 'interest'::text])`),
 ]).enableRLS();
 
-/** Provider-scoped identities that make Outreach lead capture duplicate-safe. */
-export const outreach_lead_source_identities = pgTable("outreach_lead_source_identities", {
+/** Provider-scoped identities that make Outreach prospect capture duplicate-safe. */
+export const outreach_prospect_source_identities = pgTable("outreach_prospect_source_identities", {
 	organization_id: text().default(organizationIdDefault).notNull(),
 	provider: text().default('linkedin_sales_navigator').notNull(),
 	source_id: text().notNull(),
-	lead_id: text().notNull(),
+	prospect_id: text().notNull(),
 	linkedin_url: text(),
 	sales_navigator_url: text(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	last_seen_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	primaryKey({ columns: [table.organization_id, table.provider, table.source_id], name: "outreach_lead_source_identities_pkey" }),
-	index("outreach_lead_source_identities_lead_idx").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast()),
+	primaryKey({ columns: [table.organization_id, table.provider, table.source_id], name: "outreach_prospect_source_identities_pkey" }),
+	index("outreach_prospect_source_identities_prospect_idx").using("btree", table.organization_id.asc().nullsLast(), table.prospect_id.asc().nullsLast()),
 	foreignKey({
 		columns: [table.organization_id],
 		foreignColumns: [organization.id],
-		name: "outreach_lead_source_identities_organization_fk",
+		name: "outreach_prospect_source_identities_organization_fk",
 	}).onDelete("cascade"),
-	pgPolicy("outreach_lead_source_identities_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
-	check("outreach_lead_source_identities_provider_check", sql`provider = 'linkedin_sales_navigator'`),
-	check("outreach_lead_source_identities_source_id_check", sql`length(btrim(source_id)) > 0`),
+	pgPolicy("outreach_prospect_source_identities_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+	check("outreach_prospect_source_identities_provider_check", sql`provider = 'linkedin_sales_navigator'`),
+	check("outreach_prospect_source_identities_source_id_check", sql`length(btrim(source_id)) > 0`),
 ]).enableRLS();
 
-/** A meeting bot attached to one Outreach lead. */
-export const outreach_lead_meetings = pgTable("outreach_lead_meetings", {
+/** A meeting bot attached to one Outreach prospect. */
+export const outreach_prospect_meetings = pgTable("outreach_prospect_meetings", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	organization_id: text().default(organizationIdDefault).notNull(),
-	lead_id: text().notNull(),
+	prospect_id: text().notNull(),
 	provider: text().default('recall').notNull(),
 	provider_bot_id: text(),
 	meeting_url: text().notNull(),
@@ -1844,21 +1844,21 @@ export const outreach_lead_meetings = pgTable("outreach_lead_meetings", {
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("outreach_lead_meetings_lead_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
-	uniqueIndex("outreach_lead_meetings_provider_bot_key").using("btree", table.organization_id.asc().nullsLast(), table.provider.asc().nullsLast(), table.provider_bot_id.asc().nullsLast()).where(sql`(provider_bot_id IS NOT NULL)`),
-	unique("outreach_lead_meetings_id_organization_key").on(table.id, table.organization_id),
+	index("outreach_prospect_meetings_prospect_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.prospect_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
+	uniqueIndex("outreach_prospect_meetings_provider_bot_key").using("btree", table.organization_id.asc().nullsLast(), table.provider.asc().nullsLast(), table.provider_bot_id.asc().nullsLast()).where(sql`(provider_bot_id IS NOT NULL)`),
+	unique("outreach_prospect_meetings_id_organization_key").on(table.id, table.organization_id),
 	foreignKey({
 		columns: [table.organization_id],
 		foreignColumns: [organization.id],
-		name: "outreach_lead_meetings_organization_fk",
+		name: "outreach_prospect_meetings_organization_fk",
 	}).onDelete("cascade"),
-	pgPolicy("outreach_lead_meetings_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
-	check("outreach_lead_meetings_provider_check", sql`provider = ANY (ARRAY['attendee'::text, 'recall'::text])`),
-	check("outreach_lead_meetings_status_check", sql`status = ANY (ARRAY['provisioning'::text, 'joining'::text, 'in_meeting'::text, 'post_processing'::text, 'completed'::text, 'failed'::text])`),
+	pgPolicy("outreach_prospect_meetings_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+	check("outreach_prospect_meetings_provider_check", sql`provider = ANY (ARRAY['attendee'::text, 'recall'::text])`),
+	check("outreach_prospect_meetings_status_check", sql`status = ANY (ARRAY['provisioning'::text, 'joining'::text, 'in_meeting'::text, 'post_processing'::text, 'completed'::text, 'failed'::text])`),
 ]).enableRLS();
 
 /** Immutable, idempotent receipt for every inbound meeting-provider event. */
-export const outreach_lead_meeting_events = pgTable("outreach_lead_meeting_events", {
+export const outreach_prospect_meeting_events = pgTable("outreach_prospect_meeting_events", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	organization_id: text().default(organizationIdDefault).notNull(),
 	meeting_id: uuid().notNull(),
@@ -1869,22 +1869,22 @@ export const outreach_lead_meeting_events = pgTable("outreach_lead_meeting_event
 	occurred_at: timestamp({ withTimezone: true, mode: 'string' }),
 	received_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("outreach_lead_meeting_events_meeting_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.meeting_id.asc().nullsLast(), table.received_at.asc().nullsLast()),
-	unique("outreach_lead_meeting_events_delivery_key").on(table.organization_id, table.provider_delivery_id),
-	unique("outreach_lead_meeting_events_id_organization_key").on(table.id, table.organization_id),
+	index("outreach_prospect_meeting_events_meeting_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.meeting_id.asc().nullsLast(), table.received_at.asc().nullsLast()),
+	unique("outreach_prospect_meeting_events_delivery_key").on(table.organization_id, table.provider_delivery_id),
+	unique("outreach_prospect_meeting_events_id_organization_key").on(table.id, table.organization_id),
 	foreignKey({
 		columns: [table.meeting_id, table.organization_id],
-		foreignColumns: [outreach_lead_meetings.id, outreach_lead_meetings.organization_id],
-		name: "outreach_lead_meeting_events_meeting_fk",
+		foreignColumns: [outreach_prospect_meetings.id, outreach_prospect_meetings.organization_id],
+		name: "outreach_prospect_meeting_events_meeting_fk",
 	}).onDelete("cascade"),
-	pgPolicy("outreach_lead_meeting_events_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+	pgPolicy("outreach_prospect_meeting_events_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
 ]).enableRLS();
 
-/** Human updates and transcript utterances used as attributable lead evidence. */
-export const outreach_lead_evidence = pgTable("outreach_lead_evidence", {
+/** Human updates and transcript utterances used as attributable prospect evidence. */
+export const outreach_prospect_evidence = pgTable("outreach_prospect_evidence", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	organization_id: text().default(organizationIdDefault).notNull(),
-	lead_id: text().notNull(),
+	prospect_id: text().notNull(),
 	meeting_id: uuid(),
 	meeting_event_id: uuid(),
 	kind: text().notNull(),
@@ -1902,31 +1902,31 @@ export const outreach_lead_evidence = pgTable("outreach_lead_evidence", {
 	metadata: jsonb().default({}).notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("outreach_lead_evidence_lead_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast(), table.created_at.asc().nullsLast()),
-	uniqueIndex("outreach_lead_evidence_source_key").using("btree", table.organization_id.asc().nullsLast(), table.meeting_id.asc().nullsLast(), table.source_key.asc().nullsLast()).where(sql`(source_key IS NOT NULL)`),
-	uniqueIndex("outreach_lead_evidence_external_source_key").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast(), table.source_key.asc().nullsLast()).where(sql`(source_key IS NOT NULL AND meeting_id IS NULL)`),
-	unique("outreach_lead_evidence_id_organization_key").on(table.id, table.organization_id),
+	index("outreach_prospect_evidence_prospect_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.prospect_id.asc().nullsLast(), table.created_at.asc().nullsLast()),
+	uniqueIndex("outreach_prospect_evidence_source_key").using("btree", table.organization_id.asc().nullsLast(), table.meeting_id.asc().nullsLast(), table.source_key.asc().nullsLast()).where(sql`(source_key IS NOT NULL)`),
+	uniqueIndex("outreach_prospect_evidence_external_source_key").using("btree", table.organization_id.asc().nullsLast(), table.prospect_id.asc().nullsLast(), table.source_key.asc().nullsLast()).where(sql`(source_key IS NOT NULL AND meeting_id IS NULL)`),
+	unique("outreach_prospect_evidence_id_organization_key").on(table.id, table.organization_id),
 	foreignKey({
 		columns: [table.meeting_id, table.organization_id],
-		foreignColumns: [outreach_lead_meetings.id, outreach_lead_meetings.organization_id],
-		name: "outreach_lead_evidence_meeting_fk",
+		foreignColumns: [outreach_prospect_meetings.id, outreach_prospect_meetings.organization_id],
+		name: "outreach_prospect_evidence_meeting_fk",
 	}).onDelete("cascade"),
 	foreignKey({
 		columns: [table.meeting_event_id, table.organization_id],
-		foreignColumns: [outreach_lead_meeting_events.id, outreach_lead_meeting_events.organization_id],
-		name: "outreach_lead_evidence_event_fk",
+		foreignColumns: [outreach_prospect_meeting_events.id, outreach_prospect_meeting_events.organization_id],
+		name: "outreach_prospect_evidence_event_fk",
 	}).onDelete("cascade"),
-	pgPolicy("outreach_lead_evidence_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
-	check("outreach_lead_evidence_kind_check", sql`kind = ANY (ARRAY['manual_update'::text, 'transcript_utterance'::text])`),
-	check("outreach_lead_evidence_actor_type_check", sql`actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text])`),
-	check("outreach_lead_evidence_content_check", sql`length(btrim(content)) > 0`),
+	pgPolicy("outreach_prospect_evidence_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+	check("outreach_prospect_evidence_kind_check", sql`kind = ANY (ARRAY['manual_update'::text, 'transcript_utterance'::text])`),
+	check("outreach_prospect_evidence_actor_type_check", sql`actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text])`),
+	check("outreach_prospect_evidence_content_check", sql`length(btrim(content)) > 0`),
 ]).enableRLS();
 
 /** Versioned AI interpretation. Old revisions remain available for audit. */
-export const outreach_lead_insight_snapshots = pgTable("outreach_lead_insight_snapshots", {
+export const outreach_prospect_insight_snapshots = pgTable("outreach_prospect_insight_snapshots", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	organization_id: text().default(organizationIdDefault).notNull(),
-	lead_id: text().notNull(),
+	prospect_id: text().notNull(),
 	revision: integer().notNull(),
 	status: text().default('current').notNull(),
 	summary: text().notNull(),
@@ -1939,19 +1939,19 @@ export const outreach_lead_insight_snapshots = pgTable("outreach_lead_insight_sn
 	created_by: text(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("outreach_lead_insights_lead_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
-	uniqueIndex("outreach_lead_insights_current_key").using("btree", table.organization_id.asc().nullsLast(), table.lead_id.asc().nullsLast()).where(sql`(status = 'current')`),
-	unique("outreach_lead_insights_revision_key").on(table.organization_id, table.lead_id, table.revision),
-	unique("outreach_lead_insights_id_organization_key").on(table.id, table.organization_id),
+	index("outreach_prospect_insights_prospect_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.prospect_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
+	uniqueIndex("outreach_prospect_insights_current_key").using("btree", table.organization_id.asc().nullsLast(), table.prospect_id.asc().nullsLast()).where(sql`(status = 'current')`),
+	unique("outreach_prospect_insights_revision_key").on(table.organization_id, table.prospect_id, table.revision),
+	unique("outreach_prospect_insights_id_organization_key").on(table.id, table.organization_id),
 	foreignKey({
 		columns: [table.organization_id],
 		foreignColumns: [organization.id],
-		name: "outreach_lead_insights_organization_fk",
+		name: "outreach_prospect_insights_organization_fk",
 	}).onDelete("cascade"),
-	pgPolicy("outreach_lead_insights_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
-	check("outreach_lead_insights_status_check", sql`status = ANY (ARRAY['current'::text, 'superseded'::text])`),
-	check("outreach_lead_insights_reason_check", sql`generated_reason = ANY (ARRAY['manual'::text, 'manual_update'::text, 'meeting_completed'::text, 'activity_update'::text, 'outreach_sent'::text])`),
-	check("outreach_lead_insights_revision_check", sql`revision > 0 AND evidence_count >= 0`),
+	pgPolicy("outreach_prospect_insights_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+	check("outreach_prospect_insights_status_check", sql`status = ANY (ARRAY['current'::text, 'superseded'::text])`),
+	check("outreach_prospect_insights_reason_check", sql`generated_reason = ANY (ARRAY['manual'::text, 'manual_update'::text, 'meeting_completed'::text, 'activity_update'::text, 'outreach_sent'::text])`),
+	check("outreach_prospect_insights_revision_check", sql`revision > 0 AND evidence_count >= 0`),
 ]).enableRLS();
 
 export const jobs = pgTable("jobs", {
@@ -1992,7 +1992,7 @@ export const product_events = pgTable("product_events", {
 	event_version: integer().default(1).notNull(),
 	occurred_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	content_id: text(),
-	lead_id: text(),
+	prospect_id: text(),
 	post_id: text(),
 	send_id: text(),
 	source: text().default('product').notNull(),
@@ -2309,7 +2309,7 @@ export const conversationsInAssistant = assistant.table("conversations", {
 	account_id: text(),
 	user_id: text(),
 	status: text().default('open').notNull(),
-	lead_state: jsonb().default({}).notNull(),
+	prospect_state: jsonb().default({}).notNull(),
 	failed_answer_count: integer().default(0).notNull(),
 	metadata: jsonb().default({}).notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),

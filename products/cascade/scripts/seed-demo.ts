@@ -4,7 +4,7 @@ import {
   listFunnels,
 } from "../data/funnel-repository";
 import { createPlainTextEmail } from "../data/plain-text-email-repository";
-import { importOutreachLead } from "../data/intake";
+import { importOutreachProspect } from "../data/intake";
 import { getCascadePool } from "../data/pool";
 import { ensureCascadeSchema } from "../data/schema";
 
@@ -32,9 +32,9 @@ await createPlainTextEmail(pool, {
   body: "A second reusable plain-text email for external automation.",
 });
 
-const contact = await importOutreachLead(pool, {
+const contact = await importOutreachProspect(pool, {
   email: "demo@example.com",
-  outreachLeadId: "demo-lead",
+  outreachProspectId: "demo-prospect",
   attributes: { name: "Demo Person", company: "DemoCorp" },
 });
 const member = await addFunnelMember(pool, {

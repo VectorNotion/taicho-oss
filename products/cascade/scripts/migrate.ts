@@ -18,7 +18,7 @@ const legacyContacts = await db
     email: contactsInCascade.email,
     attributes: contactsInCascade.attributes,
     workspaceContactId: contactsInCascade.workspace_contact_id,
-    outreachLeadId: contactsInCascade.outreach_lead_id,
+    outreachProspectId: contactsInCascade.outreach_prospect_id,
   })
   .from(contactsInCascade)
   .where(and(isNotNull(contactsInCascade.organization_id), isNull(contactsInCascade.workspace_contact_linked_at)));
@@ -28,7 +28,7 @@ try {
     if (!row.organizationId) continue;
     const proposedIds = [
       row.workspaceContactId,
-      row.outreachLeadId,
+      row.outreachProspectId,
     ];
     const legacyId = proposedIds.find(
       (value): value is string =>
@@ -66,7 +66,7 @@ try {
       .update(contactsInCascade)
       .set({
         workspace_contact_id: result.contact.id,
-        outreach_lead_id: sql`coalesce(${contactsInCascade.outreach_lead_id}, ${result.contact.id})`,
+        outreach_prospect_id: sql`coalesce(${contactsInCascade.outreach_prospect_id}, ${result.contact.id})`,
         workspace_contact_linked_at: sql`now()`,
       })
       .where(and(eq(contactsInCascade.organization_id, row.organizationId), eq(contactsInCascade.id, row.id)));

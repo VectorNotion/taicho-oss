@@ -1,6 +1,6 @@
 import { createLogger } from '@content-automation/observability';
 import { readBoundedRequestText, RequestBodyTooLargeError } from '@content-automation/platform/network/request-body';
-import { setLeadMeetingStatus } from '@/products/outreach/data/lead-intelligence-repository';
+import { setProspectMeetingStatus } from '@/products/outreach/data/prospect-intelligence-repository';
 import {
   getRecallBotTarget,
   parseRecallWorkspaceToken,
@@ -15,7 +15,7 @@ import {
 import {
   finalizeRecallMeetingCapture,
   receiveRecallWebhook,
-} from '@/products/outreach/services/lead-meeting-service';
+} from '@/products/outreach/services/prospect-meeting-service';
 import { after, type NextRequest } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
         meeting_id: workspace.meetingId,
         transcript_id: transcriptId,
       });
-      await setLeadMeetingStatus({
+      await setProspectMeetingStatus({
         organizationId: workspace.organizationId,
         meetingId: workspace.meetingId,
         status: 'failed',

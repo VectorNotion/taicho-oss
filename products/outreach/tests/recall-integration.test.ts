@@ -14,7 +14,7 @@ import {
   verifyRecallWebhook,
   type RecallWebhookPayload,
 } from '../integrations/recall';
-import { recallMeetingStatusFromWebhook } from '../services/lead-meeting-service';
+import { recallMeetingStatusFromWebhook } from '../services/prospect-meeting-service';
 
 const secret = `whsec_${Buffer.from('recall-webhook-secret-for-tests-32-bytes').toString('base64')}`;
 
@@ -169,7 +169,7 @@ test('Recall transcript segments retain speaker attribution and timestamps', () 
   assert.match(input.sourceKey, /^recall:42:1250:/);
 });
 
-test('current Recall bot lifecycle events map to lead meeting status', () => {
+test('current Recall bot lifecycle events map to prospect meeting status', () => {
   const occurredAt = '2026-08-09T12:33:48.000Z';
   const payload = (event: string, subCode: string | null = null): RecallWebhookPayload => ({
     event,

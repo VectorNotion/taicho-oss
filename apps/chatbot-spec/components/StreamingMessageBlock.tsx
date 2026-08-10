@@ -21,11 +21,11 @@ const THINKING_STEPS = [
   'Reading run #48 — 24 frames, 412k simulated impressions',
   'Comparing hook variants across every audience frame — “ship fast” beats the cost angle by 31% overall, and the gap widens to 44% in the operator-heavy frames where most of the reach lives',
   'Checking the claim against the run report before quoting it',
-  'Structuring: lead with the number, close on the pull request',
+  'Structuring: prospect with the number, close on the pull request',
 ];
 
 const ANSWER =
-  'Here is the launch post draft. Last week’s resonance run simulated 412,000 impressions across 24 audience frames — the “ship fast” hook outperformed the cost angle by 31%. The draft below leads with that number, keeps your plain-spoken voice, and ends on the open-source pull request.';
+  'Here is the launch post draft. Last week’s resonance run simulated 412,000 impressions across 24 audience frames — the “ship fast” hook outperformed the cost angle by 31%. The draft below prospects with that number, keeps your plain-spoken voice, and ends on the open-source pull request.';
 
 const WORDS = ANSWER.split(' ');
 const ERROR_CUTOFF = Math.floor(WORDS.length * 0.45);

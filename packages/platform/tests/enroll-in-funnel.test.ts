@@ -8,7 +8,7 @@ import { createContact } from "@/products/cascade/data/contact-repository";
 import { createFunnel, listFunnelMembers } from "@/products/cascade/data/funnel-repository";
 import { getCascadePool } from "@/products/cascade/data/pool";
 import { dropCascadeSchema, ensureCascadeSchema } from "@/products/cascade/data/schema";
-import { createLead } from "@/products/outreach/data/lead-repository";
+import { createProspect } from "@/products/outreach/data/prospect-repository";
 import { closeDriver } from "../data/graph";
 import { runWithGraphOrganization } from "../data/organization-context";
 import { runAddToFunnel } from "../agents/add-to-funnel";
@@ -33,7 +33,7 @@ test("payload validation fails before any I/O", async () => {
     () => inOrg(() => runAddToFunnel({ funnelId: "", contactId: "c" })),
     /funnelId is required/,
   );
-  await assert.rejects(() => inOrg(() => runAddToFunnel({ funnelId: "f" })), /leadId or contactId/);
+  await assert.rejects(() => inOrg(() => runAddToFunnel({ funnelId: "f" })), /prospectId or contactId/);
 });
 
 test("refuses to run outside an organization context", async () => {
@@ -58,14 +58,14 @@ test(
 );
 
 test(
-  "leadId path imports the lead into Cascade and adds it to the list",
+  "prospectId path imports the prospect into Cascade and adds it to the list",
   { skip: process.env.PLATFORM_DB_TESTS !== "1" }, // needs FalkorDB + Postgres (docker compose up -d)
   async () => {
     const pool = await freshSchema();
-    const funnel = await createFunnel(pool, { name: "lead-nurture" });
-    const email = `lead-${randomUUID()}@example.com`;
-    const lead = await inOrg(() =>
-      createLead({
+    const funnel = await createFunnel(pool, { name: "prospect-nurture" });
+    const email = `prospect-${randomUUID()}@example.com`;
+    const prospect = await inOrg(() =>
+      createProspect({
         name: "Ada Lovelace",
         email,
         company: "Analytical",
@@ -73,32 +73,32 @@ test(
         source: "manual",
       }),
     );
-    const result = await inOrg(() => runAddToFunnel({ funnelId: funnel.id, leadId: lead.id }));
+    const result = await inOrg(() => runAddToFunnel({ funnelId: funnel.id, prospectId: prospect.id }));
     const contact = await pool.query(
-      `SELECT email, outreach_lead_id, workspace_contact_linked_at FROM contacts WHERE id = $1`,
+      `SELECT email, outreach_prospect_id, workspace_contact_linked_at FROM contacts WHERE id = $1`,
       [result.contactId],
     );
     assert.equal(contact.rows[0].email, email);
-    assert.equal(contact.rows[0].outreach_lead_id, lead.id);
+    assert.equal(contact.rows[0].outreach_prospect_id, prospect.id);
     assert.ok(contact.rows[0].workspace_contact_linked_at);
 
     // Re-running is safe: the existing membership is returned, not duplicated.
-    const again = await inOrg(() => runAddToFunnel({ funnelId: funnel.id, leadId: lead.id }));
+    const again = await inOrg(() => runAddToFunnel({ funnelId: funnel.id, prospectId: prospect.id }));
     assert.equal(again.memberId, result.memberId);
   },
 );
 
 test(
-  "a lead without an email is rejected with a clear error",
+  "a prospect without an email is rejected with a clear error",
   { skip: process.env.PLATFORM_DB_TESTS !== "1" },
   async () => {
     const pool = await freshSchema();
     const funnel = await createFunnel(pool, { name: "no-email" });
-    const lead = await inOrg(() =>
-      createLead({ name: "No Email", company: "Acme", source: "manual" }),
+    const prospect = await inOrg(() =>
+      createProspect({ name: "No Email", company: "Acme", source: "manual" }),
     );
     await assert.rejects(
-      () => inOrg(() => runAddToFunnel({ funnelId: funnel.id, leadId: lead.id })),
+      () => inOrg(() => runAddToFunnel({ funnelId: funnel.id, prospectId: prospect.id })),
       /has no email/,
     );
   },

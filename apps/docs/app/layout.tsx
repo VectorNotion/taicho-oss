@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     template: "%s | Taicho Documentation",
   },
   description:
-    "Learn how to connect data, create leads through APIs, and operate Taicho.",
+    "Learn how to connect data, create prospects through APIs, and operate Taicho.",
   robots: { follow: true, index: true },
 };
 

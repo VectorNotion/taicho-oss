@@ -8,12 +8,12 @@ import {
   getSession,
   runWithGraphOrganization,
 } from '@content-automation/platform/data/graph';
-import { createLead } from '../data/lead-repository';
+import { createProspect } from '../data/prospect-repository';
 import {
   getAccountById,
-  getAccountLeads,
+  getAccountProspects,
   normalizeCompanyName,
-  resolveAccountForLead,
+  resolveAccountForProspect,
 } from '../data/account-repository';
 
 const ORGANIZATION_ID = `outreach-account-test-organization-${process.pid}`;
@@ -43,42 +43,42 @@ test('normalizeCompanyName trims, lowercases and collapses whitespace', () => {
   assert.equal(normalizeCompanyName('ACME CORP'), 'acme corp');
 });
 
-test('resolveAccountForLead MERGEs one account per normalized company and links leads', async () => {
-  const lead1 = await createLead({ name: 'Jane Smith', company: 'Acme Corp', source: 'manual' });
-  const lead2 = await createLead({ name: 'John Roe', company: '  ACME  Corp ', source: 'manual' });
+test('resolveAccountForProspect MERGEs one account per normalized company and links prospects', async () => {
+  const prospect1 = await createProspect({ name: 'Jane Smith', company: 'Acme Corp', source: 'manual' });
+  const prospect2 = await createProspect({ name: 'John Roe', company: '  ACME  Corp ', source: 'manual' });
 
-  const account1 = await resolveAccountForLead(lead1);
-  const account2 = await resolveAccountForLead(lead2);
+  const account1 = await resolveAccountForProspect(prospect1);
+  const account2 = await resolveAccountForProspect(prospect2);
 
   assert.ok(account1);
   assert.equal(account1.name, 'Acme Corp');
   assert.equal(account1.normalizedName, 'acme corp');
   assert.equal(account2?.id, account1.id, 'same normalized company → same account');
 
-  const leads = await getAccountLeads(account1.id);
-  assert.deepEqual(leads.sort(), [lead1.id, lead2.id].sort());
+  const prospects = await getAccountProspects(account1.id);
+  assert.deepEqual(prospects.sort(), [prospect1.id, prospect2.id].sort());
 
   const fetched = await getAccountById(account1.id);
   assert.equal(fetched?.normalizedName, 'acme corp');
 });
 
-test('resolveAccountForLead returns null without a company', async () => {
-  const lead = await createLead({ name: 'No Company', source: 'manual' });
-  assert.equal(await resolveAccountForLead(lead), null);
-  assert.equal(await resolveAccountForLead({ id: 'x', company: '   ' }), null);
+test('resolveAccountForProspect returns null without a company', async () => {
+  const prospect = await createProspect({ name: 'No Company', source: 'manual' });
+  assert.equal(await resolveAccountForProspect(prospect), null);
+  assert.equal(await resolveAccountForProspect({ id: 'x', company: '   ' }), null);
 });
 
 test('resolving repeatedly is idempotent (one BELONGS_TO edge)', async () => {
-  const lead = await createLead({ name: 'Repeat', company: 'Repeat Co', source: 'manual' });
-  await resolveAccountForLead(lead);
-  const account = await resolveAccountForLead(lead);
+  const prospect = await createProspect({ name: 'Repeat', company: 'Repeat Co', source: 'manual' });
+  await resolveAccountForProspect(prospect);
+  const account = await resolveAccountForProspect(prospect);
   assert.ok(account);
 
   const session = await getSession();
   try {
     const result = await session.run(
-      `MATCH (l:Lead {id: $leadId})-[r:BELONGS_TO]->(a:Account {id: $accountId}) RETURN count(r) AS edges`,
-      { leadId: lead.id, accountId: account.id },
+      `MATCH (l:Prospect {id: $prospectId})-[r:BELONGS_TO]->(a:Account {id: $accountId}) RETURN count(r) AS edges`,
+      { prospectId: prospect.id, accountId: account.id },
     );
     assert.equal(result.records[0].get('edges').toNumber(), 1);
   } finally {

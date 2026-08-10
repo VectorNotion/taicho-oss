@@ -53,7 +53,7 @@ export type {
 } from './retention'
 export type {
   AssistantOperations,
-  LeadInput,
+  ProspectInput,
   TicketInput,
   TicketListInput,
 } from './operations'

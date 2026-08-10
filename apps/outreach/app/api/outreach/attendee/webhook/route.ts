@@ -10,7 +10,7 @@ import {
   attendeePostProcessingCompleted,
   finalizeMeetingCapture,
   receiveAttendeeWebhook,
-} from '@/products/outreach/services/lead-meeting-service';
+} from '@/products/outreach/services/prospect-meeting-service';
 import { after, type NextRequest } from 'next/server';
 
 export const runtime = 'nodejs';

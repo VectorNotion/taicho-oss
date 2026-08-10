@@ -36,31 +36,31 @@ export function attentionProjectionForEvent(
 ): AttentionProjection | null {
   if (event.origin !== 'external_connector') return null;
 
-  if (event.name === 'lead.created' && event.leadId) {
-    const name = label(event, 'name', 'A new lead');
+  if (event.name === 'prospect.created' && event.prospectId) {
+    const name = label(event, 'name', 'A new prospect');
     const company = label(event, 'company', '');
     const subject = company ? `${name} at ${company}` : name;
     return {
       priority: 'normal',
-      category: 'leads',
+      category: 'prospects',
       policyVersion: POLICY_VERSION,
       groupKey: event.connectorId
-        ? `${event.connectorId}:lead.created`
+        ? `${event.connectorId}:prospect.created`
         : undefined,
-      title: 'New lead ready for research',
-      message: `${subject} was added through ${event.connectorId ?? 'an external connector'}. Do you want to research and qualify this lead?`,
-      entityType: 'lead',
-      entityId: event.leadId,
+      title: 'New prospect ready for research',
+      message: `${subject} was added through ${event.connectorId ?? 'an external connector'}. Do you want to research and qualify this prospect?`,
+      entityType: 'prospect',
+      entityId: event.prospectId,
       suggestedAction: {
-        workflow: 'lead_intelligence',
+        workflow: 'prospect_intelligence',
         label: 'Research and qualify',
-        input: { leadId: event.leadId },
-        prompt: `Research and qualify ${subject} (lead ID: ${event.leadId}). Use attention item {{attentionItemId}} and show me the resulting lead dossier.`,
+        input: { prospectId: event.prospectId },
+        prompt: `Research and qualify ${subject} (prospect ID: ${event.prospectId}). Use attention item {{attentionItemId}} and show me the resulting prospect dossier.`,
       },
     };
   }
 
-  if (event.name === 'lead.qualified' && event.leadId) {
+  if (event.name === 'prospect.qualified' && event.prospectId) {
     const score = typeof event.payload.score === 'number'
       ? ` scored ${event.payload.score}/100`
       : ' has been qualified';
@@ -68,17 +68,17 @@ export function attentionProjectionForEvent(
       priority: typeof event.payload.score === 'number' && event.payload.score >= 80
         ? 'high'
         : 'normal',
-      category: 'leads',
+      category: 'prospects',
       policyVersion: POLICY_VERSION,
-      title: 'Qualified lead needs a next action',
-      message: `The lead${score}. Decide whether to create an outreach artifact or keep researching.`,
-      entityType: 'lead',
-      entityId: event.leadId,
+      title: 'Qualified prospect needs a next action',
+      message: `The prospect${score}. Decide whether to create an outreach artifact or keep researching.`,
+      entityType: 'prospect',
+      entityId: event.prospectId,
       suggestedAction: {
         workflow: 'outreach_intelligence',
         label: 'Prepare outreach',
-        input: { leadId: event.leadId, medium: 'email' },
-        prompt: `Review qualified lead ${event.leadId} and prepare a grounded outreach artifact. Use attention item {{attentionItemId}}.`,
+        input: { prospectId: event.prospectId, medium: 'email' },
+        prompt: `Review qualified prospect ${event.prospectId} and prepare a grounded outreach artifact. Use attention item {{attentionItemId}}.`,
       },
     };
   }

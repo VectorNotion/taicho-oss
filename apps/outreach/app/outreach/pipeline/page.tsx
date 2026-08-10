@@ -1,1 +1,1 @@
-export { default } from "../leads/page";
+export { default } from "../prospects/page";

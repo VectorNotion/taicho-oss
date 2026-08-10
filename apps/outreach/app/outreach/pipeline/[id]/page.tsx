@@ -1,1 +1,1 @@
-export { default } from "../../leads/[id]/page";
+export { default } from "../../prospects/[id]/page";

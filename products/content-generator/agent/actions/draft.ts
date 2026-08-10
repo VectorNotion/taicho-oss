@@ -235,7 +235,7 @@ ${whoYouAre(mission, identity, voice)}
 Write one complete X post under 280 characters.
 
 ## Guidelines
-- Lead with the most interesting claim
+- Prospect with the most interesting claim
 - Make every word earn its place
 - Keep the post useful without requiring a thread
 - Use at most one relevant hashtag
@@ -269,7 +269,7 @@ ${whoYouAre(mission, identity, voice)}
 Create a structured ad campaign with headline, primary text, supporting description, and CTA.
 
 ## Guidelines
-- Lead with a specific customer outcome
+- Prospect with a specific customer outcome
 - Keep claims grounded in the supplied idea
 - Make the headline and primary text work together without repetition
 - Avoid hype, fabricated urgency, and unsupported superlatives

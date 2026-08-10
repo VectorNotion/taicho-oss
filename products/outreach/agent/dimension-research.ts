@@ -9,7 +9,7 @@
  */
 import { z } from 'zod';
 import { createLogger } from '@content-automation/observability';
-import { DEFAULT_LEAD_RESEARCH_MODEL } from './lead-research';
+import { DEFAULT_PROSPECT_RESEARCH_MODEL } from './prospect-research';
 import { searchTavily, type TavilySearchOutput } from './tavily-tool';
 import type { DimensionDefinition, ObservationRecord } from '../domain/qualification';
 
@@ -64,7 +64,7 @@ export interface DimensionResearchDeps {
 }
 
 function researchModelSlug(): string {
-  return process.env.OUTREACH_RESEARCH_MODEL?.trim() || DEFAULT_LEAD_RESEARCH_MODEL;
+  return process.env.OUTREACH_RESEARCH_MODEL?.trim() || DEFAULT_PROSPECT_RESEARCH_MODEL;
 }
 
 /** Default JSON completion: raw OpenRouter fetch with strict json_schema output. */

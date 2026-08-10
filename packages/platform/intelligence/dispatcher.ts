@@ -1,11 +1,11 @@
 import { actionHandlers } from '../agents/registry';
 import { recordProductEvent } from '../events/emit';
 import {
-  getLeadById,
-  getLeadQualification,
-  getLeadResearch,
-} from '@/products/outreach/data/lead-repository';
-import type { LeadQualification, LeadResearch } from '@/products/outreach/domain/types';
+  getProspectById,
+  getLegacyQualification,
+  getProspectResearch,
+} from '@/products/outreach/data/prospect-repository';
+import type { LegacyQualification, ProspectResearch } from '@/products/outreach/domain/types';
 import type {
   ArtifactDraft,
   CanonicalIntelligenceWorkflow,
@@ -68,7 +68,7 @@ export type WorkflowHandler = (
   context: WorkflowHandlerContext,
 ) => Promise<ArtifactDraft>;
 
-function researchSourceRefs(research: LeadResearch | null) {
+function researchSourceRefs(research: ProspectResearch | null) {
   if (!research) return [];
   return research.companyInsights
     .filter((insight) => insight.sourceUrl)
@@ -82,7 +82,7 @@ function researchSourceRefs(research: LeadResearch | null) {
 
 function qualificationSummary(
   name: string,
-  qualification: LeadQualification | null,
+  qualification: LegacyQualification | null,
 ): string {
   if (!qualification) {
     return `${name} was researched. Qualification was skipped because no active persona produced a score.`;
@@ -90,44 +90,44 @@ function qualificationSummary(
   return `${name} scored ${qualification.score}/100 against ${qualification.matchedPersonaName}.`;
 }
 
-/** First complete vertical slice: research -> qualification -> lead dossier. */
-export const runLeadIntelligence: WorkflowHandler = async (input, context) => {
-  const leadId = input.leadId as string;
-  const before = await getLeadById(leadId);
-  if (!before) throw new Error(`Lead not found: ${leadId}`);
+/** First complete vertical slice: research -> qualification -> prospect dossier. */
+export const runProspectIntelligence: WorkflowHandler = async (input, context) => {
+  const prospectId = input.prospectId as string;
+  const before = await getProspectById(prospectId);
+  if (!before) throw new Error(`Prospect not found: ${prospectId}`);
 
-  await actionHandlers.research_lead({ leadId }, context.runId);
-  const [lead, research, qualification] = await Promise.all([
-    getLeadById(leadId),
-    getLeadResearch(leadId),
-    getLeadQualification(leadId),
+  await actionHandlers.research_prospect({ prospectId }, context.runId);
+  const [prospect, research, qualification] = await Promise.all([
+    getProspectById(prospectId),
+    getProspectResearch(prospectId),
+    getLegacyQualification(prospectId),
   ]);
-  if (!lead || !research) {
-    throw new Error(`Lead intelligence did not produce a dossier for ${leadId}.`);
+  if (!prospect || !research) {
+    throw new Error(`Prospect intelligence did not produce a dossier for ${prospectId}.`);
   }
 
   return {
-    workflow: 'lead_intelligence',
-    kind: 'lead_dossier',
-    title: `Lead dossier · ${lead.name}`,
-    summary: qualificationSummary(lead.name, qualification),
+    workflow: 'prospect_intelligence',
+    kind: 'prospect_dossier',
+    title: `Prospect dossier · ${prospect.name}`,
+    summary: qualificationSummary(prospect.name, qualification),
     content: {
-      lead: {
-        id: lead.id,
-        name: lead.name,
-        company: lead.company ?? null,
-        title: lead.title ?? null,
-        location: lead.location ?? null,
-        email: lead.email ?? null,
-        status: lead.status,
-        priority: lead.priority,
-        tags: lead.tags,
+      prospect: {
+        id: prospect.id,
+        name: prospect.name,
+        company: prospect.company ?? null,
+        title: prospect.title ?? null,
+        location: prospect.location ?? null,
+        email: prospect.email ?? null,
+        status: prospect.status,
+        priority: prospect.priority,
+        tags: prospect.tags,
       },
       research,
       qualification,
     },
     sourceRefs: [
-      { type: 'lead', id: lead.id, label: lead.name },
+      { type: 'prospect', id: prospect.id, label: prospect.name },
       ...researchSourceRefs(research),
     ],
     recommendations: [{
@@ -136,11 +136,11 @@ export const runLeadIntelligence: WorkflowHandler = async (input, context) => {
       reason: qualification
         ? `Use the ${qualification.matchedPersonaName} fit and research evidence to personalize the message.`
         : 'Use the completed research to prepare a human-reviewed message.',
-      input: { leadId: lead.id, medium: 'email' },
+      input: { prospectId: prospect.id, medium: 'email' },
     }],
     provenance: {
       workflowVersion: '1.0',
-      capabilities: ['research_lead', 'qualify_lead'],
+      capabilities: ['research_prospect', 'qualify_prospect'],
       generatedAt: new Date().toISOString(),
     },
   };
@@ -148,35 +148,35 @@ export const runLeadIntelligence: WorkflowHandler = async (input, context) => {
 
 /** Grounded outreach generation that ends at an artifact; it never delivers. */
 export const runOutreachIntelligence: WorkflowHandler = async (input, context) => {
-  const leadId = input.leadId as string;
+  const prospectId = input.prospectId as string;
   const medium = input.medium as 'inmail' | 'inmail_traditional' | 'email' | 'content_comment';
-  const [lead, research, qualification] = await Promise.all([
-    getLeadById(leadId),
-    getLeadResearch(leadId),
-    getLeadQualification(leadId),
+  const [prospect, research, qualification] = await Promise.all([
+    getProspectById(prospectId),
+    getProspectResearch(prospectId),
+    getLegacyQualification(prospectId),
   ]);
-  if (!lead) throw new Error(`Lead not found: ${leadId}`);
+  if (!prospect) throw new Error(`Prospect not found: ${prospectId}`);
   const generated = await actionHandlers.generate_outreach({
-    leadId,
+    prospectId,
     medium,
     targetContent: input.targetContent,
   }, context.runId) as Record<string, unknown>;
   const message = generated.message as Record<string, unknown> | undefined;
   if (!message || typeof message.content !== 'string') {
-    throw new Error(`Outreach intelligence did not produce a message for ${leadId}.`);
+    throw new Error(`Outreach intelligence did not produce a message for ${prospectId}.`);
   }
   return {
     workflow: 'outreach_intelligence',
     kind: 'outreach_message',
-    title: `Outreach artifact · ${lead.name}`,
+    title: `Outreach artifact · ${prospect.name}`,
     summary: `A grounded ${medium.replaceAll('_', ' ')} message is ready for human review and external delivery.`,
     content: {
-      lead: {
-        id: lead.id,
-        name: lead.name,
-        company: lead.company ?? null,
-        title: lead.title ?? null,
-        email: lead.email ?? null,
+      prospect: {
+        id: prospect.id,
+        name: prospect.name,
+        company: prospect.company ?? null,
+        title: prospect.title ?? null,
+        email: prospect.email ?? null,
       },
       medium,
       subject: message.subject ?? null,
@@ -186,7 +186,7 @@ export const runOutreachIntelligence: WorkflowHandler = async (input, context) =
       qualification,
     },
     sourceRefs: [
-      { type: 'lead', id: lead.id, label: lead.name },
+      { type: 'prospect', id: prospect.id, label: prospect.name },
       ...researchSourceRefs(research),
     ],
     recommendations: [{
@@ -206,7 +206,7 @@ export const runOutreachIntelligence: WorkflowHandler = async (input, context) =
 export const intelligenceWorkflowHandlers: Partial<
   Record<CanonicalIntelligenceWorkflow, WorkflowHandler>
 > = {
-  lead_intelligence: runLeadIntelligence,
+  prospect_intelligence: runProspectIntelligence,
   outreach_intelligence: runOutreachIntelligence,
 };
 
@@ -301,8 +301,8 @@ export async function executeIntelligenceWorkflow(input: {
         workflow: input.workflow,
         kind: artifact.kind,
       },
-      refs: input.workflow === 'lead_intelligence' || input.workflow === 'outreach_intelligence'
-        ? { leadId: parsedInput.leadId as string }
+      refs: input.workflow === 'prospect_intelligence' || input.workflow === 'outreach_intelligence'
+        ? { prospectId: parsedInput.prospectId as string }
         : undefined,
     });
     const completed = await deps.getRun(input.context.organizationId, reserved.run.id);

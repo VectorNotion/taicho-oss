@@ -29,15 +29,15 @@ test("emitProductEvent maps refs to columns and merges refs into the payload", a
   const recorded = captureSink();
   emitProductEvent({
     organizationId: "org_events_a",
-    name: "lead.qualified",
+    name: "prospect.qualified",
     payload: { score: 82 },
-    refs: { leadId: "lead-1", draftId: "draft-9" },
+    refs: { prospectId: "prospect-1", draftId: "draft-9" },
   });
   await drainProductEvents();
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0].organizationId, "org_events_a");
-  assert.equal(recorded[0].name, "lead.qualified");
-  assert.equal(recorded[0].leadId, "lead-1");
+  assert.equal(recorded[0].name, "prospect.qualified");
+  assert.equal(recorded[0].prospectId, "prospect-1");
   assert.equal(recorded[0].contentId, null);
   assert.equal(recorded[0].postId, null);
   assert.equal(recorded[0].sendId, null);
@@ -47,13 +47,13 @@ test("emitProductEvent maps refs to columns and merges refs into the payload", a
   assert.equal(recorded[0].connectorId, null);
   assert.equal(recorded[0].externalEventId, null);
   // draftId has no column of its own: it must survive in the payload.
-  assert.deepEqual(recorded[0].payload, { score: 82, leadId: "lead-1", draftId: "draft-9" });
+  assert.deepEqual(recorded[0].payload, { score: 82, prospectId: "prospect-1", draftId: "draft-9" });
 });
 
 test("emitProductEvent never throws and never rejects when the insert fails", async () => {
   setProductEventSinkForTests(async () => { throw new Error("db down"); });
   assert.doesNotThrow(() =>
-    emitProductEvent({ organizationId: "org_events_a", name: "lead.created" }));
+    emitProductEvent({ organizationId: "org_events_a", name: "prospect.created" }));
   await drainProductEvents(); // must resolve, not reject
 });
 
@@ -61,9 +61,9 @@ test("emitProductEventFromContext resolves the organization from execution conte
   const recorded = captureSink();
   runWithExecutionContext(
     { organizationId: "org_ctx", actorId: "t", actorType: "service" },
-    () => emitProductEventFromContext({ name: "lead.researched", refs: { leadId: "lead-2" } }),
+    () => emitProductEventFromContext({ name: "prospect.researched", refs: { prospectId: "prospect-2" } }),
   );
-  emitProductEventFromContext({ name: "lead.researched", refs: { leadId: "lead-3" } }); // no context: skip
+  emitProductEventFromContext({ name: "prospect.researched", refs: { prospectId: "prospect-3" } }); // no context: skip
   await drainProductEvents();
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0].organizationId, "org_ctx");
@@ -80,7 +80,7 @@ test("trusted connector attribution is copied into the durable event envelope", 
       connectorId: "hubspot",
       externalEventId: "delivery-42",
     },
-    () => emitProductEventFromContext({ name: "lead.created", refs: { leadId: "lead-42" } }),
+    () => emitProductEventFromContext({ name: "prospect.created", refs: { prospectId: "prospect-42" } }),
   );
   await drainProductEvents();
   assert.equal(recorded[0].origin, "external_connector");
@@ -91,22 +91,22 @@ test("trusted connector attribution is copied into the durable event envelope", 
 test("emitProductEventFromContext falls back to the graph organization boundary", async () => {
   const recorded = captureSink();
   runWithGraphOrganization("org_graph", () =>
-    emitProductEventFromContext({ name: "outreach.sent", refs: { leadId: "lead-4" } }));
+    emitProductEventFromContext({ name: "outreach.sent", refs: { prospectId: "prospect-4" } }));
   await drainProductEvents();
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0].organizationId, "org_graph");
 });
 
 test("the frozen v1 vocabulary contains product outcomes, not funnel delivery events", () => {
-  // `lead.replied` closes the lead chain (spec §7, emitted from the activity
+  // `prospect.replied` closes the prospect chain (spec §7, emitted from the activity
   // choke point); `post.metrics.updated` closes the feedback chain (emitted by
   // recordMetricSnapshot, plan 2026-07-31-metrics-groundwork). The Cascade
   // Funnel list and email CRUD are state, not delivery events. External
   // automation owns delivery and can report channel-neutral outcomes.
   assert.deepEqual([...PRODUCT_EVENT_NAMES], [
-    "lead.created", "lead.researched", "lead.qualified",
-    "lead.meeting.scheduled", "lead.transcript.updated", "lead.insights.updated",
-    "outreach.generated", "outreach.sent", "lead.replied",
+    "prospect.created", "prospect.researched", "prospect.qualified",
+    "prospect.meeting.scheduled", "prospect.transcript.updated", "prospect.insights.updated",
+    "outreach.generated", "outreach.sent", "prospect.replied",
     "draft.ready", "post.scheduled", "post.published", "post.failed",
     "content.angle.emerged",
     "post.metrics.updated",

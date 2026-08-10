@@ -13,7 +13,7 @@ export interface ProductEventInsert {
   name: string;
   eventVersion: number;
   contentId: string | null;
-  leadId: string | null;
+  prospectId: string | null;
   postId: string | null;
   sendId: string | null;
   source: string;
@@ -37,7 +37,7 @@ export async function insertProductEvent(event: ProductEventInsert): Promise<{ i
         name: event.name,
         event_version: event.eventVersion,
         content_id: event.contentId,
-        lead_id: event.leadId,
+        prospect_id: event.prospectId,
         post_id: event.postId,
         send_id: event.sendId,
         source: event.source,

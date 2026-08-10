@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DemoFrame, Section, Spec } from "../../components/section";
 
 const STATS: Stat[] = [
-  { label: "Total leads", value: "94", delta: "+11", direction: "up", trend: [61, 68, 72, 79, 83, 88, 94] },
+  { label: "Total prospects", value: "94", delta: "+11", direction: "up", trend: [61, 68, 72, 79, 83, 88, 94] },
   { label: "Active enrollments", value: "536", delta: "no change", direction: "flat", trend: [534, 538, 535, 537, 536, 535, 536] },
   { label: "Interest clicks", value: "41", delta: "−6", direction: "down", trend: [58, 52, 55, 49, 47, 44, 41] },
   { label: "Published this month", value: "12", delta: "+4", direction: "up", featured: true, trend: [4, 6, 5, 8, 7, 9, 12] },
@@ -95,7 +95,7 @@ export default function PatternsPage() {
         <DemoFrame>
           <PageHeader
             title="Funnels"
-            description="Sequences and open-ended queues your leads move through."
+            description="Sequences and open-ended queues your prospects move through."
             actions={<Button><Plus className="h-4 w-4" /> New funnel</Button>}
           />
         </DemoFrame>
@@ -114,7 +114,7 @@ export default function PatternsPage() {
         </Tabs>
         <ListSurface
           count={listState === "empty" ? 0 : filtered.length}
-          description="Sequences and open-ended queues your leads move through."
+          description="Sequences and open-ended queues your prospects move through."
           emptyState={
             <div className="flex flex-col items-center gap-2 p-10">
               <GitBranch className="h-8 w-8 text-muted-foreground" />
@@ -274,7 +274,7 @@ export default function PatternsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Routing</CardTitle>
-            <CardDescription>Where leads go on completion or an interest click.</CardDescription>
+            <CardDescription>Where prospects go on completion or an interest click.</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">Section content composes any other pattern — forms, tables, stat rows.</p>

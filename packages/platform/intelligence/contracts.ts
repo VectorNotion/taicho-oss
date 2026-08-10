@@ -8,7 +8,7 @@ export const CANONICAL_INTELLIGENCE_WORKFLOWS = [
   'knowledge_research',
   'content_intelligence',
   'audience_resonance',
-  'lead_intelligence',
+  'prospect_intelligence',
   'outreach_intelligence',
   'funnel_intelligence',
   'feedback_intelligence',
@@ -21,7 +21,7 @@ export const ARTIFACT_KINDS = [
   'research_brief',
   'content_package',
   'audience_evaluation',
-  'lead_dossier',
+  'prospect_dossier',
   'outreach_message',
   'funnel_recommendation',
   'feedback_recommendation',
@@ -33,7 +33,7 @@ export type WorkflowRunStatus = 'running' | 'completed' | 'failed';
 export type WorkflowTrigger = 'chat' | 'event' | 'external' | 'system';
 
 export const NOTIFICATION_CATEGORIES = [
-  'leads',
+  'prospects',
   'content_insights',
   'workflow_results',
   'external_outcomes',
@@ -75,11 +75,11 @@ export const INTELLIGENCE_WORKFLOW_DEFINITIONS: Record<
     artifactKind: 'audience_evaluation',
     implementation: 'definition-only',
   },
-  lead_intelligence: {
-    key: 'lead_intelligence',
-    name: 'Lead intelligence',
-    purpose: 'Research a lead, qualify the fit, and recommend the next decision.',
-    artifactKind: 'lead_dossier',
+  prospect_intelligence: {
+    key: 'prospect_intelligence',
+    name: 'Prospect intelligence',
+    purpose: 'Research a prospect, qualify the fit, and recommend the next decision.',
+    artifactKind: 'prospect_dossier',
     implementation: 'available',
   },
   outreach_intelligence: {
@@ -121,21 +121,21 @@ const workflowInputSchemas = {
     variationCount: z.number().int().min(2).max(6),
     audienceSize: z.number().int().min(100).max(2_000_000),
   }),
-  lead_intelligence: z.object({
-    leadId: z.string().min(1).max(200),
+  prospect_intelligence: z.object({
+    prospectId: z.string().min(1).max(200),
   }),
   outreach_intelligence: z.object({
-    leadId: z.string().min(1).max(200),
+    prospectId: z.string().min(1).max(200),
     medium: z.enum(['inmail', 'inmail_traditional', 'email', 'content_comment']),
     targetContent: z.string().max(20_000).optional(),
   }),
   funnel_intelligence: z.object({
-    leadId: z.string().min(1).max(200).optional(),
+    prospectId: z.string().min(1).max(200).optional(),
     contactId: z.string().min(1).max(200).optional(),
     funnelId: z.string().min(1).max(200),
     objective: z.string().trim().min(1).max(2_000).optional(),
-  }).refine((input) => input.leadId || input.contactId, {
-    message: 'Provide leadId or contactId.',
+  }).refine((input) => input.prospectId || input.contactId, {
+    message: 'Provide prospectId or contactId.',
   }),
   feedback_intelligence: z.object({
     entityType: z.string().trim().min(1).max(100),

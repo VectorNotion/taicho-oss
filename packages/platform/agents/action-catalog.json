@@ -9,8 +9,8 @@
     "schedule_post"
   ],
   "outreach": [
-    "research_lead",
-    "qualify_lead",
+    "research_prospect",
+    "qualify_prospect",
     "generate_outreach"
   ],
   "cascade": [
@@ -27,8 +27,8 @@
     "refine_content_idea": "mastra",
     "generate_content_draft": "mastra",
     "extract_topics": "mastra",
-    "research_lead": "mastra",
-    "qualify_lead": "mastra",
+    "research_prospect": "mastra",
+    "qualify_prospect": "mastra",
     "generate_outreach": "mastra",
     "schedule_post": "native",
     "add_to_funnel": "native"

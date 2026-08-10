@@ -23,7 +23,7 @@ test('Payload operations bind a stable request ID, timestamp, and raw body', asy
       signature: headers.get('x-assistant-signature'),
     })
     return Response.json({
-      id: 'lead-1',
+      id: 'prospect-1',
     })
   }
 
@@ -31,12 +31,12 @@ test('Payload operations bind a stable request ID, timestamp, and raw body', asy
     'https://payload.example.test/internal/assistants',
     secret,
   )
-  assert.deepEqual(await operations.createLead({
+  assert.deepEqual(await operations.createProspect({
     tenantId: 'tenant-a',
     conversationId: crypto.randomUUID(),
     state: { consent: true },
     summary: 'Approved summary',
-  }, crypto.randomUUID()), { id: 'lead-1' })
+  }, crypto.randomUUID()), { id: 'prospect-1' })
   assert.equal(verified, true)
 })
 

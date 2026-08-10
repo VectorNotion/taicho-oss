@@ -30,7 +30,7 @@ const projectWithContextSchema = projectSchema.extend({
   })),
 });
 
-const leadSchema = z.object({
+const prospectSchema = z.object({
   id: z.string(),
   name: z.string(),
   company: z.string().nullish(),
@@ -39,7 +39,7 @@ const leadSchema = z.object({
   hasResearch: z.boolean(),
 });
 
-const leadWithResearchSchema = z.object({
+const prospectWithResearchSchema = z.object({
   id: z.string(),
   name: z.string(),
   company: z.string().nullish(),
@@ -89,7 +89,7 @@ const topicSchema = z.object({
 
 export const searchKnowledgeTool = createTool({
   id: 'search-knowledge',
-  description: 'Search across all knowledge types: projects, leads, research items, and topics. Use this for broad searches across the entire knowledge base.',
+  description: 'Search across all knowledge types: projects, prospects, research items, and topics. Use this for broad searches across the entire knowledge base.',
   inputSchema: z.object({
     query: z.string().describe('Search term to find across all entity types'),
     limit: z.number().optional().default(5).describe('Maximum results per entity type'),
@@ -97,7 +97,7 @@ export const searchKnowledgeTool = createTool({
   outputSchema: z.object({
     query: z.string(),
     projects: z.array(projectSchema),
-    leads: z.array(leadSchema),
+    prospects: z.array(prospectSchema),
     research: z.array(researchItemSchema),
     topics: z.array(topicSchema),
   }),
@@ -134,13 +134,13 @@ export const searchKnowledgeTool = createTool({
         processed: r.get('processed'),
       }));
 
-      // Search leads
-      const leadsResult = await session.run(
+      // Search prospects
+      const prospectsResult = await session.run(
         `
-        MATCH (l:Lead)
+        MATCH (l:Prospect)
         WHERE toLower(l.name) CONTAINS toLower($query)
            OR toLower(l.company) CONTAINS toLower($query)
-        OPTIONAL MATCH (l)-[:HAS_RESEARCH]->(r:LeadResearch)
+        OPTIONAL MATCH (l)-[:HAS_RESEARCH]->(r:ProspectResearch)
         RETURN l.id as id, l.name as name, l.company as company,
                l.title as title, l.status as status,
                r IS NOT NULL as hasResearch
@@ -149,7 +149,7 @@ export const searchKnowledgeTool = createTool({
         `,
         { query, limit: toInt(limit) }
       );
-      const leads = leadsResult.records.map(r => ({
+      const prospects = prospectsResult.records.map(r => ({
         id: r.get('id'),
         name: r.get('name'),
         company: r.get('company'),
@@ -208,11 +208,11 @@ export const searchKnowledgeTool = createTool({
         data: {
           tool: 'searchKnowledge',
           status: 'complete',
-          message: `Found ${projects.length} projects, ${leads.length} leads, ${research.length} research items, ${topics.length} topics`,
+          message: `Found ${projects.length} projects, ${prospects.length} prospects, ${research.length} research items, ${topics.length} topics`,
         },
       } as any);
 
-      return { query, projects, leads, research, topics };
+      return { query, projects, prospects, research, topics };
     } finally {
       await session.close();
     }
@@ -390,16 +390,16 @@ export const getProjectTool = createTool({
   },
 });
 
-export const listLeadsTool = createTool({
-  id: 'list-leads',
-  description: 'List leads with optional filtering by search query or status. Shows research status for each lead.',
+export const listProspectsTool = createTool({
+  id: 'list-prospects',
+  description: 'List prospects with optional filtering by search query or status. Shows research status for each prospect.',
   inputSchema: z.object({
-    query: z.string().optional().describe('Search term for lead name/company'),
-    status: z.string().optional().describe('Filter by lead status (new, contacted, replied, qualified, lost)'),
+    query: z.string().optional().describe('Search term for prospect name/company'),
+    status: z.string().optional().describe('Filter by prospect status (new, contacted, replied, qualified, lost)'),
     limit: z.number().optional().default(10).describe('Maximum results to return'),
   }),
   outputSchema: z.object({
-    leads: z.array(leadSchema),
+    prospects: z.array(prospectSchema),
     total: z.number(),
   }),
   execute: async (input, context) => {
@@ -408,7 +408,7 @@ export const listLeadsTool = createTool({
 
     await writer?.custom({
       type: 'data-tool-progress',
-      data: { tool: 'listLeads', status: 'searching', message: 'Fetching leads...' },
+      data: { tool: 'listProspects', status: 'searching', message: 'Fetching prospects...' },
     } as any);
 
     const session = await getSession();
@@ -433,9 +433,9 @@ export const listLeadsTool = createTool({
 
       const result = await session.run(
         `
-        MATCH (l:Lead)
+        MATCH (l:Prospect)
         ${whereClause}
-        OPTIONAL MATCH (l)-[:HAS_RESEARCH]->(r:LeadResearch)
+        OPTIONAL MATCH (l)-[:HAS_RESEARCH]->(r:ProspectResearch)
         RETURN l.id as id, l.name as name, l.company as company,
                l.title as title, l.status as status,
                r IS NOT NULL as hasResearch
@@ -445,7 +445,7 @@ export const listLeadsTool = createTool({
         params
       );
 
-      const leads = result.records.map(r => ({
+      const prospects = result.records.map(r => ({
         id: r.get('id'),
         name: r.get('name'),
         company: r.get('company'),
@@ -456,65 +456,65 @@ export const listLeadsTool = createTool({
 
       await writer?.custom({
         type: 'data-tool-progress',
-        data: { tool: 'listLeads', status: 'complete', message: `Found ${leads.length} leads` },
+        data: { tool: 'listProspects', status: 'complete', message: `Found ${prospects.length} prospects` },
       } as any);
 
-      return { leads, total: leads.length };
+      return { prospects, total: prospects.length };
     } finally {
       await session.close();
     }
   },
 });
 
-export const getLeadTool = createTool({
-  id: 'get-lead',
-  description: 'Get detailed information about a specific lead including research data, company insights, and outreach history.',
+export const getProspectTool = createTool({
+  id: 'get-prospect',
+  description: 'Get detailed information about a specific prospect including research data, company insights, and outreach history.',
   inputSchema: z.object({
-    leadId: z.string().describe('The ID of the lead to retrieve'),
+    prospectId: z.string().describe('The ID of the prospect to retrieve'),
   }),
   outputSchema: z.object({
     found: z.boolean(),
-    lead: leadWithResearchSchema.nullable(),
+    prospect: prospectWithResearchSchema.nullable(),
   }),
   execute: async (input, context) => {
-    const { leadId } = input;
+    const { prospectId } = input;
     const writer = context?.writer;
 
     await writer?.custom({
       type: 'data-tool-progress',
-      data: { tool: 'getLead', status: 'searching', message: `Loading lead ${leadId}...` },
+      data: { tool: 'getProspect', status: 'searching', message: `Loading prospect ${prospectId}...` },
     } as any);
 
     const session = await getSession();
 
     try {
-      // Get lead
-      const leadResult = await session.run(
+      // Get prospect
+      const prospectResult = await session.run(
         `
-        MATCH (l:Lead {id: $id})
+        MATCH (l:Prospect {id: $id})
         RETURN l
         `,
-        { id: leadId }
+        { id: prospectId }
       );
 
-      if (leadResult.records.length === 0) {
+      if (prospectResult.records.length === 0) {
         await writer?.custom({
           type: 'data-tool-progress',
-          data: { tool: 'getLead', status: 'complete', message: 'Lead not found' },
+          data: { tool: 'getProspect', status: 'complete', message: 'Prospect not found' },
         } as any);
-        return { found: false, lead: null };
+        return { found: false, prospect: null };
       }
 
-      const leadNode = leadResult.records[0].get('l').properties;
+      const prospectNode = prospectResult.records[0].get('l').properties;
 
       // Get research
       const researchResult = await session.run(
         `
-        MATCH (l:Lead {id: $id})-[:HAS_RESEARCH]->(r:LeadResearch)
+        MATCH (l:Prospect {id: $id})-[:HAS_RESEARCH]->(r:ProspectResearch)
         RETURN r.industry as industry, r.companySummary as companySummary,
                r.talkingPoints as talkingPoints, r.outreachAngle as outreachAngle
         `,
-        { id: leadId }
+        { id: prospectId }
       );
       const researchRecord = researchResult.records[0];
       const research = researchRecord
@@ -529,10 +529,10 @@ export const getLeadTool = createTool({
       // Get company insights
       const insightsResult = await session.run(
         `
-        MATCH (l:Lead {id: $id})-[:HAS_RESEARCH]->(r:LeadResearch)-[:HAS_INSIGHT]->(i:CompanyInsight)
+        MATCH (l:Prospect {id: $id})-[:HAS_RESEARCH]->(r:ProspectResearch)-[:HAS_INSIGHT]->(i:CompanyInsight)
         RETURN i.category as category, i.content as content
         `,
-        { id: leadId }
+        { id: prospectId }
       );
       const companyInsights = insightsResult.records.map(r => ({
         category: r.get('category'),
@@ -542,13 +542,13 @@ export const getLeadTool = createTool({
       // Get outreach messages
       const outreachResult = await session.run(
         `
-        MATCH (l:Lead {id: $id})-[:HAS_OUTREACH]->(m:OutreachMessage)
+        MATCH (l:Prospect {id: $id})-[:HAS_OUTREACH]->(m:OutreachMessage)
         RETURN m.id as id, m.medium as medium, m.subject as subject,
                m.content as content, m.status as status,
                toString(m.createdAt) as createdAt
         ORDER BY m.createdAt DESC
         `,
-        { id: leadId }
+        { id: prospectId }
       );
       const outreachMessages = outreachResult.records.map(r => ({
         id: r.get('id'),
@@ -559,14 +559,14 @@ export const getLeadTool = createTool({
         createdAt: r.get('createdAt'),
       }));
 
-      const lead = {
-        id: leadNode.id,
-        name: leadNode.name,
-        company: leadNode.company,
-        title: leadNode.title,
-        email: leadNode.email,
-        linkedinUrl: leadNode.linkedinUrl,
-        status: leadNode.status,
+      const prospect = {
+        id: prospectNode.id,
+        name: prospectNode.name,
+        company: prospectNode.company,
+        title: prospectNode.title,
+        email: prospectNode.email,
+        linkedinUrl: prospectNode.linkedinUrl,
+        status: prospectNode.status,
         research,
         companyInsights,
         outreachMessages,
@@ -574,10 +574,10 @@ export const getLeadTool = createTool({
 
       await writer?.custom({
         type: 'data-tool-progress',
-        data: { tool: 'getLead', status: 'complete', message: `Loaded lead: ${lead.name}` },
+        data: { tool: 'getProspect', status: 'complete', message: `Loaded prospect: ${prospect.name}` },
       } as any);
 
-      return { found: true, lead };
+      return { found: true, prospect };
     } finally {
       await session.close();
     }
@@ -717,8 +717,8 @@ export const knowledgeGraphTools = {
   searchKnowledgeTool,
   listProjectsTool,
   getProjectTool,
-  listLeadsTool,
-  getLeadTool,
+  listProspectsTool,
+  getProspectTool,
   getResearchTool,
   listTopicsTool,
 };

@@ -1,8 +1,8 @@
 /**
- * Lead management types for outreach pipeline.
+ * Prospect management types for outreach pipeline.
  */
 
-export type LeadStatus =
+export type ProspectStatus =
   | "new"
   | "researched"
   | "contacted"
@@ -11,19 +11,19 @@ export type LeadStatus =
   | "qualified"
   | "converted";
 
-export type LeadSource = "manual" | "sales_navigator";
+export type ProspectSource = "manual" | "sales_navigator";
 
-export type LeadPriority = "low" | "medium" | "high";
+export type ProspectPriority = "low" | "medium" | "high";
 
-// Lead notes (user-entered, timestamped)
-export interface LeadNote {
+// Prospect notes (user-entered, timestamped)
+export interface ProspectNote {
   id: string;
   content: string; // Rich text HTML from TipTap
   createdAt: string;
   updatedAt?: string;
 }
 
-export interface Lead {
+export interface Prospect {
   id: string;
 
   // Core info
@@ -46,18 +46,18 @@ export interface Lead {
   websiteUrl?: string;
 
   // Classification
-  status: LeadStatus;
-  source: LeadSource;
+  status: ProspectStatus;
+  source: ProspectSource;
   sourceProvider?: string;
   nameWasDerived?: boolean;
-  priority: LeadPriority;
+  priority: ProspectPriority;
   tags: string[];
   customAttributes?: Record<string, string | number | boolean | string[]>;
   revision?: number;
 
   // Context
   about?: string; // LinkedIn bio (from Sales Navigator capture)
-  notes?: LeadNote[]; // User-entered notes with timestamps
+  notes?: ProspectNote[]; // User-entered notes with timestamps
   referredBy?: string;
 
   // Timestamps
@@ -66,7 +66,7 @@ export interface Lead {
   lastContactedAt?: string;
 }
 
-export interface CreateLeadInput {
+export interface CreateProspectInput {
   name: string;
   company?: string;
   title?: string;
@@ -80,11 +80,11 @@ export interface CreateLeadInput {
   instagramUrl?: string;
   facebookUrl?: string;
   websiteUrl?: string;
-  source: LeadSource;
-  status?: LeadStatus;
+  source: ProspectSource;
+  status?: ProspectStatus;
   sourceProvider?: string;
   nameWasDerived?: boolean;
-  priority?: LeadPriority;
+  priority?: ProspectPriority;
   tags?: string[];
   customAttributes?: Record<string, string | number | boolean | string[]>;
   about?: string; // LinkedIn bio (from Sales Navigator)
@@ -92,7 +92,7 @@ export interface CreateLeadInput {
   lastContactedAt?: string;
 }
 
-export interface UpdateLeadInput {
+export interface UpdateProspectInput {
   name?: string;
   company?: string;
   title?: string;
@@ -105,11 +105,11 @@ export interface UpdateLeadInput {
   instagramUrl?: string;
   facebookUrl?: string;
   websiteUrl?: string;
-  status?: LeadStatus;
-  source?: LeadSource;
+  status?: ProspectStatus;
+  source?: ProspectSource;
   sourceProvider?: string;
   nameWasDerived?: boolean;
-  priority?: LeadPriority;
+  priority?: ProspectPriority;
   tags?: string[];
   customAttributes?: Record<string, string | number | boolean | string[]>;
   about?: string; // LinkedIn bio
@@ -117,16 +117,16 @@ export interface UpdateLeadInput {
   lastContactedAt?: string;
 }
 
-export interface LeadFilters {
-  status?: LeadStatus;
-  source?: LeadSource;
-  priority?: LeadPriority;
+export interface ProspectFilters {
+  status?: ProspectStatus;
+  source?: ProspectSource;
+  priority?: ProspectPriority;
   search?: string;
 }
 
 // Status display configuration
-export const LEAD_STATUS_CONFIG: Record<
-  LeadStatus,
+export const PROSPECT_STATUS_CONFIG: Record<
+  ProspectStatus,
   { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
 > = {
   new: { label: "New", variant: "secondary" },
@@ -138,8 +138,8 @@ export const LEAD_STATUS_CONFIG: Record<
   converted: { label: "Converted", variant: "default" },
 };
 
-export const LEAD_PRIORITY_CONFIG: Record<
-  LeadPriority,
+export const PROSPECT_PRIORITY_CONFIG: Record<
+  ProspectPriority,
   { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
 > = {
   low: { label: "Low", variant: "outline" },
@@ -147,7 +147,7 @@ export const LEAD_PRIORITY_CONFIG: Record<
   high: { label: "High", variant: "outline" },
 };
 
-export const LEAD_SOURCE_CONFIG: Record<LeadSource, { label: string }> = {
+export const PROSPECT_SOURCE_CONFIG: Record<ProspectSource, { label: string }> = {
   manual: { label: "Manual" },
   sales_navigator: { label: "Sales Navigator" },
 };
@@ -159,7 +159,7 @@ export type OutreachStatus = "draft" | "sent";
 
 export interface OutreachMessage {
   id: string;
-  leadId: string;
+  prospectId: string;
   medium: OutreachMedium;
   subject?: string; // For email/inmail
   content: string;
@@ -175,13 +175,13 @@ export interface OutreachMessage {
   sentAt?: string;
 }
 
-export interface OutreachMessageWithLead {
+export interface OutreachMessageWithProspect {
   message: OutreachMessage;
-  lead: Pick<Lead, "id" | "name" | "company" | "title" | "email">;
+  prospect: Pick<Prospect, "id" | "name" | "company" | "title" | "email">;
 }
 
 export interface CreateOutreachInput {
-  leadId: string;
+  prospectId: string;
   medium: OutreachMedium;
   subject?: string;
   content: string;
@@ -243,8 +243,8 @@ export interface CompetitorInfo {
   recentNews?: string;
 }
 
-export interface LeadResearch {
-  leadId: string;
+export interface ProspectResearch {
+  prospectId: string;
   industry: string;
   companySummary: string;
   talkingPoints: string[];
@@ -265,9 +265,9 @@ export const INSIGHT_CATEGORY_CONFIG: Record<
   ai_initiatives: { label: "AI initiatives" },
 };
 
-// ============= LEAD ACTIVITIES =============
+// ============= PROSPECT ACTIVITIES =============
 
-export type LeadActivityType =
+export type ProspectActivityType =
   | "reaction_sent"
   | "comment_sent"
   | "connection_request_sent"
@@ -282,10 +282,10 @@ export type LeadActivityType =
   | "note"
   | "status_change";
 
-export interface LeadActivity {
+export interface ProspectActivity {
   id: string;
-  leadId: string;
-  type: LeadActivityType;
+  prospectId: string;
+  type: ProspectActivityType;
   title: string;
   notes?: string;
   metadata?: {
@@ -304,7 +304,7 @@ export interface LeadActivity {
 }
 
 export interface CreateActivityInput {
-  type: LeadActivityType;
+  type: ProspectActivityType;
   title: string;
   notes?: string;
   metadata?: {
@@ -337,7 +337,7 @@ export interface UpdateActivityInput {
 }
 
 export const ACTIVITY_TYPE_CONFIG: Record<
-  LeadActivityType,
+  ProspectActivityType,
   { label: string; color: string; bgColor: string }
 > = {
   reaction_sent: { label: "Reaction sent", color: "text-sky-600", bgColor: "bg-sky-500/10" },
@@ -396,11 +396,11 @@ export interface UpdatePersonaInput {
   isActive?: boolean;
 }
 
-// ============= LEAD QUALIFICATION =============
+// ============= PROSPECT QUALIFICATION =============
 
-export interface LeadQualification {
+export interface LegacyQualification {
   id: string;
-  leadId: string;
+  prospectId: string;
   matchedPersonaId: string;
   matchedPersonaName: string;
   score: number; // 0-100

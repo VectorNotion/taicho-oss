@@ -14,7 +14,7 @@ import type {
  * ProspectQualification (what our policy says) and ResearchRuns.
  *
  * Complex sub-structures (signals, evidence, matches, breakdown) are stored as
- * JSON string properties — the customAttributes pattern from lead-repository.
+ * JSON string properties — the customAttributes pattern from prospect-repository.
  */
 
 type EntityRef = { kind: "account" | "prospect"; id: string };
@@ -22,7 +22,7 @@ type EntityRef = { kind: "account" | "prospect"; id: string };
 function entityMatch(entity: EntityRef): { label: string; obsLabel: string } {
   return entity.kind === "account"
     ? { label: "Account", obsLabel: "AccountObservation" }
-    : { label: "Lead", obsLabel: "ProspectObservation" };
+    : { label: "Prospect", obsLabel: "ProspectObservation" };
 }
 
 function toNumber(value: unknown): number {
@@ -206,26 +206,26 @@ export async function getMatches(entity: EntityRef): Promise<DimensionMatch[]> {
   }
 }
 
-/** Replace the lead's ProspectQualification with the latest decision. */
+/** Replace the prospect's ProspectQualification with the latest decision. */
 export async function saveProspectQualification(
-  leadId: string,
+  prospectId: string,
   result: ProspectQualificationResult
 ): Promise<void> {
   const session = await getSession();
   try {
     await session.run(
       `
-      MATCH (l:Lead {id: $leadId})-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
+      MATCH (l:Prospect {id: $prospectId})-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
       DETACH DELETE q
       `,
-      { leadId }
+      { prospectId }
     );
     const created = await session.run(
       `
-      MATCH (l:Lead {id: $leadId})
+      MATCH (l:Prospect {id: $prospectId})
       CREATE (q:ProspectQualification {
         id: randomUUID(),
-        leadId: $leadId,
+        prospectId: $prospectId,
         status: $status,
         icpScore: $icpScore,
         personaScore: $personaScore,
@@ -240,7 +240,7 @@ export async function saveProspectQualification(
       RETURN q
       `,
       {
-        leadId,
+        prospectId,
         status: result.status,
         icpScore: result.icpScore,
         personaScore: result.personaScore,
@@ -253,7 +253,7 @@ export async function saveProspectQualification(
       }
     );
     if (created.records.length === 0) {
-      throw new Error(`Lead not found: ${leadId}`);
+      throw new Error(`Prospect not found: ${prospectId}`);
     }
   } finally {
     await session.close();
@@ -261,16 +261,16 @@ export async function saveProspectQualification(
 }
 
 export async function getProspectQualification(
-  leadId: string
+  prospectId: string
 ): Promise<ProspectQualificationResult | null> {
   const session = await getSession();
   try {
     const result = await session.run(
       `
-      MATCH (l:Lead {id: $leadId})-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
+      MATCH (l:Prospect {id: $prospectId})-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
       RETURN q
       `,
-      { leadId }
+      { prospectId }
     );
     if (result.records.length === 0) return null;
     const props = result.records[0].get("q").properties as Record<string, unknown>;
@@ -346,7 +346,7 @@ export async function hasAnyResearchRun(accountId: string): Promise<boolean> {
 }
 
 export interface TouchListEntry {
-  leadId: string;
+  prospectId: string;
   name: string;
   company?: string;
   title?: string;
@@ -364,20 +364,20 @@ export async function getTouchList(limit = 25): Promise<TouchListEntry[]> {
   try {
     const result = await session.run(
       `
-      MATCH (l:Lead)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification {status: 'QUALIFIED'})
+      MATCH (l:Prospect)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification {status: 'QUALIFIED'})
       RETURN l, q
       ORDER BY q.timingScore DESC
       LIMIT ${Math.max(1, Math.min(200, Math.floor(limit)))}
       `
     );
     return result.records.map((record) => {
-      const lead = record.get("l").properties as Record<string, unknown>;
+      const prospect = record.get("l").properties as Record<string, unknown>;
       const q = record.get("q").properties as Record<string, unknown>;
       return {
-        leadId: lead.id as string,
-        name: lead.name as string,
-        company: (lead.company as string | null) ?? undefined,
-        title: (lead.title as string | null) ?? undefined,
+        prospectId: prospect.id as string,
+        name: prospect.name as string,
+        company: (prospect.company as string | null) ?? undefined,
+        title: (prospect.title as string | null) ?? undefined,
         icpScore: toNumber(q.icpScore),
         personaScore: toNumber(q.personaScore),
         timingScore: toNumber(q.timingScore),

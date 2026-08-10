@@ -94,7 +94,7 @@ export const roleDefinitions: Array<{
   { id: "admin", label: "Administrator", description: "Manages users, roles, teams, and both products.", level: "organization" },
   { id: "team_admin", label: "Team administrator", description: "Manages membership for specifically assigned teams.", level: "team" },
   { id: "outreach_manager", label: "Outreach manager", description: "Full Outreach targeting and operations.", level: "product" },
-  { id: "outreach_operator", label: "Outreach operator", description: "Researches, qualifies, and contacts leads.", level: "product" },
+  { id: "outreach_operator", label: "Outreach operator", description: "Researches, qualifies, and contacts prospects.", level: "product" },
   { id: "content_manager", label: "Content manager", description: "Full Content configuration and publishing.", level: "product" },
   { id: "content_editor", label: "Content editor", description: "Researches, generates, and edits content.", level: "product" },
   { id: "member", label: "Member", description: "Basic read access to entitled products.", level: "basic" },
@@ -162,7 +162,7 @@ export function permissionForRequest(pathname: string, method: string): {
   if (product === "outreach") {
     if (permissionPath.endsWith("/research") || permissionPath === "/api/outreach/research") return { product, action: "research" };
     if (permissionPath.endsWith("/qualify")) return { product, action: "qualify" };
-    if (/\/leads\/[^/]+\/outreach(?:\/|$)/.test(permissionPath)) return { product, action: "message" };
+    if (/\/prospects\/[^/]+\/outreach(?:\/|$)/.test(permissionPath)) return { product, action: "message" };
   }
 
   if (product === "content") {

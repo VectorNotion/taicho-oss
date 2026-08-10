@@ -1,8 +1,8 @@
-import { getLeadById, storeLeadResearch } from '@/products/outreach/data/lead-repository';
+import { getProspectById, storeProspectResearch } from '@/products/outreach/data/prospect-repository';
 import {
   buildResearchInput,
-  generateLeadResearch,
-} from '@/products/outreach/agent/lead-research';
+  generateProspectResearch,
+} from '@/products/outreach/agent/prospect-research';
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { commercialErrorResponse, reserveVariableCost } from '@content-automation/auth/commercial';
 import { releaseReservation, settleReservation } from '@content-automation/platform/commercial';
@@ -21,13 +21,13 @@ function failureMessage(requestAborted: boolean, researchAborted: boolean): stri
 export async function POST(req: Request) {
   let reservationId: string | null = null;
   try {
-    const { leadId } = await req.json();
-    if (typeof leadId !== 'string' || !leadId.trim()) {
-      return Response.json({ error: 'A lead is required.' }, { status: 400 });
+    const { prospectId } = await req.json();
+    if (typeof prospectId !== 'string' || !prospectId.trim()) {
+      return Response.json({ error: 'A prospect is required.' }, { status: 400 });
     }
 
-    const lead = await getLeadById(leadId);
-    if (!lead) return Response.json({ error: 'Lead not found.' }, { status: 404 });
+    const prospect = await getProspectById(prospectId);
+    if (!prospect) return Response.json({ error: 'Prospect not found.' }, { status: 404 });
 
     const billing = await reserveVariableCost(req, {
       action: 'outreach_research_stream',
@@ -49,12 +49,12 @@ export async function POST(req: Request) {
         } as never);
         try {
           await observeOperation('ai.outreach.research_stream', {
-            runId: leadId,
-            attributes: { lead_id: leadId },
+            runId: prospectId,
+            attributes: { prospect_id: prospectId },
           }, async () => {
             // Retrieval is deterministic and concurrent; the model performs one
             // bounded synthesis pass after all five evidence sets arrive.
-            const validated = await generateLeadResearch(buildResearchInput(lead), {
+            const validated = await generateProspectResearch(buildResearchInput(prospect), {
               signal: researchSignal,
               onSearchProgress: (topic, status, detail) => {
                 writer.write({
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
                 } as never);
               },
             });
-            await storeLeadResearch(leadId, validated);
+            await storeProspectResearch(prospectId, validated);
             await settleReservation({
               reservationId: billing.reservationId,
               actualCredits: billing.estimatedCredits,
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
         } catch (error) {
           await releaseReservation(billing.reservationId).catch(() => undefined);
           log.error('outreach.research_stream.failed', error, {
-            lead_id: leadId,
+            prospect_id: prospectId,
             request_aborted: req.signal.aborted,
             research_aborted: researchSignal.aborted,
           });

@@ -24,19 +24,19 @@ export type BrainCanvasHandle = {
   mergeGraph(g: BrainGraph, originId?: string): void;
   focus(id: string | null): void;
   flyTo(id: string): void;
-  setLens(lens: 'everything' | 'content' | 'leads' | 'recent'): void;
+  setLens(lens: 'everything' | 'content' | 'prospects' | 'recent'): void;
   setPulse(id: string | null): void;
 };
 
 const CONTENT_TYPES = new Set<BrainNodeType>(['project', 'capability', 'topic', 'idea', 'draft', 'research-item', 'source']);
-const LEAD_TYPES = new Set<BrainNodeType>(['lead', 'lead-research', 'qualification', 'persona']);
+const PROSPECT_TYPES = new Set<BrainNodeType>(['prospect', 'prospect-research', 'qualification', 'persona']);
 const RECENT_MS = 7 * 24 * 3600 * 1000;
 
 /** Per-type anchor seeds (fractions of viewport) for gentle clustering. */
 const CLUSTER: Partial<Record<BrainNodeType, [number, number]>> = {
   project: [0.42, 0.5], capability: [0.35, 0.55], topic: [0.62, 0.38],
   idea: [0.74, 0.62], draft: [0.78, 0.68], 'research-item': [0.55, 0.25],
-  source: [0.5, 0.2], lead: [0.84, 0.3], 'lead-research': [0.88, 0.24],
+  source: [0.5, 0.2], prospect: [0.84, 0.3], 'prospect-research': [0.88, 0.24],
   qualification: [0.88, 0.36], persona: [0.9, 0.44],
 };
 
@@ -58,7 +58,7 @@ export const BrainCanvas = forwardRef<BrainCanvasHandle, {
     focusId: null as string | null,
     pulseId: null as string | null,
     hoverId: null as string | null,
-    lens: 'everything' as 'everything' | 'content' | 'leads' | 'recent',
+    lens: 'everything' as 'everything' | 'content' | 'prospects' | 'recent',
     dragging: null as SimNode | null,
     size: { w: 0, h: 0 },
     reduced: false,
@@ -254,7 +254,7 @@ export const BrainCanvas = forwardRef<BrainCanvasHandle, {
       const focusSet = s.focusId ? s.nbr.get(s.focusId) : null;
       const lensAlpha = (n: SimNode): number => {
         if (s.lens === 'content') return CONTENT_TYPES.has(n.type) ? 1 : 0.15;
-        if (s.lens === 'leads') return LEAD_TYPES.has(n.type) ? 1 : 0.15;
+        if (s.lens === 'prospects') return PROSPECT_TYPES.has(n.type) ? 1 : 0.15;
         if (s.lens === 'recent') {
           const recent = n.createdAt && now() - Date.parse(n.createdAt) < RECENT_MS;
           return recent ? 1 : 0.15;
@@ -315,7 +315,7 @@ export const BrainCanvas = forwardRef<BrainCanvasHandle, {
       if (k < LOD.farK) {
         const groups = new Map<string, { x: number; y: number; c: number; color: string; word: string }>();
         for (const n of s.nodes) {
-          const key = LEAD_TYPES.has(n.type) ? 'Pipeline' : n.type === 'topic' ? 'Topics' : 'Product';
+          const key = PROSPECT_TYPES.has(n.type) ? 'Pipeline' : n.type === 'topic' ? 'Topics' : 'Product';
           const g = groups.get(key) ?? { x: 0, y: 0, c: 0, color: TYPE_COLOR[n.type], word: key };
           g.x += n.x; g.y += n.y; g.c += 1;
           groups.set(key, g);

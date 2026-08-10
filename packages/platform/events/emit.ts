@@ -20,9 +20,9 @@ const log = createLogger('platform.events.emit');
  * analytics consumers compatible.
  */
 export const PRODUCT_EVENT_NAMES = [
-  'lead.created', 'lead.researched', 'lead.qualified',
-  'lead.meeting.scheduled', 'lead.transcript.updated', 'lead.insights.updated',
-  'outreach.generated', 'outreach.sent', 'lead.replied',
+  'prospect.created', 'prospect.researched', 'prospect.qualified',
+  'prospect.meeting.scheduled', 'prospect.transcript.updated', 'prospect.insights.updated',
+  'outreach.generated', 'outreach.sent', 'prospect.replied',
   'draft.ready', 'post.scheduled', 'post.published', 'post.failed',
   'content.angle.emerged',
   // Feedback spine: emitted by recordMetricSnapshot
@@ -35,7 +35,7 @@ export const PRODUCT_EVENT_NAMES = [
 
 export type ProductEventRefs = {
   contentId?: string;
-  leadId?: string;
+  prospectId?: string;
   postId?: string;
   sendId?: string;
   draftId?: string;
@@ -145,7 +145,7 @@ async function deliver(input: ProductEventInput): Promise<{ id: string; created:
     name: input.name,
     eventVersion: input.eventVersion ?? 1,
     contentId: refs.contentId ?? null,
-    leadId: refs.leadId ?? null,
+    prospectId: refs.prospectId ?? null,
     postId: refs.postId ?? null,
     sendId: refs.sendId ?? null,
     source: 'product',

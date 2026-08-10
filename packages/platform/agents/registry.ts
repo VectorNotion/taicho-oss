@@ -19,12 +19,12 @@ import {
 
 // Outreach orchestrators + the research-input builder (products/outreach/agent/*).
 import {
-  runLeadResearch,
+  runProspectResearch,
   buildResearchInput,
-} from '@/products/outreach/agent/lead-research';
+} from '@/products/outreach/agent/prospect-research';
 import { generateOutreach } from '@/products/outreach/agent/generator';
-import { runQualifyLead } from '@/products/outreach/agent/qualify-lead';
-import { getLeadById } from '@/products/outreach/data/lead-repository';
+import { runQualifyProspect } from '@/products/outreach/agent/qualify-prospect';
+import { getProspectById } from '@/products/outreach/data/prospect-repository';
 import type { OutreachMedium } from '@/products/outreach/domain/types';
 import { requireGraphOrganizationId } from '../data/organization-context';
 import type { ExecutableAction } from './contracts';
@@ -77,20 +77,20 @@ export const actionHandlers: Record<ExecutableAction, ActionHandler> = {
 
   // --- outreach --------------------------------------------------------------
 
-  // Route sends { leadId }. The research orchestrator needs the full lead
-  // (name/company/title/location), so hydrate it here; runLeadResearch chains
-  // qualify_lead internally (failure non-fatal, matching the Python semantics).
-  research_lead: async (payload) => {
-    const leadId = payload.leadId as string;
-    const lead = await getLeadById(leadId);
-    if (!lead) {
-      throw new Error(`Lead not found: ${leadId}`);
+  // Route sends { prospectId }. The research orchestrator needs the full prospect
+  // (name/company/title/location), so hydrate it here; runProspectResearch chains
+  // qualify_prospect internally (failure non-fatal, matching the Python semantics).
+  research_prospect: async (payload) => {
+    const prospectId = payload.prospectId as string;
+    const prospect = await getProspectById(prospectId);
+    if (!prospect) {
+      throw new Error(`Prospect not found: ${prospectId}`);
     }
-    return runLeadResearch(buildResearchInput(lead));
+    return runProspectResearch(buildResearchInput(prospect));
   },
 
-  // Route sends { leadId }; orchestrator takes the id directly (spec §8).
-  qualify_lead: async (payload) => runQualifyLead(payload.leadId as string),
+  // Route sends { prospectId }; orchestrator takes the id directly (spec §8).
+  qualify_prospect: async (payload) => runQualifyProspect(payload.prospectId as string),
 
   // --- shipping actions (spec 2026-07-31 §5 item 3) --------------------------
 
@@ -114,11 +114,11 @@ export const actionHandlers: Record<ExecutableAction, ActionHandler> = {
     };
   },
 
-  // Payload: AddToFunnelPayload (leadId → Cascade import rendezvous, or a
+  // Payload: AddToFunnelPayload (prospectId → Cascade import rendezvous, or a
   // direct Cascade contactId).
   add_to_funnel: async (payload) =>
     runAddToFunnel({
-      leadId: payload.leadId as string | undefined,
+      prospectId: payload.prospectId as string | undefined,
       contactId: payload.contactId as string | undefined,
       funnelId: payload.funnelId as string,
     }),
@@ -129,7 +129,7 @@ export const actionHandlers: Record<ExecutableAction, ActionHandler> = {
   // operation's historical result key.
   generate_outreach: async (payload) => {
     const result = await generateOutreach({
-      leadId: payload.leadId as string,
+      prospectId: payload.prospectId as string,
       medium: payload.medium as OutreachMedium,
       targetContent: payload.targetContent as string | undefined,
       tenantId: process.env.CMS_TENANT_ID,
@@ -139,7 +139,7 @@ export const actionHandlers: Record<ExecutableAction, ActionHandler> = {
     }
     return {
       messageId: result.message.id,
-      leadId: result.message.leadId,
+      prospectId: result.message.prospectId,
       medium: result.message.medium,
       subject: result.message.subject ?? null,
       content: result.message.content,

@@ -77,7 +77,7 @@ type TeamId =
   | "muse"
   | "scribe";
 type PermissionId = "read-only" | "ask" | "workspace-edits" | "allow-all";
-type ContextId = "project" | "lead" | "topic" | "file" | "url" | "page";
+type ContextId = "project" | "prospect" | "topic" | "file" | "url" | "page";
 
 interface Option<T extends string> {
   id: T;
@@ -92,7 +92,7 @@ const sourceOptions: Array<
   {
     id: "workspace",
     label: "Workspace",
-    description: "Projects, leads, research, and history",
+    description: "Projects, prospects, research, and history",
     icon: SearchIcon,
   },
   {
@@ -224,8 +224,8 @@ const contextOptions: Array<Option<ContextId>> = [
     icon: FileTextIcon,
   },
   {
-    id: "lead",
-    label: "Lead",
+    id: "prospect",
+    label: "Prospect",
     description: "Attach a person and relationship history",
     icon: UserRoundSearchIcon,
   },

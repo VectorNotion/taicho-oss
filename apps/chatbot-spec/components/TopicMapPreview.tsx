@@ -60,7 +60,7 @@ const FULL: BrainGraph = { nodes: NODES, links: LINKS };
 
 const TYPE_LABEL: Record<BrainNode['type'], string> = {
   project: 'Project', capability: 'Capability', topic: 'Topic', idea: 'Idea', draft: 'Draft',
-  'research-item': 'Research', source: 'Source', lead: 'Lead', 'lead-research': 'Lead research',
+  'research-item': 'Research', source: 'Source', prospect: 'Prospect', 'prospect-research': 'Prospect research',
   qualification: 'Qualification', persona: 'Persona', agent: 'Agent',
 };
 

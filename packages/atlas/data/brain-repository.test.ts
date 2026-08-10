@@ -12,7 +12,7 @@ import { fetchOverview, fetchNeighborhood, searchNodes } from './brain-repositor
 const ORGANIZATION_ID = `atlas-test-organization-${process.pid}`;
 const P = `atlas-test-project-${process.pid}`;
 const T = `atlas-test-topic-${process.pid}`;
-const L = `atlas-test-lead-${process.pid}`;
+const L = `atlas-test-prospect-${process.pid}`;
 
 function inOrganization<T>(callback: () => T): T {
   return runWithGraphOrganization(ORGANIZATION_ID, callback);
@@ -25,7 +25,7 @@ before(() => inOrganization(async () => {
       `CREATE (p:Project {id: $p, title: 'Atlas Test Project', createdAt: localdatetime()})
        CREATE (f:Feature {id: $p + '-feat', name: 'Atlas Test Feature'})
        CREATE (t:Topic {id: $t, name: 'atlas-test-topic', displayName: 'Atlas Test Topic', status: 'active'})
-       CREATE (l:Lead {id: $l, name: 'Atlas Test Lead', company: 'TestCo', title: 'CEO', status: 'new', priority: 'medium'})
+       CREATE (l:Prospect {id: $l, name: 'Atlas Test Prospect', company: 'TestCo', title: 'CEO', status: 'new', priority: 'medium'})
        CREATE (p)-[:HAS_FEATURE]->(f)
        CREATE (t)-[:DERIVED_FROM]->(f)`,
       { p: P, t: T, l: L },
@@ -53,9 +53,9 @@ test('overview returns vocabulary-typed nodes and links, no raw labels', () => i
   assert.ok(topic, 'active topic present');
   assert.equal(topic!.type, 'topic');
   assert.equal(topic!.label, 'Atlas Test Topic');
-  const lead = g.nodes.find((n) => n.id === L);
-  assert.ok(lead, 'lead present');
-  assert.equal(lead!.meta.company, 'TestCo');
+  const prospect = g.nodes.find((n) => n.id === L);
+  assert.ok(prospect, 'prospect present');
+  assert.equal(prospect!.meta.company, 'TestCo');
   const feat = g.nodes.find((n) => n.id === P + '-feat');
   assert.ok(feat, 'topic-attached capability included');
   assert.equal(feat!.type, 'capability');

@@ -34,7 +34,7 @@ export {
 } from "./data/contact-repository";
 export type { NurtureContactProjection } from "./data/contact-repository";
 export {
-  importOutreachLead,
+  importOutreachProspect,
   importWorkspaceContact,
   markWorkspaceContactLinked,
 } from "./data/intake";

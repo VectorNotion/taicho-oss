@@ -134,6 +134,13 @@
       "when": 1786384000000,
       "tag": "0018_add_outreach_lead_source_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786700000000,
+      "tag": "0019_rename_lead_to_prospect",
+      "breakpoints": true
     }
   ]
 }

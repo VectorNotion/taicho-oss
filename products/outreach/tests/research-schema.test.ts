@@ -3,22 +3,22 @@ import test from 'node:test';
 import {
   companyInsightSchema,
   competitorSchema,
-  leadResearchSchema,
+  prospectResearchSchema,
   researchInputSchema,
 } from '../domain/research-schema';
 import {
-  buildLeadResearchPrompt,
-  buildLeadResearchQueries,
+  buildProspectResearchPrompt,
+  buildProspectResearchQueries,
   buildResearchInput,
-  DEFAULT_LEAD_RESEARCH_MODEL,
-} from '../agent/lead-research';
+  DEFAULT_PROSPECT_RESEARCH_MODEL,
+} from '../agent/prospect-research';
 import {
-  buildLeadResearchInstructions,
-  LEAD_RESEARCH_MAX_STEPS,
-} from '../agent/lead-research-agent';
+  buildProspectResearchInstructions,
+  PROSPECT_RESEARCH_MAX_STEPS,
+} from '../agent/prospect-research-agent';
 
-test('lead research accepts the complete structured provider contract', () => {
-  const result = leadResearchSchema.parse({
+test('prospect research accepts the complete structured provider contract', () => {
+  const result = prospectResearchSchema.parse({
     industry: 'Software',
     companySummary: 'A concise summary.',
     companyInsights: [
@@ -27,7 +27,7 @@ test('lead research accepts the complete structured provider contract', () => {
     ],
     competitors: [{ name: 'Competitor', relevance: 'Same buyer', aiFocus: 'Automation' }],
     talkingPoints: ['Reliability', 'Governance'],
-    outreachAngle: 'Lead with operational reliability.',
+    outreachAngle: 'Prospect with operational reliability.',
   });
   assert.equal(result.companyInsights.length, 2);
   assert.equal(result.competitors[0].name, 'Competitor');
@@ -36,33 +36,33 @@ test('lead research accepts the complete structured provider contract', () => {
 test('research schemas reject unknown categories and missing required output', () => {
   assert.equal(companyInsightSchema.safeParse({ category: 'rumor', content: 'x' }).success, false);
   assert.equal(competitorSchema.safeParse({ name: 'Only a name' }).success, false);
-  assert.equal(leadResearchSchema.safeParse({ industry: 'Software' }).success, false);
-  assert.equal(researchInputSchema.safeParse({ leadId: 'lead-1', name: 'Ada' }).success, false);
+  assert.equal(prospectResearchSchema.safeParse({ industry: 'Software' }).success, false);
+  assert.equal(researchInputSchema.safeParse({ prospectId: 'prospect-1', name: 'Ada' }).success, false);
 });
 
-test('research input is grounded only in persisted lead fields', () => {
+test('research input is grounded only in persisted prospect fields', () => {
   const input = buildResearchInput({
-    id: 'lead-1', name: 'Ada', company: 'Analytical Engines', title: 'Founder',
+    id: 'prospect-1', name: 'Ada', company: 'Analytical Engines', title: 'Founder',
     location: 'London', status: 'new', source: 'manual', priority: 'medium', tags: [],
     createdAt: '2026-01-01', updatedAt: '2026-01-01',
   });
   assert.deepEqual(input, {
-    leadId: 'lead-1', name: 'Ada', company: 'Analytical Engines', title: 'Founder', location: 'London',
+    prospectId: 'prospect-1', name: 'Ada', company: 'Analytical Engines', title: 'Founder', location: 'London',
   });
 });
 
 test('research instructions use the current date and leave room for synthesis', () => {
-  const instructions = buildLeadResearchInstructions(new Date('2026-08-09T00:00:00.000Z'));
+  const instructions = buildProspectResearchInstructions(new Date('2026-08-09T00:00:00.000Z'));
 
   assert.match(instructions, /Today is 2026-08-09/);
   assert.match(instructions, /recent news 2026 2025/);
   assert.doesNotMatch(instructions, /recent news 2024 2025/);
-  assert.ok(LEAD_RESEARCH_MAX_STEPS >= 6);
+  assert.ok(PROSPECT_RESEARCH_MAX_STEPS >= 6);
 });
 
-test('research prompt contains only the persisted lead identity supplied by the server', () => {
-  const prompt = buildLeadResearchPrompt({
-    leadId: 'lead-1',
+test('research prompt contains only the persisted prospect identity supplied by the server', () => {
+  const prompt = buildProspectResearchPrompt({
+    prospectId: 'prospect-1',
     name: 'Ada Lovelace',
     company: 'Analytical Engines',
     title: 'Founder',
@@ -73,8 +73,8 @@ test('research prompt contains only the persisted lead identity supplied by the 
 });
 
 test('research retrieval plans exactly five current, independent evidence queries', () => {
-  const queries = buildLeadResearchQueries({
-    leadId: 'lead-1',
+  const queries = buildProspectResearchQueries({
+    prospectId: 'prospect-1',
     name: 'Ada Lovelace',
     company: 'Analytical Engines',
   }, new Date('2026-08-09T00:00:00.000Z'));
@@ -88,5 +88,5 @@ test('research retrieval plans exactly five current, independent evidence querie
   ]);
   assert.match(queries[1].query, /2026 2025/);
   assert.match(queries[4].query, /2026/);
-  assert.equal(DEFAULT_LEAD_RESEARCH_MODEL, 'google/gemini-3.6-flash');
+  assert.equal(DEFAULT_PROSPECT_RESEARCH_MODEL, 'google/gemini-3.6-flash');
 });

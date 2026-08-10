@@ -1,10 +1,10 @@
-import type { LeadState, TicketDetail, TicketSummary } from './contracts'
+import type { ProspectState, TicketDetail, TicketSummary } from './contracts'
 import { signInternalRequest } from './security'
 
-export type LeadInput = {
+export type ProspectInput = {
   tenantId: string
   conversationId: string
-  state: LeadState
+  state: ProspectState
   summary: string
 }
 
@@ -27,7 +27,7 @@ export type TicketListInput = {
 }
 
 export interface AssistantOperations {
-  createLead(input: LeadInput, idempotencyKey: string): Promise<{ id: string }>
+  createProspect(input: ProspectInput, idempotencyKey: string): Promise<{ id: string }>
   createTicket(input: TicketInput, idempotencyKey: string): Promise<TicketSummary>
   listTickets(input: TicketListInput): Promise<TicketDetail[]>
 }
@@ -38,8 +38,8 @@ export class PayloadAssistantOperations implements AssistantOperations {
     private readonly secret: string,
   ) {}
 
-  createLead(input: LeadInput, idempotencyKey: string): Promise<{ id: string }> {
-    return this.request('lead.create', input, idempotencyKey)
+  createProspect(input: ProspectInput, idempotencyKey: string): Promise<{ id: string }> {
+    return this.request('prospect.create', input, idempotencyKey)
   }
 
   createTicket(input: TicketInput, idempotencyKey: string): Promise<TicketSummary> {
@@ -78,11 +78,11 @@ export class PayloadAssistantOperations implements AssistantOperations {
 }
 
 export class InMemoryAssistantOperations implements AssistantOperations {
-  readonly leads: LeadInput[] = []
+  readonly prospects: ProspectInput[] = []
   readonly tickets: TicketInput[] = []
 
-  async createLead(input: LeadInput): Promise<{ id: string }> {
-    this.leads.push(structuredClone(input))
+  async createProspect(input: ProspectInput): Promise<{ id: string }> {
+    this.prospects.push(structuredClone(input))
     return { id: crypto.randomUUID() }
   }
 

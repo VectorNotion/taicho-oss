@@ -42,7 +42,7 @@ export interface OutreachDraft {
 
 export interface OutreachResult {
   type: "outreach_draft";
-  lead: {
+  prospect: {
     name: string;
     company: string;
   };

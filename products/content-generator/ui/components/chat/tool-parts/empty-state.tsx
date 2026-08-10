@@ -3,7 +3,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { SearchX, Users, Database, FileText, Tags } from 'lucide-react';
 
-type EmptyStateType = 'leads' | 'projects' | 'research' | 'topics' | 'search';
+type EmptyStateType = 'prospects' | 'projects' | 'research' | 'topics' | 'search';
 
 interface EmptyStateProps {
   type: EmptyStateType;
@@ -16,10 +16,10 @@ const config: Record<EmptyStateType, {
   defaultMessage: string;
   defaultSuggestion: string;
 }> = {
-  leads: {
+  prospects: {
     icon: Users,
-    defaultMessage: 'No leads found',
-    defaultSuggestion: 'Try adjusting your search or add new leads',
+    defaultMessage: 'No prospects found',
+    defaultSuggestion: 'Try adjusting your search or add new prospects',
   },
   projects: {
     icon: Database,

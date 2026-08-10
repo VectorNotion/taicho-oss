@@ -1,6 +1,6 @@
 # Graph backend
 
-FalkorDB is the platform's sole graph store. Content, research, topics, leads,
+FalkorDB is the platform's sole graph store. Content, research, topics, prospects,
 Intelligence workflows, Chat context, and the Brain all access it through the shared graph seam.
 
 ## Configuration

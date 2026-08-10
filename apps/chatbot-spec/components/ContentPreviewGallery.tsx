@@ -44,7 +44,7 @@ const REEL_CAPTION = 'We score every hook against a synthetic audience before it
 const THINKING = {
   x: [
     'Scanning run #48 — 24 frames, 412k simulated impressions, hook variants ranked',
-    'Cutting to one number — 412k leads the post, the thread carries the mechanism, and the price point holds for tweet two so the hook stays under 280 characters',
+    'Cutting to one number — 412k prospects the post, the thread carries the mechanism, and the price point holds for tweet two so the hook stays under 280 characters',
   ],
   li: [
     'Audience read: operators and founders — professional register, no hashtags',

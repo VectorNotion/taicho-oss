@@ -196,9 +196,9 @@ const ThreadSuggestions: FC<ThreadSuggestionsProps & { disabled?: boolean }> = (
 const defaultSuggestions: ThreadSuggestionsProps["suggestions"] = [
   {
     title: "Search knowledge",
-    label: "across projects and leads",
+    label: "across projects and prospects",
     icon: "research",
-    prompt: "Search for AI-related projects and leads",
+    prompt: "Search for AI-related projects and prospects",
     service: "Workspace",
   },
   {

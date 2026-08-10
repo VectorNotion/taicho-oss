@@ -1,5 +1,5 @@
 import {
-  LeadStateSchema,
+  ProspectStateSchema,
   chatEvent,
   encodeSseEvent,
   type ChatEventEnvelope,
@@ -8,7 +8,7 @@ import {
   type ConversationHistory,
   type AssistantKnowledgeScope,
   type EscalationRequest,
-  type LeadState,
+  type ProspectState,
   type SupportFeedbackRequest,
   type TicketDetail,
   type TicketSummary,
@@ -101,8 +101,8 @@ function fieldFrom(message: string, label: string): string | undefined {
   return message.match(expression)?.[1]?.trim()
 }
 
-function nextLeadState(previous: LeadState, message: string): LeadState {
-  return LeadStateSchema.parse({
+function nextProspectState(previous: ProspectState, message: string): ProspectState {
+  return ProspectStateSchema.parse({
     ...previous,
     consent: previous.consent || explicitlyConsents(message),
     email: previous.email ?? emailFrom(message),
@@ -211,7 +211,7 @@ function salesContextText(
 ): string {
   if (contexts.length === 0) return 'No linked sales context.'
   return contexts.map((context, index) => {
-    const state = context.leadState
+    const state = context.prospectState
     const fields = [
       state.company ? `Company: ${state.company}` : null,
       state.role ? `Role: ${state.role}` : null,
@@ -361,7 +361,7 @@ export class AssistantService {
       surface: conversation.surface,
       messages,
       ...(conversation.surface === 'sales'
-        ? { leadState: LeadStateSchema.parse(conversation.leadState) }
+        ? { prospectState: ProspectStateSchema.parse(conversation.prospectState) }
         : {}),
     }
   }
@@ -437,8 +437,8 @@ export class AssistantService {
         ? await this.salesKnowledge.search(knowledgeScope, request.message, 5, request.page?.path)
         : await this.repository.searchKnowledge(request.message, 'sales_fact', 5, request.page?.path)
     const history = await this.repository.listMessages(conversation.id, this.config.maxHistoryMessages ?? 16)
-    const previousState = LeadStateSchema.parse(conversation.leadState)
-    let leadState = nextLeadState(previousState, request.message)
+    const previousState = ProspectStateSchema.parse(conversation.prospectState)
+    let prospectState = nextProspectState(previousState, request.message)
 
     const answer = supportUrl
       ? `That sounds like a support request rather than a sales question. Please use the ${this.config.brandName} support portal so the support team can help securely: ${supportUrl}`
@@ -466,22 +466,22 @@ export class AssistantService {
         messages: historyForModel(history),
       }, writer, signal)
 
-    let leadCreated = false
-    if (leadState.consent && leadState.email && !leadState.submittedAt && this.operations) {
-      const result = await this.operations.createLead({
+    let prospectCreated = false
+    if (prospectState.consent && prospectState.email && !prospectState.submittedAt && this.operations) {
+      const result = await this.operations.createProspect({
         tenantId: conversation.tenantId,
         conversationId: conversation.id,
-        state: leadState,
+        state: prospectState,
         summary: answer.slice(0, 1_000),
-      }, `lead:${conversation.id}`)
-      leadState = LeadStateSchema.parse({ ...leadState, submittedAt: new Date().toISOString() })
-      leadCreated = true
-      await this.repository.updateLeadState(conversation.id, leadState, {
-        payloadLeadId: result.id,
+      }, `prospect:${conversation.id}`)
+      prospectState = ProspectStateSchema.parse({ ...prospectState, submittedAt: new Date().toISOString() })
+      prospectCreated = true
+      await this.repository.updateProspectState(conversation.id, prospectState, {
+        payloadProspectId: result.id,
         salesSummary: answer.slice(0, 1_000),
       })
-    } else if (JSON.stringify(leadState) !== JSON.stringify(previousState)) {
-      await this.repository.updateLeadState(conversation.id, leadState, {
+    } else if (JSON.stringify(prospectState) !== JSON.stringify(previousState)) {
+      await this.repository.updateProspectState(conversation.id, prospectState, {
         salesSummary: answer.slice(0, 1_000),
       })
     }
@@ -493,18 +493,18 @@ export class AssistantService {
       role: 'assistant',
       content: answer,
       citations,
-      metadata: { leadCreated },
+      metadata: { prospectCreated },
     })
     if (supportUrl || facts.length === 0) writer.write('assistant.delta', { text: answer })
-    writer.write('lead.state.updated', {
-      consent: leadState.consent,
-      collected: Object.keys(leadState).filter((key) => key !== 'consent' && Boolean(leadState[key as keyof LeadState])),
-      submitted: Boolean(leadState.submittedAt),
+    writer.write('prospect.state.updated', {
+      consent: prospectState.consent,
+      collected: Object.keys(prospectState).filter((key) => key !== 'consent' && Boolean(prospectState[key as keyof ProspectState])),
+      submitted: Boolean(prospectState.submittedAt),
     })
     writer.write('suggestions.updated', {
       suggestions: supportUrl
         ? ['Open support', 'Read the documentation']
-        : leadState.submittedAt
+        : prospectState.submittedAt
         ? ['Explore the product', 'Read the documentation']
         : ['How does it work?', 'Which plan fits my team?', 'Contact the team'],
     })

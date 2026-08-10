@@ -70,8 +70,8 @@ test("structured logs correlate operations without raw tenant, user, or entity i
     actorId: "user-private",
     actorType: "user",
   }, () => {
-    const record = serializeLogRecord("info", "lead.created", undefined, {
-      lead_id: "lead-1",
+    const record = serializeLogRecord("info", "prospect.created", undefined, {
+      prospect_id: "prospect-1",
       email: "private@example.com",
       company: "Private Customer",
     });
@@ -80,8 +80,8 @@ test("structured logs correlate operations without raw tenant, user, or entity i
     assert.equal(serialized.includes("user-private"), false);
     assert.equal(serialized.includes("private@example.com"), false);
     assert.equal(serialized.includes("Private Customer"), false);
-    assert.equal(serialized.includes("lead-1"), false);
+    assert.equal(serialized.includes("prospect-1"), false);
     assert.equal(record.execution_id, "execution-1");
-    assert.match(record.attributes?.lead_id as string, /^entity_/);
+    assert.match(record.attributes?.prospect_id as string, /^entity_/);
   });
 });

@@ -11,10 +11,10 @@ import { drainProductEvents, setProductEventSinkForTests } from '../events/emit'
 const running: IntelligenceRun = {
   id: 'run-1',
   organizationId: 'org-1',
-  workflow: 'lead_intelligence',
+  workflow: 'prospect_intelligence',
   status: 'running',
   trigger: 'chat',
-  input: { leadId: 'lead-1' },
+  input: { prospectId: 'prospect-1' },
   idempotencyKey: 'attention:item-1',
   initiatingUserId: 'user-1',
   actorType: 'user',
@@ -25,12 +25,12 @@ const running: IntelligenceRun = {
 };
 
 const draft: ArtifactDraft = {
-  workflow: 'lead_intelligence',
-  kind: 'lead_dossier',
-  title: 'Lead dossier · Aisha',
-  summary: 'Qualified lead',
-  content: { lead: { id: 'lead-1' } },
-  sourceRefs: [{ type: 'lead', id: 'lead-1' }],
+  workflow: 'prospect_intelligence',
+  kind: 'prospect_dossier',
+  title: 'Prospect dossier · Aisha',
+  summary: 'Qualified prospect',
+  content: { prospect: { id: 'prospect-1' } },
+  sourceRefs: [{ type: 'prospect', id: 'prospect-1' }],
   recommendations: [{ action: 'outreach_intelligence', label: 'Prepare outreach' }],
   provenance: { workflowVersion: 'test' },
 };
@@ -58,8 +58,8 @@ test('a workflow persists one artifact, resolves attention, and emits readiness'
     return { id: 'event-1' };
   });
   const result = await executeIntelligenceWorkflow({
-    workflow: 'lead_intelligence',
-    workflowInput: { leadId: 'lead-1' },
+    workflow: 'prospect_intelligence',
+    workflowInput: { prospectId: 'prospect-1' },
     context: {
       organizationId: 'org-1',
       initiatingUserId: 'user-1',
@@ -76,7 +76,7 @@ test('a workflow persists one artifact, resolves attention, and emits readiness'
     getArtifactForRun: async () => null,
     resolveAttention: async () => { calls.push('resolve'); return null; },
     actOnNotification: async () => { calls.push('act'); return null; },
-    handlers: { lead_intelligence: async () => draft },
+    handlers: { prospect_intelligence: async () => draft },
   } as never);
   await drainProductEvents();
   assert.equal(result.artifact.id, 'artifact-1');
@@ -88,8 +88,8 @@ test('a workflow persists one artifact, resolves attention, and emits readiness'
 test('an idempotent completed run replays its existing artifact', async () => {
   let invoked = false;
   const result = await executeIntelligenceWorkflow({
-    workflow: 'lead_intelligence',
-    workflowInput: { leadId: 'lead-1' },
+    workflow: 'prospect_intelligence',
+    workflowInput: { prospectId: 'prospect-1' },
     context: {
       organizationId: 'org-1',
       actorType: 'service',
@@ -102,7 +102,7 @@ test('an idempotent completed run replays its existing artifact', async () => {
       created: false,
     }),
     getArtifactForRun: async () => artifact,
-    handlers: { lead_intelligence: async () => { invoked = true; return draft; } },
+    handlers: { prospect_intelligence: async () => { invoked = true; return draft; } },
   } as never);
   assert.equal(result.replayed, true);
   assert.equal(invoked, false);

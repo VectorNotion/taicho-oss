@@ -3,7 +3,7 @@
 
 export type BrainNodeType =
   | 'project' | 'capability' | 'topic' | 'idea' | 'draft'
-  | 'research-item' | 'source' | 'lead' | 'lead-research'
+  | 'research-item' | 'source' | 'prospect' | 'prospect-research'
   | 'qualification' | 'persona' | 'agent';
 
 export type BrainNode = {

@@ -4,7 +4,7 @@ import { getSession } from '@content-automation/platform/data/graph';
 import { LABEL_TO_TYPE } from '../palette';
 import type { BrainGraph, BrainNode, BrainLink, BrainSearchResult, BrainNodeType } from '../types';
 
-const EXCLUDED = ['LeadNote', 'LeadActivity', 'OutreachMessage', 'CompanyInsight', 'Competitor', 'Settings', 'SquadAgent', 'Lesson', 'Automation'];
+const EXCLUDED = ['ProspectNote', 'ProspectActivity', 'OutreachMessage', 'CompanyInsight', 'Competitor', 'Settings', 'SquadAgent', 'Lesson', 'Automation'];
 const OVERVIEW_CAP = 400;
 const NEIGHBORHOOD_CAP = 100;
 const SEARCH_CAP = 12;
@@ -27,21 +27,21 @@ function toBrainNode(props: Record<string, unknown>, labels: string[], degree: n
   if (!label) return null;
   const type: BrainNodeType = LABEL_TO_TYPE[label];
   const p = props as Record<string, string | number | null>;
-  // Leads carry both a person name and a job title — name wins there.
+  // Prospects carry both a person name and a job title — name wins there.
   const display =
-    (type === 'lead' ? (p.name as string) : null) ||
+    (type === 'prospect' ? (p.name as string) : null) ||
     (p.displayName as string) || (p.title as string) || (p.name as string) ||
-    (type === 'lead-research'
+    (type === 'prospect-research'
       ? 'Research'
       : type === 'qualification'
         ? `Qualification · ${p.score ?? '–'}`
         : String(p.id ?? 'Unknown'));
   const createdRaw = p.createdAt ?? p.created_at ?? p.qualifiedAt ?? p.first_mentioned ?? null;
-  // LeadResearch carries no id of its own — only leadId. Without a synthetic
-  // id it collides with its Lead and the HAS_RESEARCH edge self-links away.
-  const id = type === 'lead-research'
-    ? `lr-${String(p.leadId)}`
-    : String(p.id ?? p.leadId ?? display);
+  // ProspectResearch carries no id of its own — only prospectId. Without a synthetic
+  // id it collides with its Prospect and the HAS_RESEARCH edge self-links away.
+  const id = type === 'prospect-research'
+    ? `lr-${String(p.prospectId)}`
+    : String(p.id ?? p.prospectId ?? display);
   return {
     id,
     label: display,
@@ -52,7 +52,7 @@ function toBrainNode(props: Record<string, unknown>, labels: string[], degree: n
       status: (p.status as string) ?? null,
       priority: (p.priority as string) ?? null,
       company: (p.company as string) ?? null,
-      title: type === 'lead' ? ((p.title as string) ?? null) : null,
+      title: type === 'prospect' ? ((p.title as string) ?? null) : null,
       score: p.score !== undefined && p.score !== null ? num(p.score as GraphValue) : null,
       type: (p.type as string) ?? null,
       ideaId: (p.ideaId as string) ?? null,
@@ -94,11 +94,11 @@ export async function fetchOverview(): Promise<BrainGraph> {
   const CATEGORY_QUERIES = [
     `MATCH (n:Project) RETURN properties(n) AS props, labels(n) AS labels, ${DEGREE} AS degree`,
     `MATCH (n:Topic {status: 'active'}) RETURN properties(n) AS props, labels(n) AS labels, ${DEGREE} AS degree`,
-    `MATCH (n:Lead) RETURN properties(n) AS props, labels(n) AS labels, ${DEGREE} AS degree`,
+    `MATCH (n:Prospect) RETURN properties(n) AS props, labels(n) AS labels, ${DEGREE} AS degree`,
     `MATCH (n:Persona {isActive: true}) RETURN properties(n) AS props, labels(n) AS labels, ${DEGREE} AS degree`,
     `MATCH (n:ContentIdea) RETURN properties(n) AS props, labels(n) AS labels, ${DEGREE} AS degree`,
     `MATCH (n:ContentDraft) RETURN properties(n) AS props, labels(n) AS labels, ${DEGREE} AS degree`,
-    `MATCH (:Lead)-[:HAS_RESEARCH|HAS_QUALIFICATION]->(n)
+    `MATCH (:Prospect)-[:HAS_RESEARCH|HAS_QUALIFICATION]->(n)
      RETURN properties(n) AS props, labels(n) AS labels, ${DEGREE} AS degree`,
     `MATCH (n) WHERE (n:Framework OR n:Database OR n:Cloud OR n:Language
        OR n:AIComponent OR n:Feature OR n:Integration OR n:BusinessValue)
@@ -124,21 +124,21 @@ export async function fetchOverview(): Promise<BrainGraph> {
       if (nodeRows.length >= OVERVIEW_CAP) break;
     }
     const ids = nodeRows
-      .map((r) => (r.props as { id?: unknown; leadId?: unknown }).id ?? (r.props as { leadId?: unknown }).leadId)
+      .map((r) => (r.props as { id?: unknown; prospectId?: unknown }).id ?? (r.props as { prospectId?: unknown }).prospectId)
       .filter(Boolean)
       .map(String);
 
     const linkResult = await session.run(
       `
       MATCH (a)-[r]->(b)
-      WHERE coalesce(a.id, a.leadId) IN $ids AND coalesce(b.id, b.leadId) IN $ids
-      RETURN coalesce(a.id, a.leadId) AS a, labels(a) AS aLabels,
-             coalesce(b.id, b.leadId) AS b, labels(b) AS bLabels, type(r) AS kind
+      WHERE coalesce(a.id, a.prospectId) IN $ids AND coalesce(b.id, b.prospectId) IN $ids
+      RETURN coalesce(a.id, a.prospectId) AS a, labels(a) AS aLabels,
+             coalesce(b.id, b.prospectId) AS b, labels(b) AS bLabels, type(r) AS kind
       `,
       { ids },
     );
     const withSynthetic = (raw: string, labels: string[]): string =>
-      labels.includes('LeadResearch') ? `lr-${raw}` : raw;
+      labels.includes('ProspectResearch') ? `lr-${raw}` : raw;
     const linkRows = linkResult.records.map((r) => ({
       a: withSynthetic(String(r.get('a')), r.get('aLabels') as string[]),
       b: withSynthetic(String(r.get('b')), r.get('bLabels') as string[]),
@@ -152,12 +152,12 @@ export async function fetchOverview(): Promise<BrainGraph> {
 
 export async function fetchNeighborhood(id: string): Promise<BrainGraph> {
   const session = await getSession();
-  const researchLeadId = id.startsWith('lr-') ? id.slice(3) : null;
+  const researchProspectId = id.startsWith('lr-') ? id.slice(3) : null;
   try {
     const result = await session.run(
-      researchLeadId
+      researchProspectId
         ? `
-      MATCH (c:LeadResearch) WHERE c.leadId = $id
+      MATCH (c:ProspectResearch) WHERE c.prospectId = $id
       WITH c LIMIT 1
       OPTIONAL MATCH (c)-[r]-(m)
       WHERE NONE(l IN labels(m) WHERE l IN $excluded)
@@ -165,13 +165,13 @@ export async function fetchNeighborhood(id: string): Promise<BrainGraph> {
       RETURN properties(c) AS cProps, labels(c) AS cLabels, ${degreeExpr('c')} AS cDegree,
              collect({props: properties(m), labels: labels(m),
                       degree: ${degreeExpr('m')},
-                      a: coalesce(startNode(r).id, startNode(r).leadId),
-                      b: coalesce(endNode(r).id, endNode(r).leadId),
+                      a: coalesce(startNode(r).id, startNode(r).prospectId),
+                      b: coalesce(endNode(r).id, endNode(r).prospectId),
                       aLabels: labels(startNode(r)), bLabels: labels(endNode(r)),
                       kind: type(r)}) AS nbrs
       `
         : `
-      MATCH (c) WHERE coalesce(c.id, c.leadId) = $id
+      MATCH (c) WHERE coalesce(c.id, c.prospectId) = $id
       WITH c LIMIT 1
       OPTIONAL MATCH (c)-[r]-(m)
       WHERE NONE(l IN labels(m) WHERE l IN $excluded)
@@ -179,12 +179,12 @@ export async function fetchNeighborhood(id: string): Promise<BrainGraph> {
       RETURN properties(c) AS cProps, labels(c) AS cLabels, ${degreeExpr('c')} AS cDegree,
              collect({props: properties(m), labels: labels(m),
                       degree: ${degreeExpr('m')},
-                      a: coalesce(startNode(r).id, startNode(r).leadId),
-                      b: coalesce(endNode(r).id, endNode(r).leadId),
+                      a: coalesce(startNode(r).id, startNode(r).prospectId),
+                      b: coalesce(endNode(r).id, endNode(r).prospectId),
                       aLabels: labels(startNode(r)), bLabels: labels(endNode(r)),
                       kind: type(r)}) AS nbrs
       `,
-      { id: researchLeadId ?? id, excluded: EXCLUDED },
+      { id: researchProspectId ?? id, excluded: EXCLUDED },
     );
     if (result.records.length === 0) return { nodes: [], links: [] };
     const rec = result.records[0];
@@ -203,7 +203,7 @@ export async function fetchNeighborhood(id: string): Promise<BrainGraph> {
       });
       if (nb.a && nb.b) {
         const synth = (raw: unknown, ls: unknown): string =>
-          Array.isArray(ls) && (ls as string[]).includes('LeadResearch') ? `lr-${String(raw)}` : String(raw);
+          Array.isArray(ls) && (ls as string[]).includes('ProspectResearch') ? `lr-${String(raw)}` : String(raw);
         linkRows.push({
           a: synth(nb.a, nb.aLabels),
           b: synth(nb.b, nb.bLabels),

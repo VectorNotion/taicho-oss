@@ -20,7 +20,7 @@ import { getRecentResearchItems } from '../../data/research-repository';
 import { getTopics } from '../../data/topic-repository';
 
 // --------------------------------------------------------------------------
-// Structured-output primitive (mirrors runLeadResearch's agent.generate path).
+// Structured-output primitive (mirrors runProspectResearch's agent.generate path).
 // The default constructs a Mastra Agent and calls generate() with
 // structuredOutput + modelSettings. Tests inject a stub via deps.generate so no
 // Agent is constructed and no model API is touched.

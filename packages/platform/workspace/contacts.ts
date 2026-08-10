@@ -53,7 +53,7 @@ function contactFromGraph(
   properties: Record<string, unknown>,
   labels: string[],
 ): WorkspaceContact {
-  const outreach = labels.includes("Lead");
+  const outreach = labels.includes("Prospect");
   const nurture = labels.includes("NurtureContact");
   return {
     id: String(properties.id),
@@ -99,8 +99,8 @@ export async function addWorkspaceContactRole(
       role === "outreach"
         ? `
           MATCH (contact {id: $id})
-          WHERE contact:Contact OR contact:Lead
-          SET contact:Contact:Lead,
+          WHERE contact:Contact OR contact:Prospect
+          SET contact:Contact:Prospect,
               contact.status = coalesce(contact.status, 'new'),
               contact.priority = coalesce(contact.priority, 'medium'),
               contact.source = coalesce(contact.source, $outreachSource, 'manual'),
@@ -115,7 +115,7 @@ export async function addWorkspaceContactRole(
         `
         : `
           MATCH (contact {id: $id})
-          WHERE contact:Contact OR contact:Lead
+          WHERE contact:Contact OR contact:Prospect
           SET contact:Contact:NurtureContact, contact.updatedAt = localdatetime()
           RETURN contact, labels(contact) AS labels
           LIMIT 1
@@ -140,14 +140,14 @@ export async function addWorkspaceContactRole(
 
 /**
  * Promote the historical Outreach-owned graph label into the canonical
- * workspace identity without removing the Lead role projection.
+ * workspace identity without removing the Prospect role projection.
  */
 export async function ensureWorkspaceContactLabels(): Promise<number> {
   const session = await getSession();
   try {
     const result = await session.run(
       `
-      MATCH (contact:Lead)
+      MATCH (contact:Prospect)
       WHERE NOT contact:Contact
       SET contact:Contact
       RETURN count(contact) AS promoted
@@ -173,7 +173,7 @@ export async function listWorkspaceContacts(input?: {
     const result = await session.run(
       `
       MATCH (contact)
-      WHERE (contact:Contact OR contact:Lead)
+      WHERE (contact:Contact OR contact:Prospect)
         AND (
           $search = ''
           OR toLower(coalesce(contact.name, '')) CONTAINS toLower($search)
@@ -205,7 +205,7 @@ export async function getWorkspaceContactById(
     const result = await session.run(
       `
       MATCH (contact {id: $id})
-      WHERE contact:Contact OR contact:Lead
+      WHERE contact:Contact OR contact:Prospect
       RETURN contact, labels(contact) AS labels
       LIMIT 1
       `,
@@ -231,7 +231,7 @@ export async function getWorkspaceContactByEmail(
     const result = await session.run(
       `
       MATCH (contact)
-      WHERE (contact:Contact OR contact:Lead)
+      WHERE (contact:Contact OR contact:Prospect)
         AND contact.email IS NOT NULL
         AND toLower(contact.email) = toLower($email)
       RETURN contact, labels(contact) AS labels
@@ -262,7 +262,7 @@ export async function deleteWorkspaceContact(id: string): Promise<boolean> {
     const result = await session.run(
       `
       MATCH (contact:Contact {id: $id})
-      WHERE NOT contact:Lead AND NOT contact:NurtureContact
+      WHERE NOT contact:Prospect AND NOT contact:NurtureContact
       OPTIONAL MATCH (contact)-[relationship]-()
       WITH contact, count(relationship) AS relationshipCount
       WHERE relationshipCount = 0
@@ -291,7 +291,7 @@ export async function ensureWorkspaceContact(
       const existing = await session.run(
         `
         MATCH (contact)
-        WHERE (contact:Contact OR contact:Lead)
+        WHERE (contact:Contact OR contact:Prospect)
           AND (
             ($id IS NOT NULL AND contact.id = $id)
             OR ($email IS NOT NULL AND toLower(contact.email) = toLower($email))
@@ -404,7 +404,7 @@ export async function updateWorkspaceContact(
     const result = await session.run(
       `
       MATCH (contact {id: $id})
-      WHERE contact:Contact OR contact:Lead
+      WHERE contact:Contact OR contact:Prospect
       SET contact:Contact,
           contact.name = CASE WHEN 'name' IN $fields THEN coalesce($name, contact.name) ELSE contact.name END,
           contact.company = CASE WHEN 'company' IN $fields THEN $company ELSE contact.company END,

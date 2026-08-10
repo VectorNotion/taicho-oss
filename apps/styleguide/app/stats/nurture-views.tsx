@@ -18,23 +18,23 @@ import { axisTick, ChartCard, percent } from "./view-primitives";
 
 /*
  * Pipeline & Nurture views — grounded in the real shapes:
- * - LeadStatus (7 ordered values) from getLeadCounts().byStatus
+ * - ProspectStatus (7 ordered values) from getProspectCounts().byStatus
  * - Cascade funnelMetrics(): per-step sends/opens/clicks/interests; the bandit's
  *   objective is interest-per-send (thompsonPick samples Beta(1+interests, 1+sends−interests))
  * - Variant lifecycle: draft|validated|active|retired, minSends=50, retire below best×0.5
  * - Enrollment state: active | at frontier | completed | stopped (open-ended queues park at the frontier)
- * - LeadQualification.score 0-100 with 80/50 priority cuts, one score per lead (argmax persona)
+ * - ProspectQualification.score 0-100 with 80/50 priority cuts, one score per prospect (argmax persona)
  */
 
 const KPIS: Stat[] = [
-  { label: "Leads in pipeline", value: "94", delta: "+11", direction: "up", trend: [61, 68, 72, 79, 83, 88, 94] },
+  { label: "Prospects in pipeline", value: "94", delta: "+11", direction: "up", trend: [61, 68, 72, 79, 83, 88, 94] },
   { label: "Replied", value: "7", delta: "this week", direction: "up", trend: [2, 4, 3, 5, 4, 6, 7] },
   { label: "Qualified", value: "9", delta: "+2", direction: "up", featured: true, trend: [3, 4, 4, 6, 7, 7, 9] },
   { label: "Active enrollments", value: "605", delta: "3 funnels", direction: "up", trend: [480, 495, 520, 548, 566, 590, 605] },
 ];
 
-/* getLeadCounts().byStatus in canonical LeadStatus order. */
-const LEAD_STAGES = [
+/* getProspectCounts().byStatus in canonical ProspectStatus order. */
+const PROSPECT_STAGES = [
   { stage: "New", count: 41 },
   { stage: "Researched", count: 18 },
   { stage: "Contacted", count: 15 },
@@ -67,7 +67,7 @@ const ENROLLMENT_MIX = [
   { funnel: "Discovery", active: 8, frontier: 1, completed: 3, stopped: 2 },
 ];
 
-/* LeadQualification.score histogram per matched persona; 50/80 are the priority cut lines. */
+/* ProspectQualification.score histogram per matched persona; 50/80 are the priority cut lines. */
 const QUAL_BUCKETS = [
   {
     persona: "Founder CTO",
@@ -91,7 +91,7 @@ const QUAL_BUCKETS = [
   },
 ];
 
-const stageConfig = { count: { label: "Leads", color: "var(--chart-2)" } } satisfies ChartConfig;
+const stageConfig = { count: { label: "Prospects", color: "var(--chart-2)" } } satisfies ChartConfig;
 const rateConfig = { rate: { label: "Interest rate", color: "var(--chart-2)" } } satisfies ChartConfig;
 const mixConfig = {
   active: { label: "Active", color: "var(--chart-2)" },
@@ -99,7 +99,7 @@ const mixConfig = {
   completed: { label: "Completed", color: "var(--chart-3)" },
   stopped: { label: "Stopped", color: "var(--muted-foreground)" },
 } satisfies ChartConfig;
-const qualConfig = { count: { label: "Leads", color: "var(--chart-2)" } } satisfies ChartConfig;
+const qualConfig = { count: { label: "Prospects", color: "var(--chart-2)" } } satisfies ChartConfig;
 
 const VARIANT_FILL: Record<string, string> = {
   active: "var(--chart-2)",
@@ -115,11 +115,11 @@ export function NurtureViews() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Section
           title="Pipeline stages"
-          description="Leads by status in the canonical order — current stock per stage. Stage velocity isn't chartable yet: status changes write no activity log."
+          description="Prospects by status in the canonical order — current stock per stage. Stage velocity isn't chartable yet: status changes write no activity log."
         >
-          <ChartCard title="Leads by stage" description="getLeadCounts().byStatus, all sources">
+          <ChartCard title="Prospects by stage" description="getProspectCounts().byStatus, all sources">
             <ChartContainer className="h-64 w-full" config={stageConfig}>
-              <BarChart data={LEAD_STAGES} layout="vertical" margin={{ left: 8, right: 24 }}>
+              <BarChart data={PROSPECT_STAGES} layout="vertical" margin={{ left: 8, right: 24 }}>
                 <CartesianGrid horizontal={false} stroke="var(--border)" />
                 <XAxis axisLine={false} tick={axisTick} tickLine={false} type="number" />
                 <YAxis axisLine={false} dataKey="stage" tick={axisTick} tickLine={false} type="category" width={92} />
@@ -226,7 +226,7 @@ export function NurtureViews() {
         >
           <div className="grid gap-4">
             {QUAL_BUCKETS.map((persona) => (
-              <ChartCard description="LeadQualification.score, matched leads" key={persona.persona} title={persona.persona}>
+              <ChartCard description="ProspectQualification.score, matched prospects" key={persona.persona} title={persona.persona}>
                 <ChartContainer className="h-24 w-full" config={qualConfig}>
                   <BarChart data={persona.buckets} margin={{ top: 4 }}>
                     <XAxis axisLine={false} dataKey="bucket" tick={{ ...axisTick, fontSize: 10 }} tickLine={false} />

@@ -31,9 +31,9 @@ function actionsFor(node: BrainNode): { streams: StreamAction[]; open: string | 
           : [{ label: 'Refine', api: `/api/content/ideas/${node.id}/refine/stream` }],
         open: `/content/${node.id}`,
       };
-    case 'lead':
+    case 'prospect':
       return {
-        streams: [{ label: 'Re-score fit', api: `/api/outreach/leads/${node.id}/qualify/stream` }],
+        streams: [{ label: 'Re-score fit', api: `/api/outreach/prospects/${node.id}/qualify/stream` }],
         open: `/outreach/pipeline/${node.id}`,
       };
     case 'draft':
@@ -53,7 +53,7 @@ function actionsFor(node: BrainNode): { streams: StreamAction[]; open: string | 
 function subtitle(node: BrainNode): string {
   const m = node.meta;
   switch (node.type) {
-    case 'lead': return [m.title, m.company && `@ ${m.company}`, m.status].filter(Boolean).join(' · ');
+    case 'prospect': return [m.title, m.company && `@ ${m.company}`, m.status].filter(Boolean).join(' · ');
     case 'idea': return [m.status, m.priority && `${m.priority} priority`].filter(Boolean).join(' · ');
     case 'draft': return [m.type, m.status].filter(Boolean).join(' · ');
     case 'topic': return String(m.status ?? '');

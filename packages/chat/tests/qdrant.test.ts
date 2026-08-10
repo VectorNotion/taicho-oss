@@ -122,10 +122,10 @@ test('support retrieval is restricted to documentation from the signed tenant', 
           payload: {
             tenantId: 'taicho',
             kind: 'docs',
-            sourceId: 'api#leads',
-            title: 'Lead API',
+            sourceId: 'api#prospects',
+            title: 'Prospect API',
             url: 'https://docs.taicho.ai/api',
-            content: 'Create leads with a validated REST API payload.',
+            content: 'Create prospects with a validated REST API payload.',
             contentHash: 'a'.repeat(64),
           },
         }, {
@@ -149,9 +149,9 @@ test('support retrieval is restricted to documentation from the signed tenant', 
   })
 
   const store = new QdrantSupportKnowledgeStore(configuration)
-  const documents = await store.search('taicho', 'lead API', 5)
+  const documents = await store.search('taicho', 'prospect API', 5)
 
-  assert.deepEqual(documents.map(({ sourceId }) => sourceId), ['api#leads'])
+  assert.deepEqual(documents.map(({ sourceId }) => sourceId), ['api#prospects'])
   assert.deepEqual(queryBody?.filter, {
     must: [
       { key: 'tenantId', match: { value: 'taicho' } },
@@ -184,11 +184,11 @@ test('support knowledge replacement embeds, scopes, and replaces only tenant doc
 
   const store = new QdrantSupportKnowledgeStore(configuration)
   await store.replace('taicho', [{
-    sourceId: 'api#leads',
-    title: 'Lead API',
+    sourceId: 'api#prospects',
+    title: 'Prospect API',
     url: 'https://docs.taicho.ai/api',
-    heading: 'Create a lead',
-    content: 'Create leads with a validated REST API payload.',
+    heading: 'Create a prospect',
+    content: 'Create prospects with a validated REST API payload.',
     contentHash: 'a'.repeat(64),
     kind: 'docs',
     metadata: {

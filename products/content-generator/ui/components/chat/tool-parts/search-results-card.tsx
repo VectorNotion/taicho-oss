@@ -11,11 +11,11 @@ interface SearchResultsCardProps {
 export function SearchResultsCard({ data }: SearchResultsCardProps) {
   const query = data.query as string;
   const projects = (data.projects as Record<string, unknown>[]) || [];
-  const leads = (data.leads as Record<string, unknown>[]) || [];
+  const prospects = (data.prospects as Record<string, unknown>[]) || [];
   const research = (data.research as Record<string, unknown>[]) || [];
   const topics = (data.topics as Record<string, unknown>[]) || [];
 
-  const totalResults = projects.length + leads.length + research.length + topics.length;
+  const totalResults = projects.length + prospects.length + research.length + topics.length;
 
   return (
     <Card className="my-2 rounded-lg" data-component="DATA-04 Research Result List">
@@ -45,10 +45,10 @@ export function SearchResultsCard({ data }: SearchResultsCardProps) {
           </ResultSection>
         )}
 
-        {/* Leads */}
-        {leads.length > 0 && (
-          <ResultSection icon={<Users className="h-4 w-4 text-muted-foreground" />} title="Leads" count={leads.length}>
-            {leads.map((l) => (
+        {/* Prospects */}
+        {prospects.length > 0 && (
+          <ResultSection icon={<Users className="h-4 w-4 text-muted-foreground" />} title="Prospects" count={prospects.length}>
+            {prospects.map((l) => (
               <ResultItem
                 key={l.id as string}
                 title={l.name as string}

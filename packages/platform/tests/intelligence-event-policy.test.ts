@@ -13,35 +13,35 @@ function event(name: string, input: Record<string, unknown> = {}) {
     connectorId: 'hubspot',
     externalEventId: 'delivery-1',
     payload: input,
-    leadId: 'lead-1',
+    prospectId: 'prospect-1',
     contentId: null,
     postId: null,
     sendId: null,
   };
 }
 
-test('new leads become explicit human attention decisions', () => {
-  const projection = attentionProjectionForEvent(event('lead.created', {
+test('new prospects become explicit human attention decisions', () => {
+  const projection = attentionProjectionForEvent(event('prospect.created', {
     name: 'Aisha',
     company: 'Northstar',
   }));
-  assert.equal(projection?.entityId, 'lead-1');
-  assert.equal(projection?.suggestedAction.workflow, 'lead_intelligence');
-  assert.deepEqual(projection?.suggestedAction.input, { leadId: 'lead-1' });
+  assert.equal(projection?.entityId, 'prospect-1');
+  assert.equal(projection?.suggestedAction.workflow, 'prospect_intelligence');
+  assert.deepEqual(projection?.suggestedAction.input, { prospectId: 'prospect-1' });
   assert.match(projection?.suggestedAction.prompt ?? '', /\{\{attentionItemId\}\}/);
 });
 
 test('internal UI and system events never become assistant notifications', () => {
   assert.equal(attentionProjectionForEvent({
-    ...event('lead.created', { name: 'Aisha' }),
+    ...event('prospect.created', { name: 'Aisha' }),
     origin: 'internal',
     connectorId: null,
     externalEventId: null,
   }), null);
 });
 
-test('qualified leads suggest an artifact, while routine telemetry stays silent', () => {
-  const projection = attentionProjectionForEvent(event('lead.qualified', { score: 84 }));
+test('qualified prospects suggest an artifact, while routine telemetry stays silent', () => {
+  const projection = attentionProjectionForEvent(event('prospect.qualified', { score: 84 }));
   assert.equal(projection?.priority, 'high');
   assert.equal(projection?.suggestedAction.workflow, 'outreach_intelligence');
   assert.equal(attentionProjectionForEvent(event('post.metrics.updated')), null);
@@ -54,7 +54,7 @@ test('external content angles become optional content-intelligence prompts', () 
       summary: 'Teams are measuring maintenance overhead.',
       confidence: 0.91,
     }),
-    leadId: null,
+    prospectId: null,
     contentId: 'angle-1',
   });
   assert.equal(projection?.category, 'content_insights');

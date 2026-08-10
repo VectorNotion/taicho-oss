@@ -11,16 +11,16 @@ export const LABEL_TO_TYPE: Record<string, BrainNodeType> = {
   ContentDraft: 'draft',
   ResearchItem: 'research-item',
   ResearchSource: 'source',
-  Lead: 'lead',
-  LeadResearch: 'lead-research',
-  LeadQualification: 'qualification',
+  Prospect: 'prospect',
+  ProspectResearch: 'prospect-research',
+  ProspectQualification: 'qualification',
   Persona: 'persona',
 };
 
 export const TYPE_COLOR: Record<BrainNodeType, string> = {
   project: '#8b7cf7', capability: '#5fd4d0', topic: '#d9a15c',
   idea: '#7cc98f', draft: '#7cc98f', 'research-item': '#d9a15c',
-  source: '#d9a15c', lead: '#d97c8a', 'lead-research': '#d97c8a',
+  source: '#d9a15c', prospect: '#d97c8a', 'prospect-research': '#d97c8a',
   qualification: '#d97c8a', persona: '#e6e6f0', agent: '#8b7cf7',
 };
 
@@ -30,8 +30,8 @@ export const TYPE_RING = new Set<BrainNodeType>(['draft', 'source']);
 /** User word shown in the inspector type line. */
 export const TYPE_WORD: Record<BrainNodeType, string> = {
   project: 'Project', capability: 'Capability', topic: 'Topic', idea: 'Idea',
-  draft: 'Post', 'research-item': 'Research', source: 'Source', lead: 'Lead',
-  'lead-research': 'Research', qualification: 'Qualification',
+  draft: 'Post', 'research-item': 'Research', source: 'Source', prospect: 'Prospect',
+  'prospect-research': 'Research', qualification: 'Qualification',
   persona: 'Persona', agent: 'Agent',
 };
 

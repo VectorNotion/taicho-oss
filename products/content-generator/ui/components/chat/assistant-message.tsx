@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 // Import existing tool UI components
 import { SearchResultsCard } from "@/components/chat/tool-parts/search-results-card";
 import { ProjectCard } from "@/components/chat/tool-parts/project-card";
-import { LeadCard } from "@/components/chat/tool-parts/lead-card";
+import { ProspectCard } from "@/components/chat/tool-parts/prospect-card";
 import { ResearchList } from "@/components/chat/tool-parts/research-list";
 import { TopicCloud } from "@/components/chat/tool-parts/topic-cloud";
 import { ToolProgress } from "@/components/chat/tool-parts/tool-progress";
@@ -120,68 +120,68 @@ const ListProjectsTool: ToolCallMessagePartComponent = ({ result, status, toolNa
   );
 };
 
-const GetLeadTool: ToolCallMessagePartComponent = ({ result, status, toolName, isError }) => {
+const GetProspectTool: ToolCallMessagePartComponent = ({ result, status, toolName, isError }) => {
   const recovery = renderToolRecovery(toolName, status, result, isError);
   if (recovery) return recovery;
   if (status.type === "running" || status.type === "requires-action") {
     return (
       <AnimatedProgress>
-        <ToolProgress tool={toolName} status="searching" message="Loading lead..." />
+        <ToolProgress tool={toolName} status="searching" message="Loading prospect..." />
       </AnimatedProgress>
     );
   }
   if (!result) return null;
   const data = result as Record<string, unknown>;
-  if (data.found && data.lead) {
+  if (data.found && data.prospect) {
     return (
       <AnimatedTool>
-        <LeadCard lead={data.lead as Record<string, unknown>} />
+        <ProspectCard prospect={data.prospect as Record<string, unknown>} />
       </AnimatedTool>
     );
   }
   return (
     <AnimatedTool>
-      <EmptyState type="leads" message="Lead not found" />
+      <EmptyState type="prospects" message="Prospect not found" />
     </AnimatedTool>
   );
 };
 
-const FindLeadContextTool: ToolCallMessagePartComponent = ({ result, status, toolName, isError }) => {
+const FindProspectContextTool: ToolCallMessagePartComponent = ({ result, status, toolName, isError }) => {
   const recovery = renderToolRecovery(toolName, status, result, isError);
   if (recovery) return recovery;
   if (status.type === "running" || status.type === "requires-action") {
-    return <AnimatedProgress><ToolProgress tool={toolName} status="searching" message="Searching leads and relationship history..." /></AnimatedProgress>;
+    return <AnimatedProgress><ToolProgress tool={toolName} status="searching" message="Searching prospects and relationship history..." /></AnimatedProgress>;
   }
   if (!result) return null;
-  const data = result as { found?: boolean; lead?: Record<string, unknown> | null };
-  if (data.found && data.lead) return <AnimatedTool><LeadCard lead={data.lead} /></AnimatedTool>;
-  return <AnimatedTool><EmptyState type="leads" message="No matching person in this workspace" /></AnimatedTool>;
+  const data = result as { found?: boolean; prospect?: Record<string, unknown> | null };
+  if (data.found && data.prospect) return <AnimatedTool><ProspectCard prospect={data.prospect} /></AnimatedTool>;
+  return <AnimatedTool><EmptyState type="prospects" message="No matching person in this workspace" /></AnimatedTool>;
 };
 
-const ListLeadsTool: ToolCallMessagePartComponent = ({ result, status, toolName, isError }) => {
+const ListProspectsTool: ToolCallMessagePartComponent = ({ result, status, toolName, isError }) => {
   const recovery = renderToolRecovery(toolName, status, result, isError);
   if (recovery) return recovery;
   if (status.type === "running" || status.type === "requires-action") {
     return (
       <AnimatedProgress>
-        <ToolProgress tool={toolName} status="searching" message="Listing leads..." />
+        <ToolProgress tool={toolName} status="searching" message="Listing prospects..." />
       </AnimatedProgress>
     );
   }
   if (!result) return null;
   const data = result as Record<string, unknown>;
-  const leads = data.leads as Record<string, unknown>[] | undefined;
-  if (!leads || leads.length === 0) {
+  const prospects = data.prospects as Record<string, unknown>[] | undefined;
+  if (!prospects || prospects.length === 0) {
     return (
       <AnimatedTool>
-        <EmptyState type="leads" />
+        <EmptyState type="prospects" />
       </AnimatedTool>
     );
   }
   return (
     <AnimatedList>
-      {leads.map((l) => (
-        <LeadCard key={l.id as string} lead={l} compact />
+      {prospects.map((l) => (
+        <ProspectCard key={l.id as string} prospect={l} compact />
       ))}
     </AnimatedList>
   );
@@ -312,14 +312,14 @@ export const AssistantMessage: FC = () => {
                   searchKnowledgeTool: SearchKnowledgeTool,
                   getProjectTool: GetProjectTool,
                   listProjectsTool: ListProjectsTool,
-                  getLeadTool: GetLeadTool,
-                  findLeadContextTool: FindLeadContextTool,
-                  listLeadsTool: ListLeadsTool,
+                  getProspectTool: GetProspectTool,
+                  findProspectContextTool: FindProspectContextTool,
+                  listProspectsTool: ListProspectsTool,
                   getResearchTool: GetResearchTool,
                   listTopicsTool: ListTopicsTool,
                   getTopicMapTool: GetTopicMapTool,
                   tavilySearchTool: TavilySearchTool,
-                  runLeadIntelligenceTool: WorkflowArtifactTool,
+                  runProspectIntelligenceTool: WorkflowArtifactTool,
                   runOutreachIntelligenceTool: WorkflowArtifactTool,
                 },
                 Fallback: ToolFallback,

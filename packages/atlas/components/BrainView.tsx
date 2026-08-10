@@ -7,10 +7,10 @@ import { Inspector } from './Inspector';
 import { CommandBar } from './CommandBar';
 import { LABEL } from '../physics/constants';
 
-type Lens = 'everything' | 'content' | 'leads' | 'recent';
-const LENSES: Lens[] = ['everything', 'content', 'leads', 'recent'];
+type Lens = 'everything' | 'content' | 'prospects' | 'recent';
+const LENSES: Lens[] = ['everything', 'content', 'prospects', 'recent'];
 const LENS_LABEL: Record<Lens, string> = {
-  everything: 'Everything', content: 'Content', leads: 'Leads', recent: 'Recent',
+  everything: 'Everything', content: 'Content', prospects: 'Prospects', recent: 'Recent',
 };
 
 const LEGEND = [
@@ -18,7 +18,7 @@ const LEGEND = [
   { label: 'Capabilities', color: '#5fd4d0' },
   { label: 'Topics & research', color: '#d9a15c' },
   { label: 'Ideas & drafts', color: '#7cc98f' },
-  { label: 'Leads & assessments', color: '#d97c8a' },
+  { label: 'Prospects & assessments', color: '#d97c8a' },
   { label: 'Personas', color: '#e6e6f0' },
 ] as const;
 
@@ -76,7 +76,7 @@ export function BrainView() {
 
   const setLens = (l: Lens) => { setLensState(l); canvas.current?.setLens(l); };
 
-  const handleLeadAdded = useCallback(async (id: string) => {
+  const handleProspectAdded = useCallback(async (id: string) => {
     await refreshNeighborhood(id);
     canvas.current?.flyTo(id);
   }, [refreshNeighborhood]);
@@ -127,7 +127,7 @@ export function BrainView() {
 
       <CommandBar
         onPick={(id) => { canvas.current?.flyTo(id); }}
-        onLeadAdded={handleLeadAdded}
+        onProspectAdded={handleProspectAdded}
       />
 
       <div className="absolute bottom-4 left-4 hidden max-w-[calc(100%-2rem)] flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border/50 bg-background/80 px-3 py-2 text-[10px] text-muted-foreground backdrop-blur sm:flex">
@@ -160,7 +160,7 @@ export function BrainView() {
       )}
       {!loading && !loadError && nodeCount === 0 && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-          <div><p className="text-sm font-medium">The Brain is empty</p><p className="mt-1 text-xs text-muted-foreground">Add projects, research, topics, or leads to build your knowledge map.</p></div>
+          <div><p className="text-sm font-medium">The Brain is empty</p><p className="mt-1 text-xs text-muted-foreground">Add projects, research, topics, or prospects to build your knowledge map.</p></div>
         </div>
       )}
     </div>

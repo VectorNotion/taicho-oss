@@ -74,7 +74,7 @@ export const CitationSchema = z.object({
 })
 export type Citation = z.infer<typeof CitationSchema>
 
-export const LeadStateSchema = z.object({
+export const ProspectStateSchema = z.object({
   consent: z.boolean().default(false),
   email: z.string().email().optional(),
   name: z.string().max(200).optional(),
@@ -85,7 +85,7 @@ export const LeadStateSchema = z.object({
   planInterest: z.string().max(200).optional(),
   submittedAt: z.string().datetime().optional(),
 })
-export type LeadState = z.infer<typeof LeadStateSchema>
+export type ProspectState = z.infer<typeof ProspectStateSchema>
 
 export const TicketSummarySchema = z.object({
   id: z.string().min(1),
@@ -107,7 +107,7 @@ export const ChatEventTypeSchema = z.enum([
   'assistant.delta',
   'activity.updated',
   'citation.added',
-  'lead.state.updated',
+  'prospect.state.updated',
   'support.escalation.offered',
   'support.feedback.recorded',
   'support.ticket.created',
@@ -161,7 +161,7 @@ export const ConversationHistorySchema = z.object({
   conversationId: z.uuid(),
   surface: ChatSurfaceSchema,
   messages: z.array(ConversationHistoryMessageSchema).max(50),
-  leadState: LeadStateSchema.optional(),
+  prospectState: ProspectStateSchema.optional(),
 })
 export type ConversationHistory = z.infer<typeof ConversationHistorySchema>
 

@@ -161,9 +161,9 @@ function ActivityRow({
 function PersonResult({ loading = false }: { loading?: boolean }) {
   if (loading) {
     return (
-      <div className="space-y-1.5" data-component="DATA-01 Lead Result Card">
-        <ComponentTag id="DATA-01" name="Lead Result Card" />
-        <div className="grid gap-3 rounded-xl border bg-background/70 p-4 md:grid-cols-[auto_1fr_auto]" aria-label="Searching lead results">
+      <div className="space-y-1.5" data-component="DATA-01 Prospect Result Card">
+        <ComponentTag id="DATA-01" name="Prospect Result Card" />
+        <div className="grid gap-3 rounded-xl border bg-background/70 p-4 md:grid-cols-[auto_1fr_auto]" aria-label="Searching prospect results">
           <div className="size-10 animate-pulse rounded-full bg-muted motion-reduce:animate-none" />
           <div className="space-y-2">
             <div className="h-3 w-36 animate-pulse rounded bg-muted motion-reduce:animate-none" />
@@ -175,15 +175,15 @@ function PersonResult({ loading = false }: { loading?: boolean }) {
     );
   }
   return (
-    <div className="space-y-1.5" data-component="DATA-01 Lead Result Card">
-      <ComponentTag id="DATA-01" name="Lead Result Card" />
+    <div className="space-y-1.5" data-component="DATA-01 Prospect Result Card">
+      <ComponentTag id="DATA-01" name="Prospect Result Card" />
       <div className="animate-in fade-in slide-in-from-bottom-1 rounded-xl border bg-background/80 p-4 duration-300 motion-reduce:animate-none">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/12 text-sm font-semibold text-primary">AR</span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-medium">Aisha Rahman</p>
-              <Badge variant="secondary">Qualified lead</Badge>
+              <Badge variant="secondary">Qualified prospect</Badge>
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">VP Operations · Northstar Labs</p>
           </div>
@@ -361,8 +361,8 @@ function ExperienceDemo({ looping, paused }: { looping: boolean; paused: boolean
                     {at('search') && (
                       <ActivityRow
                         icon={Search}
-                        title="Search leads"
-                        detail={exact('search') ? 'Matching “Aisha Rahman” across your workspace' : 'One matching lead found'}
+                        title="Search prospects"
+                        detail={exact('search') ? 'Matching “Aisha Rahman” across your workspace' : 'One matching prospect found'}
                         state={exact('search') ? 'active' : 'done'}
                       />
                     )}
@@ -407,21 +407,21 @@ function ExperienceDemo({ looping, paused }: { looping: boolean; paused: boolean
                   <div className="min-w-0 flex-1 text-sm leading-6">
                     <ComponentTag className="mb-1.5" id="RESP-01" name="Answer Stream" />
                     {exact('synthesize') ? (
-                      <p>Yes—you know Aisha. She’s already a qualified lead in your workspace<span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary align-text-bottom motion-reduce:animate-none" /></p>
+                      <p>Yes—you know Aisha. She’s already a qualified prospect in your workspace<span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary align-text-bottom motion-reduce:animate-none" /></p>
                     ) : (
                       <div className="space-y-3">
-                        <p><strong>Yes—you know Aisha.</strong> She is a qualified lead at Northstar Labs, with two prior touchpoints.</p>
+                        <p><strong>Yes—you know Aisha.</strong> She is a qualified prospect at Northstar Labs, with two prior touchpoints.</p>
                         <p>Your last exchange was about <strong>reliable AI operations and approval workflows</strong>. She replied positively 18 days ago, but no follow-up was sent. Scout also confirmed she still owns this area.</p>
                         <ComponentTag id="DATA-06" name="Source Chip" />
                         <div className="flex flex-wrap gap-2">
-                          <Badge variant="outline"><FileText className="mr-1 size-3" /> Lead record</Badge>
+                          <Badge variant="outline"><FileText className="mr-1 size-3" /> Prospect record</Badge>
                           <Badge variant="outline"><MessageSquareText className="mr-1 size-3" /> 2 touchpoints</Badge>
                           <Badge variant="outline"><Globe2 className="mr-1 size-3" /> 3 current sources</Badge>
                         </div>
                         <ComponentTag id="RESP-02" name="Suggested Action Row" />
                         <div className="flex flex-wrap gap-2 pt-1">
                           <Button size="sm"><Send className="size-3.5" /> Draft a follow-up</Button>
-                          <Button size="sm" variant="outline">Open lead</Button>
+                          <Button size="sm" variant="outline">Open prospect</Button>
                         </div>
                       </div>
                     )}
@@ -562,7 +562,7 @@ function SurfacePreview({ surface, looping, paused }: { surface: SurfaceSpec; lo
       case 'WORK-01':
         return <div className="space-y-2"><ComponentTag id="WORK-01" name="Intent Acknowledgement" /><div className="animate-in fade-in slide-in-from-bottom-1 rounded-xl border bg-background/70 p-3 text-xs leading-5 duration-200 motion-reduce:animate-none">I’ll check your workspace first, then verify what may be out of date.</div></div>;
       case 'WORK-02':
-        return <div className="space-y-2"><ComponentTag id="WORK-02" name="Activity Rail" /><div className="rounded-xl border bg-background/60 p-2"><ActivityRow detail="Matching people and companies" icon={Search} state="done" title="Search leads" /><ActivityRow detail={active ? 'Notes and outreach history' : 'Two touchpoints loaded'} icon={Layers3} state={active ? 'active' : 'done'} title="Load context" /></div></div>;
+        return <div className="space-y-2"><ComponentTag id="WORK-02" name="Activity Rail" /><div className="rounded-xl border bg-background/60 p-2"><ActivityRow detail="Matching people and companies" icon={Search} state="done" title="Search prospects" /><ActivityRow detail={active ? 'Notes and outreach history' : 'Two touchpoints loaded'} icon={Layers3} state={active ? 'active' : 'done'} title="Load context" /></div></div>;
       case 'WORK-04':
         return <div className="space-y-2"><ComponentTag id="WORK-04" name="Tool Progress Card" /><div className="flex items-center gap-2 rounded-lg border border-primary/25 bg-primary/5 p-3">{active ? <span className="relative size-3"><span className="absolute inset-0 animate-ping rounded-full bg-primary/25 motion-reduce:animate-none" /><span className="absolute inset-1 rounded-full bg-primary" /></span> : <CheckCircle2 className="size-3 text-primary" />}<div><p className="text-xs font-medium">Searching workspace</p><p className="text-[11px] text-muted-foreground">{active ? '2 of 4 sources complete' : '4 sources complete'}</p></div></div><MiniArticleBundle loading={active} /></div>;
       case 'DATA-01':
@@ -574,7 +574,7 @@ function SurfacePreview({ surface, looping, paused }: { surface: SurfaceSpec; lo
       case 'AGENT-05':
         return <div className="space-y-2" data-component="AGENT-05 Delegation Runway"><ComponentTag id="AGENT-05" name="Delegation Runway" /><DelegationRunwayPreview active={active} paused={paused} /></div>;
       case 'RESP-01':
-        return <div className="space-y-2"><ComponentTag id="RESP-01" name="Answer Stream" /><div className="rounded-xl border bg-background/70 p-3 text-xs leading-5">{active ? <>Yes—you know Aisha. She is already a qualified lead<span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-primary align-text-bottom motion-reduce:animate-none" /></> : <>Yes—you know Aisha. She is a qualified lead with two prior touchpoints. Your last exchange was about reliable AI operations.</>}</div></div>;
+        return <div className="space-y-2"><ComponentTag id="RESP-01" name="Answer Stream" /><div className="rounded-xl border bg-background/70 p-3 text-xs leading-5">{active ? <>Yes—you know Aisha. She is already a qualified prospect<span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-primary align-text-bottom motion-reduce:animate-none" /></> : <>Yes—you know Aisha. She is a qualified prospect with two prior touchpoints. Your last exchange was about reliable AI operations.</>}</div></div>;
       case 'ACTION-01':
         return <div className="space-y-2" data-component="ACTION-01 Approval Gate"><ComponentTag id="ACTION-01" name="Approval Gate" /><div className="rounded-xl border border-amber-300/20 bg-amber-300/5 p-3"><p className="text-xs font-medium">{active ? 'Send follow-up to Aisha?' : 'Follow-up approved'}</p><p className="mt-1 text-[11px] text-muted-foreground">Email · aisha@northstar.example</p>{active ? <div className="mt-3 flex gap-2"><Button className="h-7 text-xs" onClick={() => setSurfaceState('settled')} size="sm">Review and send</Button><Button className="h-7 text-xs" size="sm" variant="ghost">Cancel</Button></div> : <div className="mt-3 flex items-center gap-1.5 text-xs text-emerald-300"><CheckCircle2 className="size-3.5" /> Approval captured</div>}</div></div>;
       case 'ACTION-04':
@@ -916,7 +916,7 @@ export function ChatbotSpecSheet() {
                 ['RLM decision', 'intent, tool, delegate, answer', BrainCircuit],
                 ['Semantic event', 'typed name + validated payload', Zap],
                 ['State reducer', 'current state → next state', Workflow],
-                ['Named renderer', 'DATA-01 · Lead Result Card', Layers3],
+                ['Named renderer', 'DATA-01 · Prospect Result Card', Layers3],
                 ['Motion preset', 'enter → active → settle', Activity],
               ].map(([title, text, Icon], index) => (
                 <div className="contents" key={String(title)}>
@@ -961,7 +961,7 @@ export function ChatbotSpecSheet() {
       <section className="space-y-7">
         <SectionHeading eyebrow="Saying and thinking" title="Show useful reasoning, protect private reasoning" description="The interface should make Taicho legible without dumping raw chain-of-thought, hidden prompts, or internal tokens into the conversation." />
         <div className="grid gap-4 lg:grid-cols-3">
-          <Card className="gap-0 py-0"><CardHeader className="border-b p-5"><div className="flex items-center gap-2"><MessageSquareText className="size-4 text-primary" /><CardTitle className="text-base">What Taicho says</CardTitle></div></CardHeader><CardContent className="space-y-3 p-5 text-sm leading-6"><p>“I’ll check your workspace first.”</p><p>“I found one matching lead.”</p><p>“Scout is verifying the current company context.”</p><p className="text-muted-foreground">Short, natural, outcome-oriented language.</p></CardContent></Card>
+          <Card className="gap-0 py-0"><CardHeader className="border-b p-5"><div className="flex items-center gap-2"><MessageSquareText className="size-4 text-primary" /><CardTitle className="text-base">What Taicho says</CardTitle></div></CardHeader><CardContent className="space-y-3 p-5 text-sm leading-6"><p>“I’ll check your workspace first.”</p><p>“I found one matching prospect.”</p><p>“Scout is verifying the current company context.”</p><p className="text-muted-foreground">Short, natural, outcome-oriented language.</p></CardContent></Card>
           <Card className="gap-0 border-primary/20 py-0"><CardHeader className="border-b bg-primary/5 p-5"><div className="flex items-center gap-2"><BrainCircuit className="size-4 text-primary" /><CardTitle className="text-base">Visible reasoning summary</CardTitle></div></CardHeader><CardContent className="space-y-3 p-5 text-sm leading-6"><p>Intent and scope</p><p>Plan and active step</p><p>Tools, sources, and delegated owner</p><p>Evidence quality, uncertainty, and conflicts</p><p className="text-muted-foreground">Enough to trust and steer the work.</p></CardContent></Card>
           <Card className="gap-0 py-0"><CardHeader className="border-b p-5"><div className="flex items-center gap-2"><LockKeyhole className="size-4 text-muted-foreground" /><CardTitle className="text-base">What stays private</CardTitle></div></CardHeader><CardContent className="space-y-3 p-5 text-sm leading-6"><p>Raw chain-of-thought</p><p>Hidden system and specialist prompts</p><p>Credentials, internal identifiers, and security rules</p><p>Verbose token-by-token deliberation</p><p className="text-muted-foreground">Privacy improves clarity as well as safety.</p></CardContent></Card>
         </div>

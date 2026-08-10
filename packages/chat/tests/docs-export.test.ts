@@ -9,14 +9,14 @@ test('documentation exporter creates stable, clean, heading-scoped chunks', asyn
   const directory = await mkdtemp(path.join(tmpdir(), 'taicho-docs-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   await mkdir(path.join(directory, 'guides'))
-  await writeFile(path.join(directory, 'guides', 'lead-api.mdx'), `---
-title: "Create leads"
+  await writeFile(path.join(directory, 'guides', 'prospect-api.mdx'), `---
+title: "Create prospects"
 ---
 import { Callout } from '@content-automation/ui'
 
-# Create leads
+# Create prospects
 
-Send a request to the lead API.
+Send a request to the prospect API.
 
 ## Required columns
 
@@ -25,9 +25,9 @@ Email is required. <Callout>Names are optional.</Callout>
 
   const documents = await buildDocsCorpus(directory, 'https://docs.taicho.ai')
   assert.equal(documents.length, 2)
-  assert.equal(documents[0].title, 'Create leads')
-  assert.equal(documents[0].url, 'https://docs.taicho.ai/guides/lead-api')
-  assert.match(documents[0].sourceId, /^docs:guides\/lead-api:/)
+  assert.equal(documents[0].title, 'Create prospects')
+  assert.equal(documents[0].url, 'https://docs.taicho.ai/guides/prospect-api')
+  assert.match(documents[0].sourceId, /^docs:guides\/prospect-api:/)
   assert.doesNotMatch(documents[0].content, /import \{/)
   assert.doesNotMatch(documents[1].content, /<Callout>/)
   assert.match(documents[1].contentHash, /^[a-f0-9]{64}$/)

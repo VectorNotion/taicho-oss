@@ -6,11 +6,11 @@
  */
 import { addFunnelMember } from '@/products/cascade/data/funnel-repository';
 import {
-  importOutreachLead,
+  importOutreachProspect,
   markWorkspaceContactLinked,
 } from '@/products/cascade/data/intake';
 import { getCascadePool } from '@/products/cascade/data/pool';
-import { getLeadById } from '@/products/outreach/data/lead-repository';
+import { getProspectById } from '@/products/outreach/data/prospect-repository';
 import { requireGraphOrganizationId } from '../data/organization-context';
 import {
   addWorkspaceContactRole,
@@ -28,8 +28,8 @@ export async function runAddToFunnel(
   payload: AddToFunnelPayload,
 ): Promise<AddToFunnelResult> {
   if (!payload.funnelId) throw new Error('funnelId is required');
-  if (!payload.contactId && !payload.leadId) {
-    throw new Error('Provide leadId or contactId to add');
+  if (!payload.contactId && !payload.prospectId) {
+    throw new Error('Provide prospectId or contactId to add');
   }
   const organizationId = requireGraphOrganizationId();
   const pool = getCascadePool(organizationId);
@@ -46,22 +46,22 @@ export async function runAddToFunnel(
     };
   }
 
-  const lead = await getLeadById(payload.leadId!);
-  if (!lead) throw new Error(`Lead not found: ${payload.leadId}`);
-  if (!lead.email) {
-    throw new Error(`Lead ${payload.leadId} has no email; cannot add it to a funnel`);
+  const prospect = await getProspectById(payload.prospectId!);
+  if (!prospect) throw new Error(`Prospect not found: ${payload.prospectId}`);
+  if (!prospect.email) {
+    throw new Error(`Prospect ${payload.prospectId} has no email; cannot add it to a funnel`);
   }
 
   const { contact: canonical } = await ensureWorkspaceContact({
-    id: lead.id,
-    email: lead.email,
-    name: lead.name,
-    company: lead.company,
-    title: lead.title,
+    id: prospect.id,
+    email: prospect.email,
+    name: prospect.name,
+    company: prospect.company,
+    title: prospect.title,
   });
-  const contact = await importOutreachLead(pool, {
-    email: canonical.email ?? lead.email,
-    outreachLeadId: canonical.id,
+  const contact = await importOutreachProspect(pool, {
+    email: canonical.email ?? prospect.email,
+    outreachProspectId: canonical.id,
     attributes: { name: canonical.name, company: canonical.company, title: canonical.title },
   });
   await addWorkspaceContactRole(canonical.id, 'nurture');

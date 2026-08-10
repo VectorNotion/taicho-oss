@@ -29,7 +29,7 @@ import {
 } from './pool';
 
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';
-export type EntityType = 'project' | 'lead' | 'research' | 'topic' | 'outreach' | 'content' | 'content_idea';
+export type EntityType = 'project' | 'prospect' | 'research' | 'topic' | 'outreach' | 'content' | 'content_idea';
 
 export interface Job {
   id: string;
