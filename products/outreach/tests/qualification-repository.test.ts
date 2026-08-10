@@ -11,14 +11,18 @@ import {
 import { createProspect } from '../data/prospect-repository';
 import { resolveAccountForProspect } from '../data/account-repository';
 import {
+  getAccountScore,
   getMatches,
   getObservations,
   getProspectQualification,
+  getProspectScore,
   getTouchList,
   hasAnyResearchRun,
   recordResearchRun,
+  saveAccountScore,
   saveMatches,
   saveProspectQualification,
+  saveProspectScore,
   upsertObservation,
 } from '../data/qualification-repository';
 import type {
@@ -47,6 +51,60 @@ after(() => inOrganization(async () => {
   await clearGraph();
   await closeDriver();
 }));
+
+test('account score round-trips including timing breakdown and replaces on write', async () => {
+  const prospect = await createProspect({ name: 'A', company: 'ScoreCo', source: 'manual' });
+  const account = await resolveAccountForProspect(prospect);
+  assert.ok(account);
+
+  assert.equal(await getAccountScore(account.id), null);
+  await saveAccountScore(account.id, {
+    icpScore: 82.5, icpScoreConfident: 80, timingScore: 60, hardExcluded: false,
+    reviewReason: 'thin evidence',
+    timingBreakdown: [{ dimensionKey: 'hiring_activity', dimensionValue: 0.7, signalCount: 3 }],
+    computedAt: '2026-08-10T00:00:00.000Z',
+  });
+  const first = await getAccountScore(account.id);
+  assert.equal(first?.icpScore, 82.5);
+  assert.equal(first?.icpScoreConfident, 80);
+  assert.equal(first?.timingScore, 60);
+  assert.equal(first?.hardExcluded, false);
+  assert.equal(first?.reviewReason, 'thin evidence');
+  assert.deepEqual(first?.timingBreakdown, [{ dimensionKey: 'hiring_activity', dimensionValue: 0.7, signalCount: 3 }]);
+
+  await saveAccountScore(account.id, {
+    icpScore: 40, icpScoreConfident: 40, timingScore: 0, hardExcluded: true, timingBreakdown: [],
+    computedAt: '2026-08-11T00:00:00.000Z',
+  });
+  const second = await getAccountScore(account.id);
+  assert.equal(second?.icpScore, 40);
+  assert.equal(second?.hardExcluded, true);
+  assert.equal(second?.reviewReason, undefined);
+
+  // Exactly one score node per account.
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `MATCH (a:Account {id: $id})-[:HAS_SCORE]->(s:AccountScore) RETURN count(s) AS c`,
+      { id: account.id },
+    );
+    assert.equal(result.records[0].get('c').toNumber(), 1);
+  } finally {
+    await session.close();
+  }
+});
+
+test('prospect score round-trips and replaces on write', async () => {
+  const prospect = await createProspect({ name: 'P', company: 'PScore', source: 'manual' });
+  assert.equal(await getProspectScore(prospect.id), null);
+  await saveProspectScore(prospect.id, { personaScore: 74, personaScoreConfident: 70, hardExcluded: false, computedAt: '2026-08-10T00:00:00.000Z' });
+  assert.equal((await getProspectScore(prospect.id))?.personaScore, 74);
+  await saveProspectScore(prospect.id, { personaScore: 11, personaScoreConfident: 11, hardExcluded: true, reviewReason: 'builder conflict', computedAt: '2026-08-11T00:00:00.000Z' });
+  const updated = await getProspectScore(prospect.id);
+  assert.equal(updated?.personaScore, 11);
+  assert.equal(updated?.hardExcluded, true);
+  assert.equal(updated?.reviewReason, 'builder conflict');
+});
 
 function qualification(partial: Partial<ProspectQualificationResult>): ProspectQualificationResult {
   return {

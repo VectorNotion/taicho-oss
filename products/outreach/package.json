@@ -17,6 +17,7 @@
     "./agent/generator": "./agent/generator.ts",
     "./agent/prospect-research": "./agent/prospect-research.ts",
     "./agent/qualify-prospect": "./agent/qualify-prospect.ts",
+    "./agent/account-research": "./agent/account-research.ts",
     "./agent/dimension-research": "./agent/dimension-research.ts",
     "./agent/match-evaluator": "./agent/match-evaluator.ts",
     "./agent/tavily-tool": "./agent/tavily-tool.ts"

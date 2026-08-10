@@ -31,13 +31,8 @@ export interface ActionPayloads {
   refine_content_idea: { idea_id: string };
   generate_content_ideas: { count: number };
   generate_content_draft: { idea_id: string; content_type: string };
-  research_prospect: {
-    prospect_id: string;
-    name: string;
-    company: string;
-    title?: string;
-    location?: string;
-  };
+  research_account: { account_id: string };
+  research_prospect: { prospect_id: string };
   qualify_prospect: { prospect_id: string };
   schedule_post: SchedulePostPayload;
   add_to_funnel: AddToFunnelPayload;

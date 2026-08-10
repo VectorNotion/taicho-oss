@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Loader2, Plus, User } from "lucide-react";
+import { ArrowRight, Loader2, Plus, Search, User } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,12 +25,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type {
-  ProspectResearch,
-} from "@/products/outreach/domain/types";
-import type { ProspectResearchResult } from "@/products/outreach/domain/research-schema";
-import { ResearchMastra, type ResearchRunState } from "./research-mastra";
-import { ResearchLiveSurface } from "./ResearchLiveSurface";
+import { useDimensionResearch } from "../research/useDimensionResearch";
+import { DimensionResearchSurface } from "../research/DimensionResearchSurface";
 
 export interface AccountProspectRow {
   id: string;
@@ -67,33 +63,60 @@ function statusBadge(row: AccountProspectRow) {
   return <Badge variant="secondary">Not qualified</Badge>;
 }
 
-/** Map the streamed research result into the persisted-research shape for the live surface. */
-function toProspectResearch(prospectId: string, result: ProspectResearchResult): ProspectResearch {
-  return {
-    prospectId,
-    industry: result.industry,
-    companySummary: result.companySummary,
-    talkingPoints: result.talkingPoints,
-    outreachAngle: result.outreachAngle,
-    companyInsights: result.companyInsights.map((insight, index) => ({
-      id: `insight-${index}`,
-      category: insight.category,
-      content: insight.content,
-      sourceUrl: insight.sourceUrl,
-      createdAt: new Date().toISOString(),
-    })),
-    competitors: result.competitors.map((competitor, index) => ({
-      id: `competitor-${index}`,
-      name: competitor.name,
-      relevance: competitor.relevance,
-      aiFocus: competitor.aiFocus,
-      createdAt: new Date().toISOString(),
-    })),
-    updatedAt: new Date().toISOString(),
-  };
-}
-
 const EMPTY_FORM = { name: "", title: "", email: "", linkedinUrl: "" };
+
+/**
+ * Runs one prospect dimension-research stream on mount (remounted per row via
+ * `key`), rendering the live surface. Reports completion up so the account can
+ * re-fetch and reflect the new persona score / status.
+ */
+function ProspectResearchSurface({
+  prospectId,
+  prospectName,
+  onComplete,
+}: {
+  prospectId: string;
+  prospectName: string;
+  onComplete: () => void;
+}) {
+  const { start, final, error, isStreaming, dimensions } = useDimensionResearch(
+    `/api/outreach/prospects/${prospectId}/research/stream`,
+  );
+  const completed = useRef(false);
+
+  useEffect(() => {
+    start();
+    // Runs once per mount; the row remounts this component by key to re-run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (final && !completed.current) {
+      completed.current = true;
+      toast.success(`Research complete for ${prospectName}`);
+      onComplete();
+    }
+  }, [final, prospectName, onComplete]);
+
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error]);
+
+  return (
+    <Card className={isStreaming ? "border-primary/20 shadow-sm" : undefined}>
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">Researching {prospectName}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <DimensionResearchSurface
+          entityName={prospectName}
+          dimensions={dimensions}
+          isStreaming={isStreaming}
+        />
+      </CardContent>
+    </Card>
+  );
+}
 
 export function AccountProspectsSection({
   accountName,
@@ -105,8 +128,6 @@ export function AccountProspectsSection({
   const [form, setForm] = useState(EMPTY_FORM);
 
   const [activeResearch, setActiveResearch] = useState<{ id: string; name: string } | null>(null);
-  const [researchRun, setResearchRun] = useState<ResearchRunState | null>(null);
-  const [completedResearch, setCompletedResearch] = useState<ProspectResearch | null>(null);
 
   async function addProspect() {
     const name = form.name.trim();
@@ -141,18 +162,6 @@ export function AccountProspectsSection({
     } finally {
       setAdding(false);
     }
-  }
-
-  function beginResearch(prospect: AccountProspectRow) {
-    setActiveResearch({ id: prospect.id, name: prospect.name });
-    setResearchRun(null);
-    setCompletedResearch(null);
-  }
-
-  function completeResearch(prospect: AccountProspectRow, result: ProspectResearchResult) {
-    setCompletedResearch(toProspectResearch(prospect.id, result));
-    toast.success(`Research complete for ${prospect.name}`);
-    onRefresh();
   }
 
   return (
@@ -206,14 +215,14 @@ export function AccountProspectsSection({
                       <TableCell>{statusBadge(prospect)}</TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-2">
-                          <ResearchMastra
-                            onComplete={(result) => completeResearch(prospect, result)}
-                            onError={(message) => toast.error(message)}
-                            onRunUpdate={setResearchRun}
-                            onStarted={() => beginResearch(prospect)}
-                            prospect={{ name: prospect.name, company: accountName, title: prospect.title }}
-                            prospectId={prospect.id}
-                          />
+                          <Button
+                            disabled={activeResearch?.id === prospect.id}
+                            onClick={() => setActiveResearch({ id: prospect.id, name: prospect.name })}
+                            size="sm"
+                            variant="secondary"
+                          >
+                            <Search className="size-4" /> Research
+                          </Button>
                           <Button asChild size="icon-sm" variant="ghost">
                             <Link aria-label={`Open ${prospect.name}`} href={`/outreach/prospects/${prospect.id}`}>
                               <ArrowRight className="size-4" />
@@ -244,18 +253,12 @@ export function AccountProspectsSection({
       </Card>
 
       {activeResearch ? (
-        <Card className={researchRun && researchRun.phase !== "complete" ? "border-primary/20 shadow-sm" : undefined}>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Researching {activeResearch.name}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResearchLiveSurface
-              prospectName={activeResearch.name}
-              research={completedResearch}
-              run={researchRun}
-            />
-          </CardContent>
-        </Card>
+        <ProspectResearchSurface
+          key={activeResearch.id}
+          onComplete={onRefresh}
+          prospectId={activeResearch.id}
+          prospectName={activeResearch.name}
+        />
       ) : null}
 
       <Dialog onOpenChange={(open) => { if (!adding) setAddOpen(open); }} open={addOpen}>

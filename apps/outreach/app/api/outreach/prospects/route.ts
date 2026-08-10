@@ -10,7 +10,7 @@ import {
 } from "@/products/outreach/data/prospect-repository";
 import { resolveAccountForProspect } from "@/products/outreach/data/account-repository";
 import type { ProspectFilters } from "@/products/outreach/domain/types";
-import { runProspectResearchAsync, buildResearchInput } from "@/products/outreach/agent/prospect-research";
+import { runProspectResearchAsync } from "@/products/outreach/agent/prospect-research";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       await resolveAccountForProspect({ id: prospect.id, company: prospect.company });
     }
     if (triggerResearch) {
-      runProspectResearchAsync(buildResearchInput(prospect));
+      runProspectResearchAsync(prospect.id);
     }
     return NextResponse.json(
       { ...prospect, existed: false },

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useCallback, use } from "react";
 import { toast } from "sonner";
-import { ArrowLeft, GitBranch, Loader2, Search, UserX } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ExternalLink, GitBranch, Loader2, Search, UserX } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,13 +19,13 @@ import {
 } from "@/components/ui/dialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ResearchMastra, type ResearchRunState } from "@/components/prospects/research-mastra";
-import { ResearchLiveSurface } from "@/components/prospects/ResearchLiveSurface";
+import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
+import { DimensionResearchSurface } from "@/products/outreach/ui/components/research/DimensionResearchSurface";
+import { ScoreRing } from "@/components/genui";
 
 import { ProspectHero, QuickInfo, OutreachHistory, ActivityTimeline, AddActivityDialog, ProspectNotes, ProspectIntelligenceTabs, type Activity } from "@/components/prospects";
 import { QualificationCard } from "@/components/prospects/QualificationCard";
 import { useActionStream } from "@/hooks/use-action-stream";
-import { ResearchSectionSkeleton } from "@/components/prospects/ResearchSkeleton";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -34,7 +34,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ProspectResearchResult } from "@/products/outreach/domain/research-schema";
 import type { ProspectQualificationResult } from "@/products/outreach/domain/qualification";
 import type {
   Prospect,
@@ -43,10 +42,35 @@ import type {
   LegacyQualification,
   OutreachMessage,
   OutreachMedium,
-  ProspectResearch,
   ProspectActivity,
 } from "@/products/outreach/domain/types";
 import { callRecordingProspectUrl } from "@/products/outreach/ui/call-recording-link";
+
+/** One persona (prospect-fit) dimension: what we wanted → what research found → how it matched. */
+type PersonaDimension = {
+  dimensionKey: string;
+  observedValue?: string;
+  evidence: string[];
+  confidence: number;
+  matchScore?: number;
+  effectiveMatch?: number;
+  classification?: string;
+  hardExclusion?: boolean;
+};
+
+type PersonaPayload = { dimensions: PersonaDimension[]; personaScore: number | null };
+
+function formatDimensionKey(key: string): string {
+  return key.replaceAll("_", " ");
+}
+
+function hostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
+}
 
 type ConfirmDelete =
   | { type: "prospect" }
@@ -76,10 +100,8 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   const [addActivityDialogOpen, setAddActivityDialogOpen] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [research, setResearch] = useState<ProspectResearch | null>(null);
-  const [researchLoading, setResearchLoading] = useState(true);
-  const [isResearchStreaming, setIsResearchStreaming] = useState(false);
-  const [researchRun, setResearchRun] = useState<ResearchRunState | null>(null);
+  const [persona, setPersona] = useState<PersonaPayload | null>(null);
+  const [personaLoading, setPersonaLoading] = useState(true);
   const [qualification, setQualification] = useState<QualificationPayload | null>(null);
   const [qualificationLoading, setQualificationLoading] = useState(true);
   const [notes, setNotes] = useState<ProspectNote[]>([]);
@@ -97,6 +119,22 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   const qualifyStream = useActionStream<{ score?: number; notes?: string }, { score?: number }>({
     api: `/api/outreach/prospects/${prospectId}/qualify/stream`,
   });
+  const research = useDimensionResearch(`/api/outreach/prospects/${prospectId}/research/stream`);
+
+  const fetchPersona = useCallback(async () => {
+    if (!prospectId) return;
+    setPersonaLoading(true);
+    try {
+      const response = await fetch(`/api/outreach/prospects/${prospectId}/persona`);
+      if (!response.ok) throw new Error("Failed to fetch persona");
+      setPersona(await response.json());
+    } catch (error) {
+      console.error("Error fetching persona:", error);
+      toast.error("Could not load persona fit — refresh to try again");
+    } finally {
+      setPersonaLoading(false);
+    }
+  }, [prospectId]);
 
   // Fetch prospect data
   useEffect(() => {
@@ -158,27 +196,22 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   }, [qualifyStream.final, prospectId]);
   useEffect(() => { if (qualifyStream.error) toast.error(qualifyStream.error); }, [qualifyStream.error]);
 
-  // Fetch research data
+  // Fetch persona (prospect fit) detail
   useEffect(() => {
-    async function fetchResearch() {
-      if (!prospectId) return;
+    void fetchPersona();
+  }, [fetchPersona]);
 
-      setResearchLoading(true);
-      try {
-        const response = await fetch(`/api/outreach/prospects/${prospectId}/research`);
-        if (!response.ok) throw new Error("Failed to fetch research");
-
-        const data = await response.json();
-        setResearch(data);
-      } catch (error) {
-        console.error("Error fetching research:", error);
-        toast.error("Could not load research — refresh to try again");
-      } finally {
-        setResearchLoading(false);
-      }
-    }
-    fetchResearch();
-  }, [prospectId]);
+  // When dimension research finishes, refresh persona fit + qualification.
+  useEffect(() => {
+    if (!research.final || !prospectId) return;
+    toast.success("Research complete");
+    void fetchPersona();
+    void fetch(`/api/outreach/prospects/${prospectId}/qualify`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("Failed to fetch qualification"))))
+      .then(setQualification)
+      .catch(() => toast.error("Research completed, but the score could not be refreshed"));
+  }, [research.final, fetchPersona, prospectId]);
+  useEffect(() => { if (research.error) toast.error(research.error); }, [research.error]);
 
   // Fetch qualification
   useEffect(() => {
@@ -361,60 +394,6 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     } finally {
       setUpdatingStatus(false);
     }
-  };
-
-  const handleResearchStarted = () => {
-    setIsResearchStreaming(true);
-  };
-
-  const handleResearchComplete = async (result: ProspectResearchResult) => {
-    setIsResearchStreaming(false);
-
-    // Update research state with the streamed result
-    // Convert ProspectResearchResult to ProspectResearch format
-    const researchData: ProspectResearch = {
-      prospectId,
-      industry: result.industry,
-      companySummary: result.companySummary,
-      talkingPoints: result.talkingPoints,
-      outreachAngle: result.outreachAngle,
-      companyInsights: result.companyInsights.map((insight, idx) => ({
-        id: `insight-${idx}`,
-        category: insight.category,
-        content: insight.content,
-        sourceUrl: insight.sourceUrl,
-        createdAt: new Date().toISOString(),
-      })),
-      competitors: result.competitors.map((comp, idx) => ({
-        id: `competitor-${idx}`,
-        name: comp.name,
-        relevance: comp.relevance,
-        aiFocus: comp.aiFocus,
-        createdAt: new Date().toISOString(),
-      })),
-      updatedAt: new Date().toISOString(),
-    };
-    setResearch(researchData);
-
-    // Refresh qualification data after research completes
-    try {
-      const qualifyResponse = await fetch(`/api/outreach/prospects/${prospectId}/qualify`);
-      if (qualifyResponse.ok) {
-        const qualifyData = await qualifyResponse.json();
-        if (qualifyData) {
-          setQualification(qualifyData);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to refresh qualification data:", error);
-      toast.error("Could not refresh qualification — reload to see the latest score");
-    }
-  };
-
-  const handleResearchError = (error: string) => {
-    setIsResearchStreaming(false);
-    console.error("Research failed:", error);
-    toast.error("Research failed — try again");
   };
 
   const handleGenerateOutreach = async (medium: OutreachMedium, targetContentValue?: string) => {
@@ -675,19 +654,15 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
           onOpenCommentDialog={() => setContentCommentDialogOpen(true)}
           onDelete={() => setConfirmDelete({ type: "prospect" })}
           researchButton={
-            <ResearchMastra
-              prospectId={prospectId}
-              prospect={{
-                name: prospect.name,
-                company: prospect.company || '',
-                title: prospect.title || '',
-                location: prospect.location || '',
-              }}
-              onStarted={handleResearchStarted}
-              onRunUpdate={setResearchRun}
-              onComplete={handleResearchComplete}
-              onError={handleResearchError}
-            />
+            <Button
+              aria-label="Research this person"
+              disabled={research.isStreaming}
+              onClick={() => research.start()}
+              size="sm"
+            >
+              {research.isStreaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              <span className="hidden sm:inline">{research.isStreaming ? "Researching…" : "Research"}</span>
+            </Button>
           }
           nurtureAction={nurtureFunnels ? (
             <Button aria-label="Add to funnel" size="sm" variant="outline" onClick={openNurtureDialog}>
@@ -717,44 +692,124 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
         )}
         overview={(
           <div className="space-y-4">
-            <Card className={isResearchStreaming ? "border-primary/20 shadow-sm" : undefined}>
-              <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <CardTitle>Research</CardTitle>
-                    {research && !isResearchStreaming && (
-                      <Badge variant="outline" className="text-xs">
-                        {research.industry}
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Evidence-grounded company and market brief
-                  </p>
+            {(research.isStreaming || research.dimensions.length > 0) && (
+              <Card className={research.isStreaming ? "border-primary/20 shadow-sm" : undefined}>
+                <CardHeader>
+                  <CardTitle>Live research</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <DimensionResearchSurface
+                    entityName={prospect.name}
+                    dimensions={research.dimensions}
+                    isStreaming={research.isStreaming}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
+            <Card>
+              <CardHeader className="flex-row items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CardTitle>Persona fit</CardTitle>
+                  {persona?.personaScore != null && (
+                    <Badge variant="outline" className="text-xs tabular-nums">
+                      {Math.round(persona.personaScore)}
+                    </Badge>
+                  )}
                 </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={research.isStreaming}
+                  onClick={() => research.start()}
+                >
+                  <Search className="h-4 w-4" />
+                  {persona && persona.dimensions.length > 0 ? "Re-research" : "Research"}
+                </Button>
               </CardHeader>
               <CardContent>
-                {!researchLoading && (researchRun || research) && (
-                  <ResearchLiveSurface
-                    prospectName={prospect.name}
-                    research={research}
-                    run={researchRun}
-                  />
-                )}
-
-                {!researchRun && !research && !researchLoading && (
+                {personaLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-4 w-1/2" />
+                    <Skeleton className="h-2 w-full" />
+                    <Skeleton className="h-4 w-2/3" />
+                  </div>
+                ) : persona && persona.dimensions.length > 0 ? (
+                  <div className="space-y-5">
+                    <div className="flex justify-center">
+                      <ScoreRing score={persona.personaScore == null ? null : Math.round(persona.personaScore)} label="Persona" />
+                    </div>
+                    <div className="space-y-4">
+                      {persona.dimensions.map((dimension) => {
+                        const percent = Math.round((dimension.effectiveMatch ?? 0) * 100);
+                        return (
+                          <div key={dimension.dimensionKey} className="space-y-1.5 border-t pt-4 first:border-t-0 first:pt-0">
+                            <div className="flex items-center justify-between gap-2 text-sm">
+                              <span className="font-medium capitalize">
+                                {formatDimensionKey(dimension.dimensionKey)}
+                                {dimension.hardExclusion && (
+                                  <AlertTriangle className="ml-1 inline h-3.5 w-3.5 text-destructive" />
+                                )}
+                              </span>
+                              <span className="tabular-nums text-muted-foreground">{percent}%</span>
+                            </div>
+                            {dimension.observedValue && (
+                              <p className="text-sm leading-6 text-muted-foreground">{dimension.observedValue}</p>
+                            )}
+                            {dimension.evidence.length > 0 && (
+                              <div className="flex flex-wrap gap-2 pt-0.5">
+                                {[...new Set(dimension.evidence)].slice(0, 4).map((url) => (
+                                  <a
+                                    key={url}
+                                    className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+                                    href={url}
+                                    rel="noopener noreferrer"
+                                    target="_blank"
+                                  >
+                                    <ExternalLink className="size-3" />
+                                    {hostname(url)}
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                            <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                              <div
+                                className={`h-full transition-all duration-500 ${dimension.hardExclusion ? "bg-destructive" : "bg-chart-2"}`}
+                                style={{ width: `${percent}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
                   <div className="flex flex-col items-center gap-2 py-8 text-center">
                     <div className="rounded-full border bg-muted/40 p-3">
                       <Search className="h-6 w-6 text-muted-foreground" />
                     </div>
-                    <p className="text-sm font-medium">No research brief yet</p>
+                    <p className="text-sm font-medium">Not researched yet — run Research.</p>
                     <p className="max-w-md text-sm text-muted-foreground">
-                      Run research to retrieve live evidence and build a grounded outreach point of view.
+                      Research gathers live evidence for each persona dimension and scores the fit.
                     </p>
                   </div>
                 )}
+              </CardContent>
+            </Card>
 
-                {!isResearchStreaming && researchLoading && <ResearchSectionSkeleton />}
+            <Card>
+              <CardHeader>
+                <CardTitle>Company context</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <p className="text-sm font-medium">{prospect.company || "No company on file"}</p>
+                <p className="text-sm text-muted-foreground">Company research lives on the account.</p>
+                <Link
+                  className="inline-flex items-center gap-1 text-sm text-primary transition-colors hover:underline"
+                  href="/outreach/accounts"
+                >
+                  View accounts <ExternalLink className="size-3" />
+                </Link>
               </CardContent>
             </Card>
 

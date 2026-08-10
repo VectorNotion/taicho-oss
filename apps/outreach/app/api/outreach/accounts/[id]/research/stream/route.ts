@@ -1,5 +1,5 @@
 import { actionStreamResponse } from '@/packages/platform/agents/streaming';
-import { runQualifyProspect } from '@/products/outreach/agent/qualify-prospect';
+import { runAccountResearch, streamingDimensionProgress } from '@/products/outreach/agent/account-research';
 import { commercialErrorResponse, reserveBackgroundAction } from '@content-automation/auth/commercial';
 import { runWithGraphOrganization } from '@content-automation/platform/data/graph';
 
@@ -8,21 +8,21 @@ export const maxDuration = 600;
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   // reserveBackgroundAction authenticates and yields the caller's organization;
-  // the deferred run callback must re-establish that graph scope itself, since
-  // AsyncLocalStorage from this request does not reach the streamed execution.
+  // the deferred run callback re-establishes that graph scope (AsyncLocalStorage
+  // from this request does not reach the streamed execution).
   let billing;
   try {
-    billing = await reserveBackgroundAction(request, 'qualify_prospect');
+    billing = await reserveBackgroundAction(request, 'research_account');
   } catch (error) {
-    return commercialErrorResponse(error) ?? Response.json({ error: 'Could not start qualification.' }, { status: 500 });
+    return commercialErrorResponse(error) ?? Response.json({ error: 'Could not start account research.' }, { status: 500 });
   }
   const organizationId = billing.commercial.organizationId;
   return actionStreamResponse({
-    action: 'qualify_prospect', entityId: id, entityType: 'prospect',
+    action: 'research_account', entityId: id, entityType: 'account',
     commercial: billing.commercial, estimatedCredits: billing.estimatedCredits,
-    run: () => runWithGraphOrganization(
+    run: (emit) => runWithGraphOrganization(
       organizationId,
-      () => runQualifyProspect(id),
+      () => runAccountResearch(id, { onDimension: streamingDimensionProgress(emit) }),
     ) as unknown as Promise<Record<string, unknown>>,
   });
 }

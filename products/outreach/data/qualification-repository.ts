@@ -5,6 +5,7 @@ import type {
   ProspectQualificationResult,
   QualificationStatus,
   ResearchRunRecord,
+  TimingDimensionBreakdown,
   TimingSignal,
 } from "../domain/qualification";
 
@@ -201,6 +202,188 @@ export async function getMatches(entity: EntityRef): Promise<DimensionMatch[]> {
         confidence: toNumber(props.confidence),
       } satisfies DimensionMatch;
     });
+  } finally {
+    await session.close();
+  }
+}
+
+export interface PersonaDimensionObservation {
+  dimensionKey: string;
+  observedValue?: string;
+  evidence: string[];
+  confidence: number;
+  matchScore?: number;
+  effectiveMatch?: number;
+  classification?: string;
+  hardExclusion?: boolean;
+}
+
+/**
+ * Per persona (prospect fit) dimension: what the researcher found (observation +
+ * evidence) joined with its match — the prospect page's want→found→match view.
+ */
+export async function getProspectPersonaDetail(prospectId: string): Promise<PersonaDimensionObservation[]> {
+  const [observations, matches] = await Promise.all([
+    getObservations({ kind: "prospect", id: prospectId }),
+    getMatches({ kind: "prospect", id: prospectId }),
+  ]);
+  const matchByKey = new Map(matches.map((m) => [m.dimensionKey, m]));
+  return observations
+    .filter((o) => o.shape === "prose")
+    .map((o) => {
+      const match = matchByKey.get(o.dimensionKey);
+      return {
+        dimensionKey: o.dimensionKey,
+        observedValue: o.observedValue,
+        evidence: o.evidence,
+        confidence: o.confidence,
+        matchScore: match?.matchScore,
+        effectiveMatch: match?.effectiveMatch,
+        classification: match?.classification,
+        hardExclusion: match?.hardExclusion,
+      };
+    });
+}
+
+/**
+ * Account-level scores (ICP fit + timing), owned by the account and written by
+ * `runAccountResearch` independently of any prospect. Replace-on-write.
+ */
+export interface AccountScoreRecord {
+  icpScore: number;
+  /** ICP score excluding low-confidence fit matches — feeds confidence routing (spec §8). */
+  icpScoreConfident: number;
+  timingScore: number;
+  hardExcluded: boolean;
+  reviewReason?: string;
+  timingBreakdown: TimingDimensionBreakdown[];
+  computedAt: string;
+}
+
+export interface ProspectScoreRecord {
+  personaScore: number;
+  /** Persona score excluding low-confidence fit matches — feeds confidence routing (spec §8). */
+  personaScoreConfident: number;
+  hardExcluded: boolean;
+  reviewReason?: string;
+  computedAt: string;
+}
+
+export async function saveAccountScore(accountId: string, score: AccountScoreRecord): Promise<void> {
+  const session = await getSession();
+  try {
+    await session.run(
+      `MATCH (a:Account {id: $accountId})-[:HAS_SCORE]->(s:AccountScore) DETACH DELETE s`,
+      { accountId }
+    );
+    const created = await session.run(
+      `
+      MATCH (a:Account {id: $accountId})
+      CREATE (s:AccountScore {
+        id: randomUUID(),
+        icpScore: $icpScore,
+        icpScoreConfident: $icpScoreConfident,
+        timingScore: $timingScore,
+        hardExcluded: $hardExcluded,
+        reviewReason: $reviewReason,
+        timingBreakdownJson: $timingBreakdownJson,
+        computedAt: $computedAt
+      })
+      CREATE (a)-[:HAS_SCORE]->(s)
+      RETURN s
+      `,
+      {
+        accountId,
+        icpScore: score.icpScore,
+        icpScoreConfident: score.icpScoreConfident,
+        timingScore: score.timingScore,
+        hardExcluded: score.hardExcluded,
+        reviewReason: score.reviewReason ?? null,
+        timingBreakdownJson: JSON.stringify(score.timingBreakdown),
+        computedAt: score.computedAt,
+      }
+    );
+    if (created.records.length === 0) throw new Error(`Account not found: ${accountId}`);
+  } finally {
+    await session.close();
+  }
+}
+
+export async function getAccountScore(accountId: string): Promise<AccountScoreRecord | null> {
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `MATCH (a:Account {id: $accountId})-[:HAS_SCORE]->(s:AccountScore) RETURN s`,
+      { accountId }
+    );
+    if (result.records.length === 0) return null;
+    const s = result.records[0].get("s").properties as Record<string, unknown>;
+    return {
+      icpScore: toNumber(s.icpScore),
+      icpScoreConfident: toNumber(s.icpScoreConfident),
+      timingScore: toNumber(s.timingScore),
+      hardExcluded: s.hardExcluded as boolean,
+      reviewReason: (s.reviewReason as string | null) ?? undefined,
+      timingBreakdown: parseJson<TimingDimensionBreakdown[]>(s.timingBreakdownJson, []),
+      computedAt: s.computedAt as string,
+    };
+  } finally {
+    await session.close();
+  }
+}
+
+export async function saveProspectScore(prospectId: string, score: ProspectScoreRecord): Promise<void> {
+  const session = await getSession();
+  try {
+    await session.run(
+      `MATCH (p:Prospect {id: $prospectId})-[:HAS_SCORE]->(s:ProspectScore) DETACH DELETE s`,
+      { prospectId }
+    );
+    const created = await session.run(
+      `
+      MATCH (p:Prospect {id: $prospectId})
+      CREATE (s:ProspectScore {
+        id: randomUUID(),
+        personaScore: $personaScore,
+        personaScoreConfident: $personaScoreConfident,
+        hardExcluded: $hardExcluded,
+        reviewReason: $reviewReason,
+        computedAt: $computedAt
+      })
+      CREATE (p)-[:HAS_SCORE]->(s)
+      RETURN s
+      `,
+      {
+        prospectId,
+        personaScore: score.personaScore,
+        personaScoreConfident: score.personaScoreConfident,
+        hardExcluded: score.hardExcluded,
+        reviewReason: score.reviewReason ?? null,
+        computedAt: score.computedAt,
+      }
+    );
+    if (created.records.length === 0) throw new Error(`Prospect not found: ${prospectId}`);
+  } finally {
+    await session.close();
+  }
+}
+
+export async function getProspectScore(prospectId: string): Promise<ProspectScoreRecord | null> {
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `MATCH (p:Prospect {id: $prospectId})-[:HAS_SCORE]->(s:ProspectScore) RETURN s`,
+      { prospectId }
+    );
+    if (result.records.length === 0) return null;
+    const s = result.records[0].get("s").properties as Record<string, unknown>;
+    return {
+      personaScore: toNumber(s.personaScore),
+      personaScoreConfident: toNumber(s.personaScoreConfident),
+      hardExcluded: s.hardExcluded as boolean,
+      reviewReason: (s.reviewReason as string | null) ?? undefined,
+      computedAt: s.computedAt as string,
+    };
   } finally {
     await session.close();
   }

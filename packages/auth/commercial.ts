@@ -9,7 +9,7 @@ import {
 import { getAuthorizationContext } from "./server";
 
 type BackgroundAction = "build_project_graph" | "do_research" | "extract_topics" |
-  "refine_content_idea" | "generate_content_ideas" | "generate_content_draft" | "research_prospect" | "qualify_prospect";
+  "refine_content_idea" | "generate_content_ideas" | "generate_content_draft" | "research_account" | "research_prospect" | "qualify_prospect";
 type JobCommercialContext = { organizationId: string; initiatingUserId: string; walletUserId: string; creditReservationId: string };
 
 const actionPricing: Record<BackgroundAction, { credits: number; capability: CapabilityId }> = {
@@ -19,6 +19,7 @@ const actionPricing: Record<BackgroundAction, { credits: number; capability: Cap
   refine_content_idea: { credits: 30, capability: "content.full" },
   generate_content_ideas: { credits: 50, capability: "content.full" },
   generate_content_draft: { credits: 80, capability: "content.full" },
+  research_account: { credits: 80, capability: "outreach" },
   research_prospect: { credits: 80, capability: "outreach" },
   qualify_prospect: { credits: 40, capability: "outreach" },
 };

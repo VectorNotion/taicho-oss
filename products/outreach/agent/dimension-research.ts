@@ -9,11 +9,13 @@
  */
 import { z } from 'zod';
 import { createLogger } from '@content-automation/observability';
-import { DEFAULT_PROSPECT_RESEARCH_MODEL } from './prospect-research';
 import { searchTavily, type TavilySearchOutput } from './tavily-tool';
 import type { DimensionDefinition, ObservationRecord } from '../domain/qualification';
 
 const log = createLogger('dimension-research');
+
+/** Default OpenRouter model slug for research synthesis (override via OUTREACH_RESEARCH_MODEL). */
+export const DEFAULT_RESEARCH_MODEL = 'google/gemini-3.6-flash';
 
 const RESEARCH_TIMEOUT_MS = 180_000;
 
@@ -64,7 +66,7 @@ export interface DimensionResearchDeps {
 }
 
 function researchModelSlug(): string {
-  return process.env.OUTREACH_RESEARCH_MODEL?.trim() || DEFAULT_PROSPECT_RESEARCH_MODEL;
+  return process.env.OUTREACH_RESEARCH_MODEL?.trim() || DEFAULT_RESEARCH_MODEL;
 }
 
 /** Default JSON completion: raw OpenRouter fetch with strict json_schema output. */

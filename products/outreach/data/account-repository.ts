@@ -145,13 +145,14 @@ export interface AccountListPage {
 
 const ACCOUNT_ROLLUP = `
   MATCH (a:Account)
+  OPTIONAL MATCH (a)-[:HAS_SCORE]->(sc:AccountScore)
   OPTIONAL MATCH (a)<-[:BELONGS_TO]-(p:Prospect)
   OPTIONAL MATCH (p)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
   WITH a,
        count(DISTINCT p) AS prospectCount,
        sum(CASE WHEN q.status = 'QUALIFIED' THEN 1 ELSE 0 END) AS qualifiedCount,
-       max(q.icpScore) AS icpScore,
-       max(q.timingScore) AS timingScore
+       max(sc.icpScore) AS icpScore,
+       max(sc.timingScore) AS timingScore
 `;
 
 function mapRollupRow(record: { get(name: string): unknown }): AccountListItem {
@@ -277,6 +278,24 @@ export interface AccountProspectSummary {
   qualificationStatus: string | null;
 }
 
+export interface AccountDimensionObservation {
+  dimensionKey: string;
+  observedValue?: string;
+  evidence: string[];
+  confidence: number;
+  matchScore?: number;
+  effectiveMatch?: number;
+  classification?: string;
+  hardExclusion?: boolean;
+}
+
+export interface AccountTimingSignals {
+  dimensionKey: string;
+  signals: Array<{ signal: string; date: string; evidence: string[]; confidence: number }>;
+  dimensionValue?: number;
+  signalCount: number;
+}
+
 export interface AccountDetail {
   id: string;
   name: string;
@@ -284,8 +303,15 @@ export interface AccountDetail {
   createdAt: string;
   icpScore: number | null;
   timingScore: number | null;
+  hardExcluded: boolean;
+  reviewReason?: string;
+  computedAt?: string;
   icpMatches: DimensionMatch[];
+  /** Per fit dimension: what the researcher found (observation + evidence) joined with its match. */
+  icpObservations: AccountDimensionObservation[];
   timingBreakdown: TimingDimensionBreakdown[];
+  /** Per timing dimension: the dated signals found, joined with the decayed dimension value. */
+  timingSignals: AccountTimingSignals[];
   prospects: AccountProspectSummary[];
 }
 
@@ -296,7 +322,16 @@ export async function getAccountDetail(id: string): Promise<AccountDetail | null
     if (accountResult.records.length === 0) return null;
     const account = mapAccount(accountResult.records[0].get("a").properties);
 
-    // Account-level ICP matches (the fit dimensions scored against the company).
+    // Account-level score (ICP fit + timing), written by runAccountResearch.
+    const scoreResult = await session.run(
+      `MATCH (a:Account {id: $id})-[:HAS_SCORE]->(s:AccountScore) RETURN s`,
+      { id },
+    );
+    const score = scoreResult.records[0]?.get("s")?.properties as Record<string, unknown> | undefined;
+    const timingBreakdown = score ? parseJson<TimingDimensionBreakdown[]>(score.timingBreakdownJson, []) : [];
+    const timingValueByKey = new Map(timingBreakdown.map((entry) => [entry.dimensionKey, entry]));
+
+    // ICP fit matches (how well each fit observation matched the ideal).
     const matchResult = await session.run(
       `MATCH (a:Account {id: $id})-[:HAS_MATCH]->(m:DimensionMatch) RETURN m ORDER BY m.dimensionKey`,
       { id },
@@ -312,39 +347,59 @@ export async function getAccountDetail(id: string): Promise<AccountDetail | null
         confidence: toNumber(m.confidence) ?? 0,
       };
     });
+    const matchByKey = new Map(icpMatches.map((m) => [m.dimensionKey, m]));
 
-    // Prospects under the account, each with its persona score + status.
+    // The raw observations the researcher found (spec §17 "what we found").
+    const obsResult = await session.run(
+      `MATCH (a:Account {id: $id})-[:HAS_OBSERVATION]->(o:AccountObservation) RETURN o ORDER BY o.dimensionKey`,
+      { id },
+    );
+    const icpObservations: AccountDimensionObservation[] = [];
+    const timingSignals: AccountTimingSignals[] = [];
+    for (const record of obsResult.records) {
+      const o = record.get("o").properties as Record<string, unknown>;
+      const dimensionKey = o.dimensionKey as string;
+      const evidence = parseJson<string[]>(o.evidenceJson, []);
+      if ((o.shape as string) === "signals") {
+        const signals = parseJson<AccountTimingSignals["signals"]>(o.signalsJson, []);
+        const entry = timingValueByKey.get(dimensionKey);
+        timingSignals.push({ dimensionKey, signals, dimensionValue: entry?.dimensionValue, signalCount: signals.length });
+      } else {
+        const match = matchByKey.get(dimensionKey);
+        icpObservations.push({
+          dimensionKey,
+          observedValue: (o.observedValue as string | null) ?? undefined,
+          evidence,
+          confidence: toNumber(o.confidence) ?? 0,
+          matchScore: match?.matchScore,
+          effectiveMatch: match?.effectiveMatch,
+          classification: match?.classification,
+          hardExclusion: match?.hardExclusion,
+        });
+      }
+    }
+
+    // Prospects under the account, each with its persona score + qualification status.
     const prospectResult = await session.run(
       `
       MATCH (p:Prospect)-[:BELONGS_TO]->(a:Account {id: $id})
+      OPTIONAL MATCH (p)-[:HAS_SCORE]->(ps:ProspectScore)
       OPTIONAL MATCH (p)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
-      RETURN p, q
-      ORDER BY q.personaScore DESC, p.name
+      RETURN p, ps, q
+      ORDER BY ps.personaScore DESC, p.name
       `,
       { id },
     );
-
-    let icpScore: number | null = null;
-    let timingScore: number | null = null;
-    let timingBreakdown: TimingDimensionBreakdown[] = [];
     const prospects: AccountProspectSummary[] = prospectResult.records.map((record) => {
       const p = record.get("p").properties as Record<string, unknown>;
-      const qNode = record.get("q") as { properties: Record<string, unknown> } | null;
-      const q = qNode?.properties;
-      if (q) {
-        // ICP + timing are account-level; capture from the first qualification seen.
-        if (icpScore == null) icpScore = toNumber(q.icpScore);
-        if (timingScore == null) timingScore = toNumber(q.timingScore);
-        if (timingBreakdown.length === 0) {
-          timingBreakdown = parseJson<TimingDimensionBreakdown[]>(q.timingBreakdownJson, []);
-        }
-      }
+      const ps = (record.get("ps") as { properties: Record<string, unknown> } | null)?.properties;
+      const q = (record.get("q") as { properties: Record<string, unknown> } | null)?.properties;
       return {
         id: p.id as string,
         name: p.name as string,
         title: (p.title as string | null) ?? undefined,
         status: (p.status as string | null) ?? "new",
-        personaScore: q ? toNumber(q.personaScore) : null,
+        personaScore: ps ? toNumber(ps.personaScore) : null,
         qualificationStatus: (q?.status as string | null) ?? null,
       };
     });
@@ -354,10 +409,15 @@ export async function getAccountDetail(id: string): Promise<AccountDetail | null
       name: account.name,
       normalizedName: account.normalizedName,
       createdAt: account.createdAt,
-      icpScore,
-      timingScore,
+      icpScore: score ? toNumber(score.icpScore) : null,
+      timingScore: score ? toNumber(score.timingScore) : null,
+      hardExcluded: Boolean(score?.hardExcluded),
+      reviewReason: (score?.reviewReason as string | null) ?? undefined,
+      computedAt: (score?.computedAt as string | null) ?? undefined,
       icpMatches,
+      icpObservations,
       timingBreakdown,
+      timingSignals,
       prospects,
     };
   } finally {

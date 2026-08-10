@@ -18,7 +18,13 @@ import {
   normalizeCompanyName,
   resolveAccountForProspect,
 } from '../data/account-repository';
-import { saveProspectQualification } from '../data/qualification-repository';
+import {
+  saveAccountScore,
+  saveMatches,
+  saveProspectQualification,
+  saveProspectScore,
+  upsertObservation,
+} from '../data/qualification-repository';
 import type { ProspectQualificationResult } from '../domain/qualification';
 
 const ORGANIZATION_ID = `outreach-account-test-organization-${process.pid}`;
@@ -99,17 +105,35 @@ function qualification(partial: Partial<ProspectQualificationResult>): ProspectQ
   };
 }
 
-test('account rollup: list, counts and detail reflect prospects and qualifications', async () => {
+test('account rollup: list, counts and detail reflect account scores and prospects', async () => {
   await clearGraph();
-  // Target account with a qualified prospect + an unqualified one.
+  // Target account: research wrote its ICP/timing score; one prospect qualified.
   const hot = await createProspect({ name: 'Hot Lead', company: 'Northstar', title: 'COO', source: 'manual' });
   const cold = await createProspect({ name: 'Cold Lead', company: 'Northstar', source: 'manual' });
   const northstar = await resolveAccountForProspect(hot);
   await resolveAccountForProspect(cold);
   assert.ok(northstar);
+  await saveAccountScore(northstar.id, {
+    icpScore: 82, icpScoreConfident: 82, timingScore: 60, hardExcluded: false,
+    timingBreakdown: [{ dimensionKey: 'hiring_activity', dimensionValue: 0.6, signalCount: 2 }],
+    computedAt: '2026-08-10T00:00:00.000Z',
+  });
+  await upsertObservation({ kind: 'account', id: northstar.id }, {
+    dimensionKey: 'internal_ai_capability', shape: 'prose', observedValue: 'No AI team.',
+    evidence: ['https://ex.test/a'], confidence: 0.9, researchedAt: '2026-08-10T00:00:00.000Z', runId: 'r1',
+  });
+  await upsertObservation({ kind: 'account', id: northstar.id }, {
+    dimensionKey: 'hiring_activity', shape: 'signals',
+    signals: [{ signal: 'Posted 2 AE roles', date: '2026-08-01', evidence: ['https://ex.test/j'], confidence: 0.9 }],
+    evidence: ['https://ex.test/j'], confidence: 0.9, researchedAt: '2026-08-10T00:00:00.000Z', runId: 'r1',
+  });
+  await saveMatches({ kind: 'account', id: northstar.id }, [
+    { dimensionKey: 'internal_ai_capability', matchScore: 0.9, effectiveMatch: 0.81, classification: 'strong_match', hardExclusion: false, confidence: 0.9 },
+  ]);
+  await saveProspectScore(hot.id, { personaScore: 91, personaScoreConfident: 91, hardExcluded: false, computedAt: '2026-08-10T00:00:00.000Z' });
   await saveProspectQualification(hot.id, qualification({ icpScore: 82, personaScore: 91, timingScore: 60, status: 'QUALIFIED' }));
 
-  // A second account with no qualification at all.
+  // A second account with no score at all.
   const other = await createProspect({ name: 'Nobody', company: 'Quietco', source: 'manual' });
   await resolveAccountForProspect(other);
 
@@ -128,7 +152,7 @@ test('account rollup: list, counts and detail reflect prospects and qualificatio
   assert.equal(northstarRow.icpScore, 82);
   assert.equal(northstarRow.isTarget, true);
   const quietRow = page.accounts.find((a) => a.name === 'Quietco');
-  assert.equal(quietRow?.icpScore, null, 'no qualification → null score');
+  assert.equal(quietRow?.icpScore, null, 'no account score → null');
   assert.equal(quietRow?.isTarget, false);
 
   // Segment filters.
@@ -144,6 +168,15 @@ test('account rollup: list, counts and detail reflect prospects and qualificatio
   assert.equal(detail.name, 'Northstar');
   assert.equal(detail.icpScore, 82);
   assert.equal(detail.timingScore, 60);
+  // Observations + evidence surfaced (spec §17 "what we found").
+  const aiObs = detail.icpObservations.find((o) => o.dimensionKey === 'internal_ai_capability');
+  assert.equal(aiObs?.observedValue, 'No AI team.');
+  assert.deepEqual(aiObs?.evidence, ['https://ex.test/a']);
+  assert.equal(aiObs?.matchScore, 0.9, 'observation joined with its match');
+  const hiring = detail.timingSignals.find((t) => t.dimensionKey === 'hiring_activity');
+  assert.equal(hiring?.signals.length, 1);
+  assert.equal(hiring?.signals[0].date, '2026-08-01');
+  assert.equal(hiring?.dimensionValue, 0.6, 'timing signal joined with decayed value');
   assert.equal(detail.prospects.length, 2);
   const hotRow = detail.prospects.find((p) => p.id === hot.id);
   assert.equal(hotRow?.personaScore, 91);

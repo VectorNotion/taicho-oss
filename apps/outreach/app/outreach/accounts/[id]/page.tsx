@@ -2,14 +2,17 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Building2, Target } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Building2, ExternalLink, Search, Target } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScoreRing } from "@/components/genui";
 import { PageHeader } from "@/components/PageHeader";
 import { AccountProspectsSection } from "@/components/prospects/AccountProspectsSection";
+import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
+import { DimensionResearchSurface } from "@/products/outreach/ui/components/research/DimensionResearchSurface";
 
 type DimensionMatch = {
   dimensionKey: string;
@@ -20,6 +23,22 @@ type DimensionMatch = {
   confidence: number;
 };
 type TimingBreakdown = { dimensionKey: string; dimensionValue: number; signalCount: number };
+type AccountObservation = {
+  dimensionKey: string;
+  observedValue?: string;
+  evidence: string[];
+  confidence: number;
+  matchScore?: number;
+  effectiveMatch?: number;
+  classification?: string;
+  hardExclusion?: boolean;
+};
+type AccountTimingSignals = {
+  dimensionKey: string;
+  signals: Array<{ signal: string; date: string; evidence: string[]; confidence: number }>;
+  dimensionValue?: number;
+  signalCount: number;
+};
 type AccountProspect = {
   id: string;
   name: string;
@@ -34,8 +53,13 @@ type AccountDetail = {
   createdAt: string;
   icpScore: number | null;
   timingScore: number | null;
+  hardExcluded: boolean;
+  reviewReason?: string;
+  computedAt?: string;
   icpMatches: DimensionMatch[];
+  icpObservations: AccountObservation[];
   timingBreakdown: TimingBreakdown[];
+  timingSignals: AccountTimingSignals[];
   prospects: AccountProspect[];
 };
 
@@ -43,20 +67,95 @@ function formatDimensionKey(key: string): string {
   return key.replaceAll("_", " ");
 }
 
-function MatchRow({ match }: { match: DimensionMatch }) {
-  const percent = Math.round(match.effectiveMatch * 100);
+function hostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
+}
+
+function EvidenceLinks({ urls }: { urls: string[] }) {
+  const unique = [...new Set(urls)].filter(Boolean).slice(0, 4);
+  if (unique.length === 0) return null;
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs">
-        <span className="capitalize text-muted-foreground">{formatDimensionKey(match.dimensionKey)}</span>
-        <span className="font-medium tabular-nums">{percent}</span>
+    <div className="flex flex-wrap gap-2">
+      {unique.map((url) => (
+        <a
+          key={url}
+          className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:text-primary"
+          href={url}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          <ExternalLink className="size-3" />
+          {hostname(url)}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function ObservationBlock({ observation }: { observation: AccountObservation }) {
+  const percent = Math.round((observation.effectiveMatch ?? 0) * 100);
+  const excluded = Boolean(observation.hardExclusion);
+  return (
+    <div className="space-y-2 rounded-lg border p-3">
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm font-medium capitalize">{formatDimensionKey(observation.dimensionKey)}</span>
+        {excluded && <AlertTriangle className="size-3.5 text-destructive" />}
+      </div>
+      {observation.observedValue ? (
+        <p className="text-sm leading-6 text-muted-foreground">{observation.observedValue}</p>
+      ) : (
+        <p className="text-sm text-muted-foreground">No observation recorded.</p>
+      )}
+      <EvidenceLinks urls={observation.evidence} />
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">Match</span>
+          <span className="font-medium tabular-nums">{percent}%</span>
+        </div>
+        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full transition-all duration-500 ${excluded ? "bg-destructive" : "bg-chart-2"}`}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimingSignalBlock({ entry }: { entry: AccountTimingSignals }) {
+  const percent = Math.round((entry.dimensionValue ?? 0) * 100);
+  return (
+    <div className="space-y-2 rounded-lg border p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium capitalize">{formatDimensionKey(entry.dimensionKey)}</span>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {entry.signalCount} {entry.signalCount === 1 ? "signal" : "signals"}
+        </span>
       </div>
       <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
         <div
-          className={`h-full transition-all duration-500 ${match.hardExclusion ? "bg-destructive" : "bg-chart-2"}`}
+          className="h-full bg-chart-1 transition-all duration-500"
           style={{ width: `${percent}%` }}
         />
       </div>
+      {entry.signals.length > 0 && (
+        <ul className="space-y-2 pt-1">
+          {entry.signals.map((signal, index) => (
+            <li key={index} className="space-y-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm text-muted-foreground">{signal.signal}</span>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{signal.date}</span>
+              </div>
+              <EvidenceLinks urls={signal.evidence} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -82,6 +181,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const research = useDimensionResearch(`/api/outreach/accounts/${id}/research/stream`);
 
   const loadAccount = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -108,6 +208,13 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     void loadAccount();
   }, [loadAccount]);
 
+  useEffect(() => {
+    if (!research.final) return;
+    if (account) toast.success(`Research complete for ${account.name}`);
+    void loadAccount({ silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [research.final]);
+
   if (loading) return <AccountDetailSkeleton />;
 
   if (notFound || !account) {
@@ -128,6 +235,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const isTarget = account.icpScore != null && account.icpScore >= 70;
+  const showResearchSurface = research.isStreaming || research.dimensions.length > 0;
 
   return (
     <div className="w-full min-w-0 space-y-8">
@@ -139,7 +247,14 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
           <ArrowLeft className="size-4" /> All accounts
         </Link>
         <PageHeader
-          actions={isTarget ? <Badge variant="default">Target account</Badge> : undefined}
+          actions={
+            <div className="flex items-center gap-2">
+              {isTarget && <Badge variant="default">Target account</Badge>}
+              <Button disabled={research.isStreaming} onClick={() => research.start()}>
+                <Search className="size-4" /> Research account
+              </Button>
+            </div>
+          }
           description="Company fit and buying-window timing. Fit gates. Timing ranks."
           title={account.name}
         />
@@ -164,11 +279,13 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
           <CardHeader>
             <CardTitle>Company fit</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {account.icpMatches.length > 0 ? (
-              account.icpMatches.map((match) => <MatchRow key={match.dimensionKey} match={match} />)
+          <CardContent className="space-y-3">
+            {account.icpObservations.length > 0 ? (
+              account.icpObservations.map((observation) => (
+                <ObservationBlock key={observation.dimensionKey} observation={observation} />
+              ))
             ) : (
-              <p className="text-sm text-muted-foreground">Not scored yet.</p>
+              <p className="text-sm text-muted-foreground">Not researched yet — run Research account.</p>
             )}
           </CardContent>
         </Card>
@@ -177,23 +294,10 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
           <CardHeader>
             <CardTitle>Timing signals</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {account.timingBreakdown.length > 0 ? (
-              account.timingBreakdown.map((entry) => (
-                <div key={entry.dimensionKey} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="capitalize text-muted-foreground">{formatDimensionKey(entry.dimensionKey)}</span>
-                    <span className="font-medium tabular-nums">
-                      {entry.signalCount} {entry.signalCount === 1 ? "signal" : "signals"}
-                    </span>
-                  </div>
-                  <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full bg-chart-1 transition-all duration-500"
-                      style={{ width: `${Math.round(entry.dimensionValue * 100)}%` }}
-                    />
-                  </div>
-                </div>
+          <CardContent className="space-y-3">
+            {account.timingSignals.length > 0 ? (
+              account.timingSignals.map((entry) => (
+                <TimingSignalBlock key={entry.dimensionKey} entry={entry} />
               ))
             ) : (
               <p className="text-sm text-muted-foreground">No timing signals found yet.</p>
@@ -201,6 +305,23 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
           </CardContent>
         </Card>
       </div>
+
+      {showResearchSurface && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Search className="size-4" /> Live research
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DimensionResearchSurface
+              dimensions={research.dimensions}
+              entityName={account.name}
+              isStreaming={research.isStreaming}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <AccountProspectsSection
         accountId={account.id}

@@ -17,14 +17,11 @@ import {
   scheduleDraftPost,
 } from '@/products/content-generator/publishing/schedule-draft';
 
-// Outreach orchestrators + the research-input builder (products/outreach/agent/*).
-import {
-  runProspectResearch,
-  buildResearchInput,
-} from '@/products/outreach/agent/prospect-research';
+// Outreach orchestrators (products/outreach/agent/*).
+import { runProspectResearch } from '@/products/outreach/agent/prospect-research';
+import { runAccountResearch } from '@/products/outreach/agent/account-research';
 import { generateOutreach } from '@/products/outreach/agent/generator';
 import { runQualifyProspect } from '@/products/outreach/agent/qualify-prospect';
-import { getProspectById } from '@/products/outreach/data/prospect-repository';
 import type { OutreachMedium } from '@/products/outreach/domain/types';
 import { requireGraphOrganizationId } from '../data/organization-context';
 import type { ExecutableAction } from './contracts';
@@ -77,19 +74,13 @@ export const actionHandlers: Record<ExecutableAction, ActionHandler> = {
 
   // --- outreach --------------------------------------------------------------
 
-  // Route sends { prospectId }. The research orchestrator needs the full prospect
-  // (name/company/title/location), so hydrate it here; runProspectResearch chains
-  // qualify_prospect internally (failure non-fatal, matching the Python semantics).
-  research_prospect: async (payload) => {
-    const prospectId = payload.prospectId as string;
-    const prospect = await getProspectById(prospectId);
-    if (!prospect) {
-      throw new Error(`Prospect not found: ${prospectId}`);
-    }
-    return runProspectResearch(buildResearchInput(prospect));
-  },
+  // Persona research → persona score → chained qualify (design §6).
+  research_prospect: async (payload) => runProspectResearch(payload.prospectId as string),
 
-  // Route sends { prospectId }; orchestrator takes the id directly (spec §8).
+  // ICP fit + timing research → account ICP/timing score (design §6).
+  research_account: async (payload) => runAccountResearch(payload.accountId as string),
+
+  // Route sends { prospectId }; the decision reads scores only (design §8).
   qualify_prospect: async (payload) => runQualifyProspect(payload.prospectId as string),
 
   // --- shipping actions (spec 2026-07-31 §5 item 3) --------------------------

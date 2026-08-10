@@ -3,7 +3,7 @@ import { withProspectOrg } from '@/lib/prospect-scope';
 import { getProspectById, getProspectResearch } from '@/products/outreach/data/prospect-repository';
 import { commercialErrorResponse, reserveBackgroundAction } from '@content-automation/auth/commercial';
 import { releaseReservation, settleReservation } from '@content-automation/platform/commercial';
-import { buildResearchInput, runProspectResearch } from '@/products/outreach/agent/prospect-research';
+import { runProspectResearch } from '@/products/outreach/agent/prospect-research';
 
 export const maxDuration = 600;
 
@@ -52,7 +52,7 @@ export async function POST(
 
     const billing = await reserveBackgroundAction(request, 'research_prospect');
     reservationId = billing.commercial.creditReservationId;
-    const result = await runProspectResearch(buildResearchInput(prospect));
+    const result = await runProspectResearch(id);
     await settleReservation({
       reservationId,
       actualCredits: billing.estimatedCredits,

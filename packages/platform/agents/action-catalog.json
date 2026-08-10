@@ -9,6 +9,7 @@
     "schedule_post"
   ],
   "outreach": [
+    "research_account",
     "research_prospect",
     "qualify_prospect",
     "generate_outreach"
@@ -27,6 +28,7 @@
     "refine_content_idea": "mastra",
     "generate_content_draft": "mastra",
     "extract_topics": "mastra",
+    "research_account": "mastra",
     "research_prospect": "mastra",
     "qualify_prospect": "mastra",
     "generate_outreach": "mastra",
