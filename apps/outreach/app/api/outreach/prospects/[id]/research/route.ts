@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withProspectOrg } from '@/lib/prospect-scope';
 import { getProspectById, getProspectResearch } from '@/products/outreach/data/prospect-repository';
 import { commercialErrorResponse, reserveBackgroundAction } from '@content-automation/auth/commercial';
 import { releaseReservation, settleReservation } from '@content-automation/platform/commercial';
@@ -10,7 +11,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+  return withProspectOrg(request, async () => {
+   try {
     const { id } = await params;
 
     const research = await getProspectResearch(id);
@@ -20,7 +22,7 @@ export async function GET(
     }
 
     return NextResponse.json(research);
-  } catch (error) {
+   } catch (error) {
     console.error('Get prospect research error:', error);
     return NextResponse.json(
       {
@@ -29,15 +31,17 @@ export async function GET(
       },
       { status: 500 }
     );
-  }
+   }
+  });
 }
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let reservationId: string | undefined;
-  try {
+  return withProspectOrg(request, async () => {
+   let reservationId: string | undefined;
+   try {
     const { id } = await params;
 
     // Verify prospect exists
@@ -61,7 +65,7 @@ export async function POST(
       result,
       message: 'Prospect research completed.',
     });
-  } catch (error) {
+   } catch (error) {
     if (reservationId) await releaseReservation(reservationId, error instanceof Error ? error.message : String(error)).catch(() => undefined);
     const commercial = commercialErrorResponse(error); if (commercial) return commercial;
     console.error('Research prospect job error:', error);
@@ -72,5 +76,6 @@ export async function POST(
       },
       { status: 500 }
     );
-  }
+   }
+  });
 }

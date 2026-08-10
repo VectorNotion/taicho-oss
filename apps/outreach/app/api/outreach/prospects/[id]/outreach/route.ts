@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withProspectOrg } from '@/lib/prospect-scope';
 import { getProspectById, getProspectOutreach, createOutreachMessage } from '@/products/outreach/data/prospect-repository';
 import { generateOutreach } from '@/products/outreach/agent/generator';
 import type { OutreachMedium } from '@/products/outreach/domain/types';
@@ -23,7 +24,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+  return withProspectOrg(request, async () => {
+   try {
     const { id } = await params;
 
     // Verify prospect exists
@@ -34,13 +36,14 @@ export async function GET(
 
     const messages = await getProspectOutreach(id);
     return NextResponse.json(messages, { headers: corsHeaders });
-  } catch (error) {
+   } catch (error) {
     console.error('Error fetching outreach messages:', error);
     return NextResponse.json(
       { error: 'Failed to fetch outreach messages' },
       { status: 500, headers: corsHeaders }
     );
-  }
+   }
+  }, { headers: corsHeaders });
 }
 
 // POST /api/outreach/prospects/[id]/outreach - Create or generate an outreach message
@@ -48,8 +51,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let reservationId: string | null = null;
-  try {
+  return withProspectOrg(request, async () => {
+   let reservationId: string | null = null;
+   try {
     const { id } = await params;
     const body = await request.json();
     const { medium, content, subject, targetContent, generate } = body;
@@ -113,7 +117,7 @@ export async function POST(
     });
 
     return NextResponse.json(message, { status: 201, headers: corsHeaders });
-  } catch (error) {
+   } catch (error) {
     if (reservationId) await releaseReservation(reservationId).catch(() => undefined);
     const commercial = commercialErrorResponse(error); if (commercial) return commercial;
     console.error('Outreach creation error:', error);
@@ -124,5 +128,6 @@ export async function POST(
       },
       { status: 500, headers: corsHeaders }
     );
-  }
+   }
+  }, { headers: corsHeaders });
 }

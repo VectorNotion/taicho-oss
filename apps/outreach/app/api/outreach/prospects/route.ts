@@ -1,5 +1,4 @@
-import { getAuthorizationContext } from "@content-automation/auth/server";
-import { headers } from "next/headers";
+import { withProspectOrg } from "@/lib/prospect-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -45,20 +44,13 @@ const createSchema = z.object({
   triggerResearch: z.boolean().optional(),
 });
 
-async function context() {
-  return getAuthorizationContext(await headers());
-}
-
 export async function OPTIONS() {
   return NextResponse.json({}, { headers: corsHeaders });
 }
 
 export async function GET(request: NextRequest) {
-  try {
-    const authorization = await context();
-    if (!authorization) {
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401, headers: corsHeaders });
-    }
+  return withProspectOrg(request, async () => {
+   try {
     const { searchParams } = new URL(request.url);
     const lookupName = searchParams.get("lookupName");
     const lookupCompany = searchParams.get("lookupCompany");
@@ -92,21 +84,19 @@ export async function GET(request: NextRequest) {
       getProspectCounts(),
     ]);
     return NextResponse.json({ ...result, counts }, { headers: corsHeaders });
-  } catch (error) {
+   } catch (error) {
     console.error("Error fetching prospects:", error);
     return NextResponse.json(
       { error: "Failed to fetch prospects" },
       { status: 500, headers: corsHeaders },
     );
-  }
+   }
+  }, { headers: corsHeaders });
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const authorization = await context();
-    if (!authorization) {
-      return NextResponse.json({ error: "Unauthenticated" }, { status: 401, headers: corsHeaders });
-    }
+  return withProspectOrg(request, async () => {
+   try {
     const parsed = createSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json(
@@ -123,11 +113,12 @@ export async function POST(request: NextRequest) {
       { ...prospect, existed: false },
       { status: 201, headers: corsHeaders },
     );
-  } catch (error) {
+   } catch (error) {
     console.error("Error creating prospect:", error);
     return NextResponse.json(
       { error: "Failed to create prospect" },
       { status: 500, headers: corsHeaders },
     );
-  }
+   }
+  }, { headers: corsHeaders });
 }

@@ -1,6 +1,5 @@
-import { getAuthorizationContext } from '@content-automation/auth/server';
 import { NextRequest, NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { withProspectOrg } from '@/lib/prospect-scope';
 import { generateProspectInsights } from '@/products/outreach/agent/prospect-insights';
 import {
   getOutreachById,
@@ -16,22 +15,24 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; messageId: string }> }
 ) {
-  try {
-    const { messageId } = await params;
+  return withProspectOrg(request, async () => {
+   try {
+    const { id, messageId } = await params;
 
     const message = await getOutreachById(messageId);
-    if (!message) {
+    if (!message || message.prospectId !== id) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 });
     }
 
     return NextResponse.json(message);
-  } catch (error) {
+   } catch (error) {
     console.error('Error fetching outreach message:', error);
     return NextResponse.json(
       { error: 'Failed to fetch outreach message' },
       { status: 500 }
     );
-  }
+   }
+  });
 }
 
 // PATCH /api/outreach/prospects/[id]/outreach/[messageId] - Update outreach message
@@ -39,9 +40,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; messageId: string }> }
 ) {
-  const authorization = await getAuthorizationContext(await headers());
-  if (!authorization) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
-  try {
+  return withProspectOrg(request, async (authorization) => {
+   try {
     const { id, messageId } = await params;
     const body = await request.json();
     const existing = await getOutreachById(messageId);
@@ -70,13 +70,14 @@ export async function PATCH(
     return NextResponse.json(message, {
       headers: { 'X-Prospect-Insight-Status': insightStatus },
     });
-  } catch (error) {
+   } catch (error) {
     console.error('Error updating outreach message:', error);
     return NextResponse.json(
       { error: 'Failed to update outreach message' },
       { status: 500 }
     );
-  }
+   }
+  });
 }
 
 // DELETE /api/outreach/prospects/[id]/outreach/[messageId] - Delete outreach message
@@ -84,12 +85,13 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; messageId: string }> }
 ) {
-  try {
-    const { messageId } = await params;
+  return withProspectOrg(request, async () => {
+   try {
+    const { id, messageId } = await params;
 
     // Get message first to check for reportId
     const message = await getOutreachById(messageId);
-    if (!message) {
+    if (!message || message.prospectId !== id) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 });
     }
 
@@ -110,11 +112,12 @@ export async function DELETE(
     }
 
     return NextResponse.json({ success: true });
-  } catch (error) {
+   } catch (error) {
     console.error('Error deleting outreach message:', error);
     return NextResponse.json(
       { error: 'Failed to delete outreach message' },
       { status: 500 }
     );
-  }
+   }
+  });
 }

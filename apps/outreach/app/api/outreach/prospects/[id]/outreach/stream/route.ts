@@ -1,5 +1,6 @@
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai';
 import { commercialErrorResponse, reserveVariableCost } from '@content-automation/auth/commercial';
+import { runWithGraphOrganization } from '@content-automation/platform/data/graph';
 import { releaseReservation, settleReservation } from '@content-automation/platform/commercial';
 import { createLogger } from '@content-automation/observability';
 import { streamOutreach } from '@/products/outreach/agent/generator';
@@ -52,7 +53,9 @@ export async function POST(
         } as never);
 
         try {
-          const message = await streamOutreach({
+          // The stream body runs after the request returns, so re-establish the
+          // caller's graph organization here (billing already authenticated it).
+          const message = await runWithGraphOrganization(billing.context.organizationId, () => streamOutreach({
             prospectId: id,
             medium,
             targetContent: body.targetContent,
@@ -64,7 +67,7 @@ export async function POST(
               id: 'draft',
               data: partial,
             } as never),
-          });
+          }));
 
           await settleReservation({
             reservationId: billing.reservationId,
