@@ -80,6 +80,8 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0017_drop_call_recording_backend",
       "0018_add_outreach_lead_source_identities",
       "0019_rename_lead_to_prospect",
+      "0020_add_action_items",
+      "0021_action_items_followup_unique",
     ],
   );
 });

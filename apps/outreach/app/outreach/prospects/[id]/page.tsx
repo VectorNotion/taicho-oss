@@ -23,7 +23,8 @@ import { useDimensionResearch } from "@/products/outreach/ui/components/research
 import { DimensionResearchSurface } from "@/products/outreach/ui/components/research/DimensionResearchSurface";
 import { ScoreRing } from "@/components/genui";
 
-import { ProspectHero, QuickInfo, OutreachHistory, ActivityTimeline, AddActivityDialog, ProspectNotes, ProspectIntelligenceTabs, type Activity } from "@/components/prospects";
+import { ProspectHero, QuickInfo, OutreachHistory, ActivityTimeline, AddActivityDialog, NextActionCard, ProspectNotes, ProspectIntelligenceTabs, type Activity } from "@/components/prospects";
+import type { ActionItem } from "@/products/outreach/domain/action-items";
 import { QualificationCard } from "@/components/prospects/QualificationCard";
 import { useActionStream } from "@/hooks/use-action-stream";
 import { Badge } from "@/components/ui/badge";
@@ -108,6 +109,8 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   const [notesLoading, setNotesLoading] = useState(true);
   const [activities, setActivities] = useState<ProspectActivity[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(true);
+  const [actionItems, setActionItems] = useState<ActionItem[]>([]);
+  const [actionItemsLoading, setActionItemsLoading] = useState(true);
   const [isSubmittingActivity, setIsSubmittingActivity] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDelete | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -279,6 +282,98 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     fetchActivities();
   }, [prospectId]);
 
+  const refreshActivities = async () => {
+    const response = await fetch(`/api/outreach/prospects/${prospectId}/activities`);
+    if (response.ok) setActivities(await response.json());
+  };
+
+  const refreshActionItems = async () => {
+    try {
+      const response = await fetch(
+        `/api/outreach/action-items?prospectId=${encodeURIComponent(prospectId)}`,
+      );
+      if (!response.ok) throw new Error("Failed to load action items");
+      const data = await response.json();
+      setActionItems(data.items as ActionItem[]);
+    } catch (error) {
+      console.error("Error fetching action items:", error);
+      toast.error("Could not load the next action — refresh to try again");
+    } finally {
+      setActionItemsLoading(false);
+    }
+  };
+
+  // Fetch action items
+  useEffect(() => {
+    if (!prospectId) return;
+    void refreshActionItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prospectId]);
+
+  const handleCompleteActionItem = async (id: string) => {
+    try {
+      const response = await fetch(`/api/outreach/action-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "complete" }),
+      });
+      if (!response.ok) throw new Error("Failed to complete action item");
+      toast.success("Action completed");
+      await Promise.all([refreshActionItems(), refreshActivities()]);
+    } catch (error) {
+      console.error("Error completing action item:", error);
+      toast.error("Could not complete the action");
+    }
+  };
+
+  const handleSnoozeActionItem = async (id: string, dueAt: string) => {
+    try {
+      const response = await fetch(`/api/outreach/action-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueAt }),
+      });
+      if (!response.ok) throw new Error("Failed to snooze action item");
+      toast.success("Snoozed");
+      await refreshActionItems();
+    } catch (error) {
+      console.error("Error snoozing action item:", error);
+      toast.error("Could not snooze the action");
+    }
+  };
+
+  const handleEditActionItem = async (id: string, title: string, dueAt: string) => {
+    try {
+      const response = await fetch(`/api/outreach/action-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, dueAt }),
+      });
+      if (!response.ok) throw new Error("Failed to update action item");
+      toast.success("Next action updated");
+      await refreshActionItems();
+    } catch (error) {
+      console.error("Error updating action item:", error);
+      toast.error("Could not update the action");
+    }
+  };
+
+  const handleCreateActionItem = async (title: string, dueAt: string) => {
+    try {
+      const response = await fetch(`/api/outreach/action-items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, dueAt, prospectId }),
+      });
+      if (!response.ok) throw new Error("Failed to create action item");
+      toast.success("Next action set");
+      await refreshActionItems();
+    } catch (error) {
+      console.error("Error creating action item:", error);
+      toast.error("Could not set the next action");
+    }
+  };
+
   const handleAddNote = async (content: string) => {
     const response = await fetch(`/api/outreach/prospects/${prospectId}/notes`, {
       method: "POST",
@@ -318,6 +413,9 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
       setAddActivityDialogOpen(false);
       setEditingActivity(null);
       toast.success("Activity added");
+      // Contact-type activities auto-create a follow-up server-side
+      // (fire-and-forget), so give the insert a beat before refreshing.
+      setTimeout(() => void refreshActionItems(), 600);
     } catch (error) {
       console.error("Error adding activity:", error);
       toast.error("Could not add the activity — try again");
@@ -453,6 +551,9 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
       if (newStatus === "sent") {
         const activityResponse = await fetch(`/api/outreach/prospects/${prospectId}/activities`);
         if (activityResponse.ok) setActivities(await activityResponse.json());
+        // Sending stamps lastContactedAt and may auto-create a follow-up
+        // server-side (fire-and-forget); give the insert a beat.
+        setTimeout(() => void refreshActionItems(), 600);
       }
       toast.success(newStatus === "sent" ? "Message marked as sent externally" : "Message moved back to drafts");
     } catch (error) {
@@ -829,6 +930,14 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
               </div>
 
               <div className="space-y-4 lg:col-span-2">
+                <NextActionCard
+                  items={actionItems}
+                  isLoading={actionItemsLoading}
+                  onComplete={handleCompleteActionItem}
+                  onSnooze={handleSnoozeActionItem}
+                  onCreate={handleCreateActionItem}
+                  onEdit={handleEditActionItem}
+                />
                 <ActivityTimeline
                   activities={activities}
                   isLoading={activitiesLoading}

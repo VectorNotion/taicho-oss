@@ -21,6 +21,7 @@ const runtimeGrantContracts = [
     environmentName: "JOBS_DATABASE_ROLE",
     schema: "public",
     relations: [
+      ["public.action_items", ["SELECT", "INSERT", "UPDATE", "DELETE"]],
       ["public.product_events", ["SELECT", "INSERT"]],
       ["public.job_workspace_member_ids", ["SELECT"]],
       ["public.attention_items", ["SELECT", "INSERT", "UPDATE", "DELETE"]],

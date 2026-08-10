@@ -276,6 +276,9 @@ export interface AccountProspectSummary {
   status: string;
   personaScore: number | null;
   qualificationStatus: string | null;
+  lastContactedAt?: string;
+  /** Earliest-due open action item, merged in by the account route from Postgres. */
+  nextAction?: { id: string; title: string; dueAt: string } | null;
 }
 
 export interface AccountDimensionObservation {
@@ -401,6 +404,7 @@ export async function getAccountDetail(id: string): Promise<AccountDetail | null
         status: (p.status as string | null) ?? "new",
         personaScore: ps ? toNumber(ps.personaScore) : null,
         qualificationStatus: (q?.status as string | null) ?? null,
+        lastContactedAt: p.lastContactedAt?.toString(),
       };
     });
 

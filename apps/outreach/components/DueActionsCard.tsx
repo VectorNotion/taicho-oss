@@ -1,0 +1,213 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { AlarmClock, Check, CheckCircle2, RefreshCw, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ListCard } from "@/components/ListCard";
+import { ListRow, ListRows } from "@/components/ListRow";
+import type { ActionItem } from "@/products/outreach/domain/action-items";
+import { groupByDue } from "@/products/outreach/domain/action-item-view";
+import { DueBadge } from "@/products/outreach/ui/components/action-items/DueBadge";
+
+type DueItem = ActionItem & {
+  prospect: { id: string; name: string; company?: string; status: string } | null;
+};
+
+function snoozeDueAt(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  date.setHours(9, 0, 0, 0);
+  return date.toISOString();
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <li className="px-6 pb-1 pt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      {children}
+    </li>
+  );
+}
+
+export function DueActionsCard() {
+  const [items, setItems] = useState<DueItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const response = await fetch("/api/outreach/action-items?horizonDays=7");
+      if (!response.ok) throw new Error("Failed to load action items");
+      const data = await response.json();
+      setItems(data.items as DueItem[]);
+      setFailed(false);
+    } catch (error) {
+      console.error("Error loading due actions:", error);
+      setFailed(true);
+      toast.error("Could not load due actions — refresh to try again");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const complete = async (id: string) => {
+    try {
+      const response = await fetch(`/api/outreach/action-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "complete" }),
+      });
+      if (!response.ok) throw new Error("Failed to complete action item");
+      toast.success("Action completed");
+      await refresh();
+    } catch (error) {
+      console.error("Error completing action item:", error);
+      toast.error("Could not complete the action");
+    }
+  };
+
+  const snooze = async (id: string) => {
+    try {
+      const response = await fetch(`/api/outreach/action-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueAt: snoozeDueAt(3) }),
+      });
+      if (!response.ok) throw new Error("Failed to snooze action item");
+      toast.success("Snoozed 3 days");
+      await refresh();
+    } catch (error) {
+      console.error("Error snoozing action item:", error);
+      toast.error("Could not snooze the action");
+    }
+  };
+
+  const dismiss = async (id: string) => {
+    try {
+      const response = await fetch(`/api/outreach/action-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss" }),
+      });
+      if (!response.ok) throw new Error("Failed to dismiss action item");
+      toast.success("Dismissed");
+      await refresh();
+    } catch (error) {
+      console.error("Error dismissing action item:", error);
+      toast.error("Could not dismiss the action");
+    }
+  };
+
+  const groups = groupByDue(items, new Date());
+  const sections = [
+    { heading: "Overdue", rows: groups.overdue },
+    { heading: "Due today", rows: groups.today },
+    { heading: "Upcoming", rows: groups.upcoming },
+  ].filter((section) => section.rows.length > 0);
+
+  return (
+    <ListCard
+      description="What needs your attention, oldest first."
+      title="Due"
+    >
+      {loading ? (
+        <ListRows>
+          {Array.from({ length: 5 }).map((_, index) => (
+            <li className="px-6 py-3.5" key={index}>
+              <Skeleton className="h-4 w-2/5" />
+              <Skeleton className="mt-2 h-3 w-1/4" />
+            </li>
+          ))}
+        </ListRows>
+      ) : failed && items.length === 0 ? (
+        <div className="grid min-h-56 place-items-center px-6 text-center">
+          <div className="max-w-sm">
+            <p className="font-medium">Due actions didn&apos;t load</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Something went wrong while fetching your action items.
+            </p>
+            <Button
+              className="mt-4"
+              onClick={() => {
+                setLoading(true);
+                void refresh();
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <RefreshCw className="size-3.5" />
+              Try again
+            </Button>
+          </div>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="grid min-h-56 place-items-center px-6 text-center">
+          <div className="max-w-sm">
+            <CheckCircle2 className="mx-auto size-8 text-muted-foreground" />
+            <p className="mt-3 font-medium">All caught up</p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Action items appear here as you contact prospects or set
+              follow-ups on their pages.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <ListRows className="pb-2">
+          {sections.map((section) => (
+            <SectionGroup key={section.heading} heading={section.heading}>
+              {section.rows.map((item) => {
+                // A prospect id that no longer resolves means the target is
+                // gone (deleted outside the app, reseeded dev data): the item
+                // is unactionable, so offer dismissal instead of snooze.
+                const orphaned = Boolean(item.prospectId) && !item.prospect;
+                return (
+                  <ListRow
+                    actions={
+                      orphaned
+                        ? [{
+                            destructive: true,
+                            icon: X,
+                            label: "Dismiss — prospect no longer exists",
+                            onSelect: () => void dismiss(item.id),
+                          }]
+                        : [
+                            { label: "Done", icon: Check, onSelect: () => void complete(item.id) },
+                            { label: "Snooze 3 days", icon: AlarmClock, onSelect: () => void snooze(item.id) },
+                          ]
+                    }
+                    badge={<DueBadge dueAt={item.dueAt} />}
+                    href={item.prospect ? `/outreach/prospects/${item.prospect.id}` : undefined}
+                    key={item.id}
+                    meta={[
+                      item.prospect
+                        ? [item.prospect.name, item.prospect.company].filter(Boolean).join(" · ")
+                        : orphaned
+                          ? "Prospect no longer exists — dismiss this item"
+                          : "Not linked to a prospect",
+                    ]}
+                    title={item.title}
+                  />
+                );
+              })}
+            </SectionGroup>
+          ))}
+        </ListRows>
+      )}
+    </ListCard>
+  );
+}
+
+/** A labeled slice of the due list; rendered inside ListRows' <ul>. */
+function SectionGroup({ heading, children }: { heading: string; children: React.ReactNode }) {
+  return (
+    <>
+      <SectionHeading>{heading}</SectionHeading>
+      {children}
+    </>
+  );
+}

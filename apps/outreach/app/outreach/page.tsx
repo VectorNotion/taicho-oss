@@ -2,14 +2,12 @@ import Link from "next/link";
 import {
   ArrowRight,
   CheckCircle2,
-  CircleDot,
   FileText,
-  Search,
-  Sparkles,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DueActionsCard } from "../../components/DueActionsCard";
 import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
 import { PageHeader } from "@/components/PageHeader";
@@ -73,37 +71,6 @@ export default async function OutreachOverviewPage() {
     },
   ];
 
-  const queue = [
-    {
-      count: counts.byStatus.new ?? 0,
-      description: "Gather context before deciding how to approach them.",
-      href: "/outreach/prospects",
-      icon: Search,
-      label: "Research new people",
-    },
-    {
-      count: readyForNextStep,
-      description: "Review fit and prepare the right outreach angle.",
-      href: "/outreach/prospects",
-      icon: Sparkles,
-      label: "Act on researched people",
-    },
-    {
-      count: draftCount,
-      description: "Review copy, send it externally, then record the outcome.",
-      href: "/outreach/drafts",
-      icon: FileText,
-      label: "Review prepared drafts",
-    },
-    {
-      count: counts.byStatus.contacted ?? 0,
-      description: "Keep the conversation moving while the context is fresh.",
-      href: "/outreach/prospects",
-      icon: CircleDot,
-      label: "Follow up with contacted people",
-    },
-  ];
-
   return (
     <div className="w-full min-w-0 space-y-8">
       <PageHeader
@@ -126,36 +93,7 @@ export default async function OutreachOverviewPage() {
 
       <StatRow stats={metrics} />
 
-      <ListCard
-        description="The next useful actions across your current prospects."
-        title="Your outreach queue"
-      >
-        <ListRows>
-          {queue.map((item) => (
-            <ListRow
-              actions={[{
-                href: item.href,
-                iconName: "arrow-right",
-                label: `Open ${item.label}`,
-              }]}
-              badge={
-                <Badge variant={item.count ? "secondary" : "outline"}>
-                  {item.count.toLocaleString()}
-                </Badge>
-              }
-              href={item.href}
-              key={item.label}
-              leading={
-                <span className="grid size-9 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <item.icon className="size-4" />
-                </span>
-              }
-              meta={[item.description]}
-              title={item.label}
-            />
-          ))}
-        </ListRows>
-      </ListCard>
+      <DueActionsCard />
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <ListCard

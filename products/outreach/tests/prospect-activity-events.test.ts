@@ -14,6 +14,7 @@ import {
   getSession,
   runWithGraphOrganization,
 } from '@content-automation/platform/data/graph';
+import { closeJobPools, getJobAdminPool } from '@content-automation/platform/jobs/pool';
 import {
   drainProductEvents,
   setProductEventSinkForTests,
@@ -23,6 +24,7 @@ import {
   createProspect,
   createProspectActivity,
   createOutreachMessage,
+  drainTouchpointWrites,
   getProspectActivities,
   updateProspect,
   updateOutreachMessage,
@@ -49,6 +51,13 @@ after(() => inOrganization(async () => {
   setProductEventSinkForTests(null);
   await clearGraph();
   await closeDriver();
+  // Contact-type touchpoints in these tests auto-create follow-up action
+  // items in Postgres; remove them so reruns start clean.
+  await drainTouchpointWrites();
+  await getJobAdminPool()
+    .query('DELETE FROM action_items WHERE organization_id = $1', [ORGANIZATION_ID])
+    .catch(() => undefined);
+  await closeJobPools();
 }));
 
 test('recording a reply_received activity emits prospect.replied, other activity types do not', async () => {

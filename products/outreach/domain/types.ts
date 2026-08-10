@@ -280,7 +280,8 @@ export type ProspectActivityType =
   | "enrichment"
   | "nurture_enrolled"
   | "note"
-  | "status_change";
+  | "status_change"
+  | "next_action_completed";
 
 export interface ProspectActivity {
   id: string;
@@ -353,7 +354,18 @@ export const ACTIVITY_TYPE_CONFIG: Record<
   nurture_enrolled: { label: "Added to funnel", color: "text-chart-2", bgColor: "bg-chart-2/10" },
   note: { label: "Note", color: "text-muted-foreground", bgColor: "bg-muted" },
   status_change: { label: "Status change", color: "text-muted-foreground", bgColor: "bg-muted" },
+  next_action_completed: { label: "Action completed", color: "text-chart-2", bgColor: "bg-chart-2/10" },
 };
+
+/** Activity types that count as touching the prospect (drive lastContactedAt + auto follow-up). */
+export const CONTACT_ACTIVITY_TYPES: ReadonlySet<ProspectActivityType> = new Set([
+  "outreach_sent",
+  "call",
+  "meeting",
+  "comment_sent",
+  "connection_request_sent",
+  "reaction_sent",
+]);
 
 // ============= PERSONAS =============
 

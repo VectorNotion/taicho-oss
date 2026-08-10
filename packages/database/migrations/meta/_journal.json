@@ -141,6 +141,20 @@
       "when": 1786700000000,
       "tag": "0019_rename_lead_to_prospect",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786924800000,
+      "tag": "0020_add_action_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786924900000,
+      "tag": "0021_action_items_followup_unique",
+      "breakpoints": true
     }
   ]
 }

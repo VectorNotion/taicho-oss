@@ -2647,3 +2647,25 @@ export const intelligence_api_tokens = pgTable("intelligence_api_tokens", {
 	unique("intelligence_api_tokens_token_key").on(table.token),
 	pgPolicy("intelligence_api_tokens_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
 ]);
+
+export const action_items = pgTable("action_items", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	organization_id: text().notNull(),
+	title: text().notNull(),
+	status: text().default('open').notNull(),
+	due_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+	source: text().default('manual').notNull(),
+	prospect_id: text(),
+	account_id: text(),
+	payload: jsonb(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	completed_at: timestamp({ withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_action_items_org_status_due").using("btree", table.organization_id.asc().nullsLast(), table.status.asc().nullsLast(), table.due_at.asc().nullsLast()),
+	index("idx_action_items_prospect").using("btree", table.prospect_id.asc().nullsLast()),
+	uniqueIndex("uniq_action_items_open_auto_followup").using("btree", table.organization_id.asc().nullsLast(), table.prospect_id.asc().nullsLast()).where(sql`(status = 'open' AND source = 'auto_followup')`),
+	pgPolicy("action_items_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
+	check("action_items_status_check", sql`status = ANY (ARRAY['open'::text, 'done'::text, 'dismissed'::text])`),
+	check("action_items_source_check", sql`source = ANY (ARRAY['manual'::text, 'auto_followup'::text])`),
+]).enableRLS();

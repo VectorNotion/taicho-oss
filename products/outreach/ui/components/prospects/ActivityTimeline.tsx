@@ -69,6 +69,7 @@ export const ACTIVITY_CONFIG: Record<
   nurture_enrolled: { icon: GitBranch, color: "text-chart-2", bgColor: "bg-chart-2/10", label: "Added to funnel" },
   note: { icon: FileText, color: "text-muted-foreground", bgColor: "bg-muted", label: "Note" },
   status_change: { icon: ArrowRight, color: "text-muted-foreground", bgColor: "bg-muted", label: "Status change" },
+  next_action_completed: { icon: UserCheck, color: "text-chart-2", bgColor: "bg-chart-2/10", label: "Action completed" },
 };
 
 function formatRelativeDate(dateString: string) {

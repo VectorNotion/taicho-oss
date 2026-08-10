@@ -46,6 +46,8 @@ type AccountProspect = {
   status: string;
   personaScore: number | null;
   qualificationStatus: string | null;
+  lastContactedAt?: string;
+  nextAction?: { id: string; title: string; dueAt: string } | null;
 };
 type AccountDetail = {
   id: string;

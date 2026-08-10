@@ -48,6 +48,8 @@ import {
   type ProspectSource,
   type ProspectStatus,
 } from "@/products/outreach/domain/types";
+import type { ActionItem } from "@/products/outreach/domain/action-items";
+import { DueBadge } from "@/products/outreach/ui/components/action-items/DueBadge";
 
 type ProspectListResponse = {
   prospects: Prospect[];
@@ -101,6 +103,31 @@ export default function PipelinePage() {
   const [deleting, setDeleting] = useState(false);
   const loadMoreController = useRef<AbortController | null>(null);
   const pageSize = 50;
+  const [nextActions, setNextActions] = useState<Map<string, ActionItem>>(new Map());
+
+  // Earliest-due open action item per prospect, for the row due badges.
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/outreach/action-items?horizonDays=90")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((data: { items: ActionItem[] }) => {
+        if (cancelled) return;
+        const earliest = new Map<string, ActionItem>();
+        for (const item of data.items) {
+          if (item.prospectId && !earliest.has(item.prospectId)) {
+            earliest.set(item.prospectId, item);
+          }
+        }
+        setNextActions(earliest);
+      })
+      .catch((error) => {
+        // Badges are progressive enhancement; the list stays usable.
+        console.error("Error loading due badges:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -388,6 +415,7 @@ export default function PipelinePage() {
                 [prospect.title, prospect.company].filter(Boolean).join(" · ")
                 || prospect.email
                 || "Outreach target";
+              const nextAction = nextActions.get(prospect.id);
 
               return (
                 <ListRow
@@ -412,6 +440,7 @@ export default function PipelinePage() {
                       <Badge variant={PROSPECT_PRIORITY_CONFIG[prospect.priority].variant}>
                         {PROSPECT_PRIORITY_CONFIG[prospect.priority].label}
                       </Badge>
+                      {nextAction && <DueBadge dueAt={nextAction.dueAt} />}
                     </span>
                   }
                   href={`/outreach/prospects/${prospect.id}`}

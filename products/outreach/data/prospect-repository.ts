@@ -25,6 +25,32 @@ import type {
   LegacyQualification,
   CreateQualificationInput,
 } from '../domain/types';
+import { CONTACT_ACTIVITY_TYPES } from '../domain/types';
+import {
+  dismissOpenActionItemsForProspect,
+  ensureFollowUpForProspect,
+} from './action-item-repository';
+
+// ============= TOUCHPOINT HOOKS =============
+
+const touchpointWritesInFlight = new Set<Promise<void>>();
+
+/** Await in-flight cross-store touchpoint writes (tests only). */
+export async function drainTouchpointWrites(): Promise<void> {
+  await Promise.all([...touchpointWritesInFlight]);
+}
+
+/**
+ * Fire-and-forget the auto follow-up. Postgres must never fail the graph
+ * operation (same contract as emitProductEvent).
+ */
+function scheduleFollowUp(prospectId: string, prospectName: string): void {
+  const task = ensureFollowUpForProspect(prospectId, prospectName).catch((error) => {
+    console.error('action_items.auto_followup_failed', error);
+  });
+  touchpointWritesInFlight.add(task);
+  void task.finally(() => touchpointWritesInFlight.delete(task));
+}
 
 // ============= PROSPECTS CRUD =============
 
@@ -342,6 +368,36 @@ export async function getProspectById(id: string): Promise<Prospect | null> {
   }
 }
 
+export async function getProspectSummariesByIds(
+  ids: string[],
+): Promise<Map<string, { id: string; name: string; company?: string; status: string }>> {
+  const summaries = new Map<string, { id: string; name: string; company?: string; status: string }>();
+  if (ids.length === 0) return summaries;
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `
+      MATCH (l:Prospect)
+      WHERE l.id IN $ids
+      RETURN l.id AS id, l.name AS name, l.company AS company, l.status AS status
+      `,
+      { ids }
+    );
+    for (const record of result.records) {
+      const id = record.get('id') as string;
+      summaries.set(id, {
+        id,
+        name: record.get('name') as string,
+        company: (record.get('company') as string | null) ?? undefined,
+        status: (record.get('status') as string | null) ?? 'new',
+      });
+    }
+    return summaries;
+  } finally {
+    await session.close();
+  }
+}
+
 export async function getProspectByLinkedinUrl(
   linkedinUrl: string,
   source?: Prospect['source'],
@@ -560,6 +616,15 @@ export async function deleteProspect(id: string): Promise<boolean> {
     );
 
     const removed = result.records[0]?.get('removed')?.toNumber() ?? 0;
+    if (removed > 0) {
+      // Cross-store cleanup: open action items lose their target. Same
+      // fire-and-forget contract as scheduleFollowUp.
+      const task = dismissOpenActionItemsForProspect(id).catch((error) => {
+        console.error('action_items.dismiss_on_prospect_delete_failed', error);
+      });
+      touchpointWritesInFlight.add(task);
+      void task.finally(() => touchpointWritesInFlight.delete(task));
+    }
     return removed > 0;
   } finally {
     await session.close();
@@ -870,7 +935,8 @@ export async function updateOutreachMessage(
       `
       MATCH (l:Prospect)-[:HAS_OUTREACH]->(m:OutreachMessage {id: $messageId})
       WITH l, m, m.status AS previousStatus
-      SET ${setClauses.join(', ')}
+      SET ${setClauses.join(', ')},
+        l.lastContactedAt = CASE WHEN $recordSentActivity THEN localdatetime() ELSE l.lastContactedAt END
       FOREACH (_ IN CASE WHEN $recordSentActivity AND previousStatus <> 'sent' THEN [1] ELSE [] END |
         CREATE (a:ProspectActivity {
           id: randomUUID(),
@@ -884,7 +950,7 @@ export async function updateOutreachMessage(
         })
         CREATE (l)-[:HAS_ACTIVITY]->(a)
       )
-      RETURN m
+      RETURN m, l.id AS prospectId, l.name AS prospectName
       `,
       params
     );
@@ -906,6 +972,10 @@ export async function updateOutreachMessage(
         refs: { prospectId: mapped.prospectId },
         payload: { messageId: mapped.id, medium: mapped.medium },
       });
+      scheduleFollowUp(
+        result.records[0].get('prospectId') as string,
+        result.records[0].get('prospectName') as string,
+      );
     }
     return mapped;
   } finally {
@@ -1139,7 +1209,10 @@ export async function createProspectActivity(
         updatedAt: localdatetime()
       })
       CREATE (l)-[:HAS_ACTIVITY]->(a)
-      RETURN a
+      SET l.lastContactedAt = CASE
+        WHEN $isContact AND (l.lastContactedAt IS NULL OR l.lastContactedAt < a.createdAt)
+        THEN a.createdAt ELSE l.lastContactedAt END
+      RETURN a, l.name AS prospectName
       `,
       {
         prospectId,
@@ -1147,6 +1220,7 @@ export async function createProspectActivity(
         title: data.title,
         notes: data.notes ?? null,
         metadata: data.metadata ? JSON.stringify(data.metadata) : null,
+        isContact: CONTACT_ACTIVITY_TYPES.has(data.type),
       }
     );
 
@@ -1158,6 +1232,10 @@ export async function createProspectActivity(
       // — the activities POST route today, an inbox integration later — writes
       // it through this function.
       emitProductEventFromContext({ name: 'prospect.replied', refs: { prospectId } });
+    }
+
+    if (CONTACT_ACTIVITY_TYPES.has(data.type)) {
+      scheduleFollowUp(prospectId, record.get('prospectName') as string);
     }
 
     return mapActivityFromNeo4j(activity);

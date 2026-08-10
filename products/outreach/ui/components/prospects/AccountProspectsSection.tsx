@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { useDimensionResearch } from "../research/useDimensionResearch";
 import { DimensionResearchSurface } from "../research/DimensionResearchSurface";
+import { DueBadge } from "../action-items/DueBadge";
 
 export interface AccountProspectRow {
   id: string;
@@ -35,6 +36,8 @@ export interface AccountProspectRow {
   status: string;
   personaScore: number | null;
   qualificationStatus: string | null;
+  lastContactedAt?: string;
+  nextAction?: { id: string; title: string; dueAt: string } | null;
 }
 
 interface AccountProspectsSectionProps {
@@ -42,6 +45,30 @@ interface AccountProspectsSectionProps {
   accountName: string;
   prospects: AccountProspectRow[];
   onRefresh: () => void;
+}
+
+function formatRelativeDate(dateString: string) {
+  // Graph localdatetime values are UTC clock readings without a zone marker;
+  // parse them as UTC so relative times don't shift by the browser's offset.
+  const hasZone = /Z|[+-]\d{2}:?\d{2}$/.test(dateString);
+  const date = new Date(hasZone ? dateString : `${dateString}Z`);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffMins < 60) {
+    return `${diffMins}m ago`;
+  } else if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  } else if (diffDays === 1) {
+    return "Yesterday";
+  } else if (diffDays < 7) {
+    return date.toLocaleDateString("en-US", { weekday: "short" });
+  } else {
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
 }
 
 const QUALIFICATION_BADGE: Record<
@@ -189,6 +216,8 @@ export function AccountProspectsSection({
                     <TableHead>Title</TableHead>
                     <TableHead className="text-right">Persona</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Last contacted</TableHead>
+                    <TableHead>Next action</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -213,6 +242,23 @@ export function AccountProspectsSection({
                         {prospect.personaScore == null ? "—" : Math.round(prospect.personaScore)}
                       </TableCell>
                       <TableCell>{statusBadge(prospect)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {prospect.lastContactedAt
+                          ? formatRelativeDate(prospect.lastContactedAt)
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        {prospect.nextAction ? (
+                          <span className="flex items-center gap-2">
+                            <span className="max-w-48 truncate text-muted-foreground">
+                              {prospect.nextAction.title}
+                            </span>
+                            <DueBadge dueAt={prospect.nextAction.dueAt} />
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-2">
                           <Button
