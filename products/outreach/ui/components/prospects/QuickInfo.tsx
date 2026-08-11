@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ListCard } from "@/components/ListCard";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -96,11 +96,8 @@ export function QuickInfo({ prospect }: QuickInfoProps) {
     prospect.websiteUrl;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Quick info</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <ListCard description="Contact details, profiles, and source." title="Quick info">
+      <div className="space-y-4 p-6">
         {/* Contact Info */}
         {hasContact && (
           <div className="space-y-2">
@@ -137,7 +134,7 @@ export function QuickInfo({ prospect }: QuickInfoProps) {
 
         {/* Social Links as Icons */}
         {hasSocial && (
-          <div className="pt-2 border-t">
+          <div className="border-t pt-2 first:border-t-0 first:pt-0">
             <p className="text-xs text-muted-foreground mb-2">Profiles</p>
             <div className="flex items-center gap-1 flex-wrap">
               {prospect.linkedinUrl && (
@@ -193,7 +190,7 @@ export function QuickInfo({ prospect }: QuickInfoProps) {
         )}
 
         {/* Details */}
-        <div className="pt-2 border-t">
+        <div className="border-t pt-2 first:border-t-0 first:pt-0">
           <p className="text-xs text-muted-foreground mb-2">Details</p>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div>
@@ -216,7 +213,7 @@ export function QuickInfo({ prospect }: QuickInfoProps) {
 
         {/* Tags */}
         {prospect.tags && prospect.tags.length > 0 && (
-          <div className="pt-2 border-t">
+          <div className="border-t pt-2 first:border-t-0 first:pt-0">
             <p className="text-xs text-muted-foreground mb-2">Tags</p>
             <div className="flex flex-wrap gap-1">
               {prospect.tags.map((tag) => (
@@ -234,7 +231,7 @@ export function QuickInfo({ prospect }: QuickInfoProps) {
         {!hasContact && !hasSocial && (
           <p className="text-sm text-muted-foreground">No contact information</p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </ListCard>
   );
 }

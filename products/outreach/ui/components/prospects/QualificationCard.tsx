@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, type ReactNode } from "react";
+import { ListCard } from "@/components/ListCard";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { ReasoningTicker, ScoreTile, SegmentMeter } from "@/components/genui";
-import { Target, Calendar, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import { Target, Calendar, ChevronDown, ChevronRight, AlertTriangle, RefreshCw } from "lucide-react";
 import { icpBand, personaBand, timingBand } from "@/lib/score-bands";
 import type { LegacyQualification } from "@/products/outreach/domain/types";
 import type {
@@ -131,32 +131,30 @@ export function QualificationCard({
   onRequalify,
   live,
 }: QualificationCardProps) {
-  const header = (
-    <CardHeader className="flex-row items-center justify-between">
-      <CardTitle className="flex items-center gap-2">
-        <Target className="h-4 w-4" />
-        Fit assessment
-      </CardTitle>
-      {onRequalify && (
-        <Button size="sm" variant="ghost" disabled={live?.isStreaming} onClick={onRequalify}>
-          {qualification || legacy ? "Re-score" : "Score fit"}
-        </Button>
-      )}
-    </CardHeader>
+  const actions = onRequalify ? (
+    <Button disabled={live?.isStreaming} onClick={onRequalify} size="sm" variant="secondary">
+      <RefreshCw className={`h-4 w-4 ${live?.isStreaming ? "animate-spin" : ""}`} />
+      {qualification || legacy ? "Re-score" : "Score fit"}
+    </Button>
+  ) : null;
+
+  const shell = (children: ReactNode) => (
+    <ListCard
+      actions={actions}
+      description="ICP fit, persona fit, and buying-window timing."
+      title="Fit assessment"
+    >
+      <div className="space-y-4 p-6">{children}</div>
+    </ListCard>
   );
 
   if (isLoading) {
-    return (
-      <Card>
-        {header}
-        <CardContent>
-          <div className="space-y-3">
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-2 w-full" />
-            <Skeleton className="h-3 w-1/2" />
-          </div>
-        </CardContent>
-      </Card>
+    return shell(
+      <div className="space-y-3">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-2 w-full" />
+        <Skeleton className="h-3 w-1/2" />
+      </div>,
     );
   }
 
@@ -168,26 +166,23 @@ export function QualificationCard({
   ) : null;
 
   if (!qualification) {
-    return (
-      <Card>
-        {header}
-        <CardContent className="space-y-4">
-          {streaming}
-          {legacy ? (
-            <LegacyBody legacy={legacy} />
-          ) : (
-            !live?.isStreaming && (
-              <div className="py-4 text-center text-muted-foreground">
-                <Target className="mx-auto mb-2 h-8 w-8 opacity-50" />
-                <p className="text-sm">Not assessed yet</p>
-                <p className="mt-1 text-xs">
-                  Run research to score this account and person against your ICP
-                </p>
-              </div>
-            )
-          )}
-        </CardContent>
-      </Card>
+    return shell(
+      <>
+        {streaming}
+        {legacy ? (
+          <LegacyBody legacy={legacy} />
+        ) : (
+          !live?.isStreaming && (
+            <div className="py-4 text-center text-muted-foreground">
+              <Target className="mx-auto mb-2 h-8 w-8 opacity-50" />
+              <p className="text-sm">Not assessed yet</p>
+              <p className="mt-1 text-xs">
+                Run research to score this account and person against your ICP
+              </p>
+            </div>
+          )
+        )}
+      </>,
     );
   }
 
@@ -195,17 +190,15 @@ export function QualificationCard({
   const icpExcluded = qualification.icpMatches.some((match) => match.hardExclusion);
   const personaExcluded = qualification.personaMatches.some((match) => match.hardExclusion);
 
-  return (
-    <Card>
-      {header}
-      <CardContent className="space-y-4">
-        {streaming}
+  return shell(
+    <>
+      {streaming}
 
-        <Badge variant="outline" className={status.className}>
-          {status.label}
-        </Badge>
+      <Badge variant="outline" className={status.className}>
+        {status.label}
+      </Badge>
 
-        <div className="space-y-3">
+      <div className="space-y-3">
           <ScoreTile
             band={icpBand(qualification.icpScore, icpExcluded)}
             explanation="How well the company matches your ideal-customer profile. Fit gates."
@@ -234,11 +227,10 @@ export function QualificationCard({
 
         <DimensionBreakdown qualification={qualification} />
 
-        <div className="flex items-center gap-1 border-t pt-2 text-xs text-muted-foreground">
-          <Calendar className="h-3 w-3" />
-          <span>Assessed {new Date(qualification.computedAt).toLocaleDateString()}</span>
-        </div>
-      </CardContent>
-    </Card>
+      <div className="flex items-center gap-1 border-t pt-2 text-xs text-muted-foreground">
+        <Calendar className="h-3 w-3" />
+        <span>Assessed {new Date(qualification.computedAt).toLocaleDateString()}</span>
+      </div>
+    </>,
   );
 }

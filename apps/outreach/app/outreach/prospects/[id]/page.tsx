@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ListCard } from "@/components/ListCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -347,6 +348,20 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     } catch (error) {
       console.error("Error completing action item:", error);
       toast.error("Could not complete the action");
+    }
+  };
+
+  const handleDeleteActionItem = async (id: string) => {
+    try {
+      const response = await fetch(`/api/outreach/action-items/${id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("Failed to delete action item");
+      toast.success("Upcoming action removed");
+      await refreshActionItems();
+    } catch (error) {
+      console.error("Error deleting action item:", error);
+      toast.error("Could not remove the action");
     }
   };
 
@@ -838,27 +853,22 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
               </Card>
             )}
 
-            <Card>
-              <CardHeader className="flex-row items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <CardTitle>Persona fit</CardTitle>
-                  {persona?.personaScore != null && (
-                    <Badge variant="outline" className="text-xs tabular-nums">
-                      {Math.round(persona.personaScore)}
-                    </Badge>
-                  )}
-                </div>
+            <ListCard
+              actions={
                 <Button
-                  size="sm"
-                  variant="ghost"
                   disabled={research.isStreaming}
                   onClick={() => research.start()}
+                  size="sm"
+                  variant="secondary"
                 >
                   <Search className="h-4 w-4" />
                   {persona && persona.dimensions.length > 0 ? "Re-research" : "Research"}
                 </Button>
-              </CardHeader>
-              <CardContent>
+              }
+              description="Live evidence scored against each persona dimension."
+              title="Persona fit"
+            >
+              <div className="p-6">
                 {personaLoading ? (
                   <div className="space-y-3">
                     <Skeleton className="h-4 w-1/2" />
@@ -925,8 +935,8 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
                     </p>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </ListCard>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className="space-y-4">
@@ -950,6 +960,7 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
                   onComplete={handleCompleteActionItem}
                   onSnooze={handleSnoozeActionItem}
                   onCreate={handleCreateActionItem}
+                  onDelete={handleDeleteActionItem}
                   onEdit={handleEditActionItem}
                 />
                 <ActivityTimeline

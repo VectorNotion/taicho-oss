@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ActionItem } from "@/products/outreach/domain/action-items";
 import { groupByDue } from "@/products/outreach/domain/action-item-view";
 import { DueBadge } from "@/products/outreach/ui/components/action-items/DueBadge";
@@ -22,11 +23,13 @@ function snoozeDueAt(days: number): string {
   return date.toISOString();
 }
 
-function SectionHeading({ children }: { children: React.ReactNode }) {
+/** Count chip on a tab trigger; hidden at zero so empty buckets stay quiet. */
+function TabCount({ n }: { n: number }) {
+  if (n === 0) return null;
   return (
-    <li className="px-6 pb-1 pt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-      {children}
-    </li>
+    <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+      {n}
+    </span>
   );
 }
 
@@ -37,7 +40,7 @@ export function DueActionsCard() {
 
   const refresh = useCallback(async () => {
     try {
-      const response = await fetch("/api/outreach/action-items?horizonDays=7");
+      const response = await fetch("/api/outreach/action-items?horizonDays=90");
       if (!response.ok) throw new Error("Failed to load action items");
       const data = await response.json();
       setItems(data.items as DueItem[]);
@@ -104,15 +107,57 @@ export function DueActionsCard() {
   };
 
   const groups = groupByDue(items, new Date());
-  const sections = [
-    { heading: "Overdue", rows: groups.overdue },
-    { heading: "Due today", rows: groups.today },
-    { heading: "Upcoming", rows: groups.upcoming },
-  ].filter((section) => section.rows.length > 0);
+  const defaultTab = groups.today.length
+    ? "today"
+    : groups.overdue.length
+      ? "past"
+      : "upcoming";
+
+  const renderRow = (item: DueItem) => {
+    // A prospect id that no longer resolves means the target is gone (deleted
+    // outside the app, reseeded dev data): the item is unactionable, so offer
+    // dismissal instead of snooze.
+    const orphaned = Boolean(item.prospectId) && !item.prospect;
+    return (
+      <ListRow
+        actions={
+          orphaned
+            ? [{
+                destructive: true,
+                icon: X,
+                label: "Dismiss — prospect no longer exists",
+                onSelect: () => void dismiss(item.id),
+              }]
+            : [
+                { label: "Done", icon: Check, onSelect: () => void complete(item.id) },
+                { label: "Snooze 3 days", icon: AlarmClock, onSelect: () => void snooze(item.id) },
+              ]
+        }
+        badge={<DueBadge dueAt={item.dueAt} />}
+        href={item.prospect ? `/outreach/prospects/${item.prospect.id}` : undefined}
+        key={item.id}
+        meta={[
+          item.prospect
+            ? [item.prospect.name, item.prospect.company].filter(Boolean).join(" · ")
+            : orphaned
+              ? "Prospect no longer exists — dismiss this item"
+              : "Not linked to a prospect",
+        ]}
+        title={item.title}
+      />
+    );
+  };
+
+  const renderBucket = (rows: DueItem[], emptyText: string) =>
+    rows.length === 0 ? (
+      <div className="px-6 py-12 text-center text-sm text-muted-foreground">{emptyText}</div>
+    ) : (
+      <ListRows className="pb-2">{rows.map(renderRow)}</ListRows>
+    );
 
   return (
     <ListCard
-      description="What needs your attention, oldest first."
+      description="Follow-ups due today, overdue, and coming up."
       title="Due"
     >
       {loading ? (
@@ -157,57 +202,34 @@ export function DueActionsCard() {
           </div>
         </div>
       ) : (
-        <ListRows className="pb-2">
-          {sections.map((section) => (
-            <SectionGroup key={section.heading} heading={section.heading}>
-              {section.rows.map((item) => {
-                // A prospect id that no longer resolves means the target is
-                // gone (deleted outside the app, reseeded dev data): the item
-                // is unactionable, so offer dismissal instead of snooze.
-                const orphaned = Boolean(item.prospectId) && !item.prospect;
-                return (
-                  <ListRow
-                    actions={
-                      orphaned
-                        ? [{
-                            destructive: true,
-                            icon: X,
-                            label: "Dismiss — prospect no longer exists",
-                            onSelect: () => void dismiss(item.id),
-                          }]
-                        : [
-                            { label: "Done", icon: Check, onSelect: () => void complete(item.id) },
-                            { label: "Snooze 3 days", icon: AlarmClock, onSelect: () => void snooze(item.id) },
-                          ]
-                    }
-                    badge={<DueBadge dueAt={item.dueAt} />}
-                    href={item.prospect ? `/outreach/prospects/${item.prospect.id}` : undefined}
-                    key={item.id}
-                    meta={[
-                      item.prospect
-                        ? [item.prospect.name, item.prospect.company].filter(Boolean).join(" · ")
-                        : orphaned
-                          ? "Prospect no longer exists — dismiss this item"
-                          : "Not linked to a prospect",
-                    ]}
-                    title={item.title}
-                  />
-                );
-              })}
-            </SectionGroup>
-          ))}
-        </ListRows>
+        <Tabs defaultValue={defaultTab}>
+          <div className="px-6 py-3">
+            <TabsList>
+              <TabsTrigger value="today">
+                Today
+                <TabCount n={groups.today.length} />
+              </TabsTrigger>
+              <TabsTrigger value="past">
+                Past
+                <TabCount n={groups.overdue.length} />
+              </TabsTrigger>
+              <TabsTrigger value="upcoming">
+                Upcoming
+                <TabCount n={groups.upcoming.length} />
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="today">
+            {renderBucket(groups.today, "Nothing due today.")}
+          </TabsContent>
+          <TabsContent value="past">
+            {renderBucket(groups.overdue, "Nothing overdue — you're clear.")}
+          </TabsContent>
+          <TabsContent value="upcoming">
+            {renderBucket(groups.upcoming, "Nothing scheduled ahead.")}
+          </TabsContent>
+        </Tabs>
       )}
     </ListCard>
-  );
-}
-
-/** A labeled slice of the due list; rendered inside ListRows' <ul>. */
-function SectionGroup({ heading, children }: { heading: string; children: React.ReactNode }) {
-  return (
-    <>
-      <SectionHeading>{heading}</SectionHeading>
-      {children}
-    </>
   );
 }
