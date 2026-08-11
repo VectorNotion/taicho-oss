@@ -2,11 +2,11 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Building2, ExternalLink, Search, Target } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Building2, ExternalLink, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScoreRing } from "@/components/genui";
 import { PageHeader } from "@/components/PageHeader";
@@ -169,10 +169,10 @@ function AccountDetailSkeleton() {
         <Skeleton className="mb-4 h-5 w-28" />
         <Skeleton className="h-9 w-64" />
       </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Skeleton className="h-40" />
-        <Skeleton className="h-40" />
-        <Skeleton className="h-40" />
+      <Skeleton className="h-24" />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Skeleton className="h-64" />
+        <Skeleton className="h-64" />
       </div>
     </div>
   );
@@ -237,6 +237,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const isTarget = account.icpScore != null && account.icpScore >= 70;
+  const qualifiedCount = account.prospects.filter((p) => p.qualificationStatus === "QUALIFIED").length;
   const showResearchSurface = research.isStreaming || research.dimensions.length > 0;
 
   return (
@@ -250,36 +251,51 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         </Link>
         <PageHeader
           actions={
-            <div className="flex items-center gap-2">
-              {isTarget && <Badge variant="default">Target account</Badge>}
-              <Button disabled={research.isStreaming} onClick={() => research.start()}>
-                <Search className="size-4" /> Research account
-              </Button>
-            </div>
+            <Button disabled={research.isStreaming} onClick={() => research.start()}>
+              <Search className="size-4" /> Research account
+            </Button>
           }
           description="Company fit and buying-window timing. Fit gates. Timing ranks."
           title={account.name}
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Target className="size-4" /> Account scores
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-2">
-              <ScoreRing label="ICP" score={account.icpScore == null ? null : Math.round(account.icpScore)} />
-              <ScoreRing label="Timing" score={account.timingScore == null ? null : Math.round(account.timingScore)} />
+      {/* Scores band — compact, full width, so it doesn't strand a whole column. */}
+      <Card>
+        <CardContent className="flex flex-col gap-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-8">
+            <ScoreRing label="ICP fit" score={account.icpScore == null ? null : Math.round(account.icpScore)} />
+            <ScoreRing label="Timing" score={account.timingScore == null ? null : Math.round(account.timingScore)} />
+          </div>
+          <div className="space-y-1.5 sm:text-right">
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              {account.hardExcluded ? (
+                <Badge variant="destructive">Hard excluded</Badge>
+              ) : account.icpScore == null ? (
+                <Badge variant="secondary">Not researched</Badge>
+              ) : isTarget ? (
+                <Badge variant="default">Target account</Badge>
+              ) : (
+                <Badge variant="outline">Below ICP threshold</Badge>
+              )}
+              <span className="text-sm text-muted-foreground">
+                {qualifiedCount} of {account.prospects.length} {account.prospects.length === 1 ? "prospect" : "prospects"} qualified
+              </span>
             </div>
-          </CardContent>
-        </Card>
+            <p className="text-xs text-muted-foreground">Fit gates. Timing ranks.</p>
+            {account.reviewReason ? (
+              <p className="max-w-md text-xs text-muted-foreground">{account.reviewReason}</p>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
 
+      {/* Research findings — two balanced columns of similar height. */}
+      <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Company fit</CardTitle>
+            <CardDescription>What research found for each ICP dimension, and how well it matches your ideal.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {account.icpObservations.length > 0 ? (
@@ -295,6 +311,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         <Card>
           <CardHeader>
             <CardTitle>Timing signals</CardTitle>
+            <CardDescription>Dated buying-window signals, decayed by recency.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {account.timingSignals.length > 0 ? (
