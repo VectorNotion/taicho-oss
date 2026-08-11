@@ -33,14 +33,55 @@ const LENSES: {
   { value: "prospect", tab: "Persona", noun: "Persona" },
 ];
 
+/** Secondary facts for a dimension row — the weight now lives in the visual
+ * indicator, so this line carries the freshness/decay/exclusion detail only. */
 function dimensionMeta(dimension: DimensionDefinition): string[] {
   return [
-    `weight ${dimension.weight}`,
     `freshness ${dimension.freshnessWindowDays}d`,
     ...(dimension.halfLifeDays ? [`half-life ${dimension.halfLifeDays}d`] : []),
     ...(dimension.hardExclusionRule ? ["hard exclusion"] : []),
     ...(dimension.isActive ? [] : ["inactive"]),
   ];
+}
+
+type WeightStat = { total: number; max: number };
+
+/**
+ * A dimension's pull on its score, made visible. `fit` and `timing` are scored
+ * independently (fit gates, timing ranks), so the share and the bar are both
+ * computed within the dimension's own type group: the bar fills relative to the
+ * heaviest dimension of that type, and the caption states the exact share of
+ * that group's weight ("18% of timing"). Fixed width so the indicators line up
+ * into a scannable column.
+ */
+function WeightIndicator({
+  weight,
+  stats,
+  typeLabel,
+  inactive,
+}: {
+  weight: number;
+  stats: WeightStat | undefined;
+  typeLabel: string;
+  inactive: boolean;
+}) {
+  const max = stats?.max ?? 0;
+  const total = stats?.total ?? 0;
+  const relative = max > 0 ? Math.round((weight / max) * 100) : 0;
+  const share = total > 0 ? Math.round((weight / total) * 100) : 0;
+  return (
+    <div className={`w-[72px] shrink-0 ${inactive ? "opacity-40" : ""}`}>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${Math.max(relative, 4)}%` }}
+        />
+      </div>
+      <div className="mt-1 text-[11px] leading-tight tabular-nums text-muted-foreground">
+        <span className="font-semibold text-foreground">{share}%</span> of {typeLabel}
+      </div>
+    </div>
+  );
 }
 
 function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: string }) {
@@ -115,6 +156,18 @@ function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: s
     </Button>
   );
 
+  // Weight share and bar scale are per scoring group: fit and timing are
+  // separate scores, so a dimension's weight is measured against its own type.
+  const weightStats = new Map<string, WeightStat>();
+  for (const dimension of dimensions) {
+    if (!dimension.isActive) continue;
+    const stat = weightStats.get(dimension.dimensionType) ?? { total: 0, max: 0 };
+    stat.total += dimension.weight;
+    stat.max = Math.max(stat.max, dimension.weight);
+    weightStats.set(dimension.dimensionType, stat);
+  }
+  const mixedTypes = new Set(dimensions.map((d) => d.dimensionType)).size > 1;
+
   return (
     <div className="space-y-6">
       <ListCard
@@ -166,11 +219,21 @@ function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: s
                   },
                 ]}
                 badge={
-                  <Badge variant={dimension.dimensionType === "timing" ? "secondary" : "outline"}>
-                    {dimension.dimensionType}
-                  </Badge>
+                  mixedTypes ? (
+                    <Badge variant={dimension.dimensionType === "timing" ? "secondary" : "outline"}>
+                      {dimension.dimensionType}
+                    </Badge>
+                  ) : null
                 }
                 key={dimension.id}
+                leading={
+                  <WeightIndicator
+                    inactive={!dimension.isActive}
+                    stats={weightStats.get(dimension.dimensionType)}
+                    typeLabel={dimension.dimensionType}
+                    weight={dimension.weight}
+                  />
+                }
                 meta={dimensionMeta(dimension)}
                 title={dimension.name}
               />
