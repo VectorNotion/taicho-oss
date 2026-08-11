@@ -162,6 +162,51 @@ function TimingSignalBlock({ entry }: { entry: AccountTimingSignals }) {
   );
 }
 
+type BandVariant = "default" | "secondary" | "outline" | "destructive";
+
+function icpBand(score: number | null, hardExcluded: boolean): { label: string; variant: BandVariant } {
+  if (hardExcluded) return { label: "Hard excluded", variant: "destructive" };
+  if (score == null) return { label: "Not researched", variant: "secondary" };
+  if (score >= 70) return { label: "Strong fit · target", variant: "default" };
+  if (score >= 50) return { label: "Partial fit", variant: "secondary" };
+  return { label: "Weak fit", variant: "outline" };
+}
+
+function timingBand(score: number | null): { label: string; variant: BandVariant } {
+  if (score == null) return { label: "No signal yet", variant: "secondary" };
+  if (score >= 66) return { label: "Hot", variant: "default" };
+  if (score >= 33) return { label: "Warming", variant: "secondary" };
+  if (score > 0) return { label: "Cool", variant: "outline" };
+  return { label: "Cold", variant: "outline" };
+}
+
+/** A self-explanatory score tile: ring (fill = value / 100), qualitative band, and plain-language meaning. */
+function ScoreTile({
+  label,
+  score,
+  band,
+  explanation,
+}: {
+  label: string;
+  score: number | null;
+  band: { label: string; variant: BandVariant };
+  explanation: string;
+}) {
+  return (
+    <div className="flex items-start gap-4 rounded-xl border bg-card p-4">
+      <ScoreRing label="" score={score == null ? null : Math.round(score)} />
+      <div className="min-w-0 space-y-1.5 pt-0.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-medium">{label}</span>
+          <span className="text-xs text-muted-foreground">out of 100</span>
+          <Badge variant={band.variant}>{band.label}</Badge>
+        </div>
+        <p className="text-xs leading-5 text-muted-foreground">{explanation}</p>
+      </div>
+    </div>
+  );
+}
+
 function AccountDetailSkeleton() {
   return (
     <div className="w-full min-w-0 space-y-8">
@@ -236,7 +281,6 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const isTarget = account.icpScore != null && account.icpScore >= 70;
   const qualifiedCount = account.prospects.filter((p) => p.qualificationStatus === "QUALIFIED").length;
   const showResearchSurface = research.isStreaming || research.dimensions.length > 0;
 
@@ -260,35 +304,29 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         />
       </div>
 
-      {/* Scores band — compact, full width, so it doesn't strand a whole column. */}
-      <Card>
-        <CardContent className="flex flex-col gap-5 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-8">
-            <ScoreRing label="ICP fit" score={account.icpScore == null ? null : Math.round(account.icpScore)} />
-            <ScoreRing label="Timing" score={account.timingScore == null ? null : Math.round(account.timingScore)} />
-          </div>
-          <div className="space-y-1.5 sm:text-right">
-            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-              {account.hardExcluded ? (
-                <Badge variant="destructive">Hard excluded</Badge>
-              ) : account.icpScore == null ? (
-                <Badge variant="secondary">Not researched</Badge>
-              ) : isTarget ? (
-                <Badge variant="default">Target account</Badge>
-              ) : (
-                <Badge variant="outline">Below ICP threshold</Badge>
-              )}
-              <span className="text-sm text-muted-foreground">
-                {qualifiedCount} of {account.prospects.length} {account.prospects.length === 1 ? "prospect" : "prospects"} qualified
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">Fit gates. Timing ranks.</p>
-            {account.reviewReason ? (
-              <p className="max-w-md text-xs text-muted-foreground">{account.reviewReason}</p>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Two self-explanatory score tiles: value out of 100, a qualitative band, and what it measures. */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <ScoreTile
+          band={icpBand(account.icpScore, account.hardExcluded)}
+          explanation={`How closely ${account.name} matches your Ideal Customer Profile, 0–100. Fit gates qualification — 70+ makes it a target account.`}
+          label="ICP fit"
+          score={account.icpScore}
+        />
+        <ScoreTile
+          band={timingBand(account.timingScore)}
+          explanation={`How active ${account.name}'s buying-window signals are right now, 0–100. Decays with time. Timing ranks the pool; it never gates.`}
+          label="Timing"
+          score={account.timingScore}
+        />
+      </div>
+      {(account.reviewReason || account.prospects.length > 0) && (
+        <p className="-mt-4 text-xs text-muted-foreground">
+          {account.prospects.length > 0 && (
+            <span>{qualifiedCount} of {account.prospects.length} {account.prospects.length === 1 ? "prospect" : "prospects"} qualified.</span>
+          )}
+          {account.reviewReason ? <span> {account.reviewReason}</span> : null}
+        </p>
+      )}
 
       {/* Research findings — two balanced columns of similar height. */}
       <div className="grid gap-4 lg:grid-cols-2">
