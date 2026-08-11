@@ -7,23 +7,32 @@ import {
   useRef,
   useState,
 } from "react";
-import { Building2, Target, Users } from "lucide-react";
+import { Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ListRow, ListRows } from "@/components/ListRow";
-import { ListSurface } from "@/components/ListSurface";
+import { FilterSelect, ListSurface } from "@/components/ListSurface";
 import { PageHeader } from "@/components/PageHeader";
 import { StatRow } from "@/components/StatRow";
 
 type Segment = "all" | "targets" | "qualified" | "warm";
+type Sort = "icp" | "timing" | "qualified" | "prospects" | "name";
+
+const SORT_OPTIONS: Array<{ value: Sort; label: string }> = [
+  { value: "icp", label: "Best ICP fit" },
+  { value: "timing", label: "Hottest timing" },
+  { value: "qualified", label: "Most qualified" },
+  { value: "prospects", label: "Most prospects" },
+  { value: "name", label: "Name (A–Z)" },
+];
+
+const SEGMENT_OPTIONS: Array<{ value: Segment; label: string }> = [
+  { value: "all", label: "All accounts" },
+  { value: "targets", label: "Target accounts" },
+  { value: "qualified", label: "With qualified prospect" },
+  { value: "warm", label: "In a buying window" },
+];
 
 type AccountListItem = {
   id: string;
@@ -44,12 +53,13 @@ type AccountListResponse = {
 };
 
 async function fetchAccounts(
-  filters: { search: string; segment: Segment; page: number; pageSize: number },
+  filters: { search: string; segment: Segment; sort: Sort; page: number; pageSize: number },
   signal?: AbortSignal,
 ): Promise<AccountListResponse> {
   const params = new URLSearchParams();
   if (filters.search) params.set("search", filters.search);
   if (filters.segment !== "all") params.set("segment", filters.segment);
+  params.set("sort", filters.sort);
   params.set("page", String(filters.page));
   params.set("pageSize", String(filters.pageSize));
   const response = await fetch(`/api/outreach/accounts?${params.toString()}`, { signal });
@@ -68,6 +78,7 @@ export default function AccountsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const [segment, setSegment] = useState<Segment>("all");
+  const [sort, setSort] = useState<Sort>("icp");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState({ total: 0, targets: 0, qualified: 0, warm: 0 });
@@ -82,7 +93,7 @@ export default function AccountsPage() {
     setLoading(true);
     setLoadingMore(false);
     void fetchAccounts(
-      { search: deferredSearchQuery, segment, page: 1, pageSize },
+      { search: deferredSearchQuery, segment, sort, page: 1, pageSize },
       controller.signal,
     )
       .then((data) => {
@@ -104,7 +115,7 @@ export default function AccountsPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [deferredSearchQuery, segment]);
+  }, [deferredSearchQuery, segment, sort]);
 
   const loadMore = useCallback(async () => {
     if (loading || loadingMore || accounts.length >= total) return;
@@ -115,7 +126,7 @@ export default function AccountsPage() {
     setLoadingMore(true);
     try {
       const data = await fetchAccounts(
-        { search: deferredSearchQuery, segment, page: nextPage, pageSize },
+        { search: deferredSearchQuery, segment, sort, page: nextPage, pageSize },
         controller.signal,
       );
       if (controller.signal.aborted) return;
@@ -135,7 +146,7 @@ export default function AccountsPage() {
         setLoadingMore(false);
       }
     }
-  }, [accounts.length, deferredSearchQuery, loading, loadingMore, page, segment, total]);
+  }, [accounts.length, deferredSearchQuery, loading, loadingMore, page, segment, sort, total]);
 
   const statCards = [
     {
@@ -206,17 +217,20 @@ export default function AccountsPage() {
           </div>
         }
         filters={
-          <Select onValueChange={(value) => setSegment(value as Segment)} value={segment}>
-            <SelectTrigger aria-label="Filter accounts" className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All accounts</SelectItem>
-              <SelectItem value="targets">Target accounts</SelectItem>
-              <SelectItem value="qualified">With qualified prospect</SelectItem>
-              <SelectItem value="warm">In a buying window</SelectItem>
-            </SelectContent>
-          </Select>
+          <>
+            <FilterSelect
+              label="Show"
+              onValueChange={(value) => setSegment(value as Segment)}
+              options={SEGMENT_OPTIONS}
+              value={segment}
+            />
+            <FilterSelect
+              label="Sort"
+              onValueChange={(value) => setSort(value as Sort)}
+              options={SORT_OPTIONS}
+              value={sort}
+            />
+          </>
         }
         hasMore={!loading && accounts.length < total}
         isLoading={loading}

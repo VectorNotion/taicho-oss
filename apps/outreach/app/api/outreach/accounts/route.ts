@@ -7,6 +7,7 @@ import {
 } from "@/products/outreach/data/account-repository";
 
 const SEGMENTS = new Set(["targets", "qualified", "warm"]);
+const SORTS = new Set(["icp", "timing", "qualified", "prospects", "name"]);
 
 export async function GET(request: NextRequest) {
   return withOrgScope(request, async () => {
@@ -18,6 +19,10 @@ export async function GET(request: NextRequest) {
       const segment = searchParams.get("segment");
       if (segment && SEGMENTS.has(segment)) {
         filters.segment = segment as AccountListFilters["segment"];
+      }
+      const sort = searchParams.get("sort");
+      if (sort && SORTS.has(sort)) {
+        filters.sort = sort as AccountListFilters["sort"];
       }
       const page = Number(searchParams.get("page") ?? 1);
       const pageSize = Number(searchParams.get("pageSize") ?? 50);

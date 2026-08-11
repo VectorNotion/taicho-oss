@@ -130,10 +130,31 @@ export interface AccountListItem {
   isTarget: boolean;
 }
 
+export type AccountSort = "icp" | "timing" | "qualified" | "prospects" | "name";
+
 export interface AccountListFilters {
   search?: string;
   /** 'targets' = ICP ≥ minimum; 'qualified' = has a QUALIFIED prospect; 'warm' = timing > 0. */
   segment?: "targets" | "qualified" | "warm";
+  /** Default 'icp' — best fit first. */
+  sort?: AccountSort;
+}
+
+/** Nulls (unscored accounts) always sort last on score columns. */
+function orderByClause(sort: AccountSort | undefined): string {
+  switch (sort) {
+    case "timing":
+      return "coalesce(timingScore, -1) DESC, coalesce(icpScore, -1) DESC, a.name";
+    case "qualified":
+      return "qualifiedCount DESC, coalesce(icpScore, -1) DESC, a.name";
+    case "prospects":
+      return "prospectCount DESC, a.name";
+    case "name":
+      return "a.name";
+    case "icp":
+    default:
+      return "coalesce(icpScore, -1) DESC, coalesce(timingScore, -1) DESC, a.name";
+  }
 }
 
 export interface AccountListPage {
@@ -211,7 +232,7 @@ export async function getAccountsPage(
       ${ACCOUNT_ROLLUP}
       ${where}
       RETURN a, prospectCount, qualifiedCount, icpScore, timingScore
-      ORDER BY coalesce(icpScore, -1) DESC, coalesce(timingScore, -1) DESC, a.name
+      ORDER BY ${orderByClause(filters.sort)}
       SKIP ${skip} LIMIT ${pageSize}
       `,
       { search: search ?? "" },

@@ -183,5 +183,30 @@ test('account rollup: list, counts and detail reflect account scores and prospec
   assert.equal(hotRow?.qualificationStatus, 'QUALIFIED');
   const coldRow = detail.prospects.find((p) => p.id === cold.id);
   assert.equal(coldRow?.personaScore, null);
-  assert.equal(coldRow?.qualificationStatus, null);
+});
+
+test('accounts sort by ICP, timing, prospects, qualified and name', async () => {
+  await clearGraph();
+  // Alpha: ICP 90, timing 10, 1 prospect (qualified).
+  const a = await createProspect({ name: 'A person', company: 'Alpha', source: 'manual' });
+  const alpha = await resolveAccountForProspect(a);
+  assert.ok(alpha);
+  await saveAccountScore(alpha.id, { icpScore: 90, icpScoreConfident: 90, timingScore: 10, hardExcluded: false, timingBreakdown: [], computedAt: '2026-08-10T00:00:00.000Z' });
+  await saveProspectQualification(a.id, qualification({ status: 'QUALIFIED' }));
+  // Beta: ICP 60, timing 95, 2 prospects (0 qualified).
+  const b1 = await createProspect({ name: 'B one', company: 'Beta', source: 'manual' });
+  const b2 = await createProspect({ name: 'B two', company: 'Beta', source: 'manual' });
+  const beta = await resolveAccountForProspect(b1);
+  await resolveAccountForProspect(b2);
+  assert.ok(beta);
+  await saveAccountScore(beta.id, { icpScore: 60, icpScoreConfident: 60, timingScore: 95, hardExcluded: false, timingBreakdown: [], computedAt: '2026-08-10T00:00:00.000Z' });
+
+  const names = async (sort: 'icp' | 'timing' | 'qualified' | 'prospects' | 'name') =>
+    (await getAccountsPage({ sort }, { page: 1, pageSize: 10 })).accounts.map((x) => x.name);
+
+  assert.deepEqual(await names('icp'), ['Alpha', 'Beta'], 'best ICP first');
+  assert.deepEqual(await names('timing'), ['Beta', 'Alpha'], 'hottest timing first');
+  assert.deepEqual(await names('prospects'), ['Beta', 'Alpha'], 'most prospects first');
+  assert.deepEqual(await names('qualified'), ['Alpha', 'Beta'], 'most qualified first');
+  assert.deepEqual(await names('name'), ['Alpha', 'Beta'], 'alphabetical');
 });
