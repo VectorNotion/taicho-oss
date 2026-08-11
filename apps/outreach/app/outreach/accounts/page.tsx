@@ -15,6 +15,7 @@ import { ListRow, ListRows } from "@/components/ListRow";
 import { FilterSelect, ListSurface } from "@/components/ListSurface";
 import { PageHeader } from "@/components/PageHeader";
 import { StatRow } from "@/components/StatRow";
+import { SegmentMeter } from "@/components/genui";
 import { icpBand, timingBand } from "@/lib/score-bands";
 
 type Segment = "all" | "targets" | "qualified" | "warm";
@@ -68,18 +69,12 @@ async function fetchAccounts(
   return response.json();
 }
 
-/** Violet ramp, light → dark, one shade per segment. Filled segments deepen as
- * the score climbs, so a strong score reads as more blocks AND darker blocks. */
-const METER_SHADES = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5"];
-const METER_SEGMENTS = METER_SHADES.length;
-
 /**
- * A compact segmented score meter for a list row. Five blocks, one per 20
- * points; a block lights up in an ever-darker shade of the brand violet as the
- * score climbs, empty blocks stay muted. Filled-vs-empty contrast plus the
- * shade gradient make strong-vs-weak legible at a glance, and the blocks line
- * up down the column because the label and value cells are fixed-width. Bands
- * (excluded / not-researched) fall back to a distinct treatment.
+ * A compact segmented score meter for a list row. The shared SegmentMeter fills
+ * one block per 20 points, each filled block an ever-darker shade of the brand
+ * violet; filled-vs-empty contrast plus the shade gradient make strong-vs-weak
+ * legible at a glance. Fixed-width label/value cells keep the meters lined up
+ * down the column. Excluded / not-researched fall back to a distinct treatment.
  */
 function ScoreMeter({
   label,
@@ -91,8 +86,6 @@ function ScoreMeter({
   band: { label: string; variant: "default" | "secondary" | "outline" | "destructive" };
 }) {
   const value = score == null ? null : Math.max(0, Math.min(100, Math.round(score)));
-  const excluded = band.variant === "destructive";
-  const filled = value == null ? 0 : Math.ceil((value / 100) * METER_SEGMENTS);
   return (
     <span
       className="flex items-center gap-2"
@@ -101,14 +94,7 @@ function ScoreMeter({
       <span className="w-[42px] shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
         {label}
       </span>
-      <span aria-hidden className="flex items-center gap-[3px]">
-        {Array.from({ length: METER_SEGMENTS }).map((_, i) => {
-          const on = i < filled;
-          const tone = excluded ? "bg-destructive" : on ? METER_SHADES[i] : "bg-muted";
-          const dim = excluded && !on ? "bg-destructive/25" : tone;
-          return <span className={`h-3.5 w-2 rounded-[2px] ${dim}`} key={i} />;
-        })}
-      </span>
+      <SegmentMeter excluded={band.variant === "destructive"} fraction={value == null ? null : value / 100} />
       <span className="w-6 shrink-0 text-right text-xs font-semibold tabular-nums text-foreground">
         {value == null ? "–" : value}
       </span>

@@ -6,4 +6,5 @@ export { AddActivityDialog } from "./AddActivityDialog";
 export { NextActionCard } from "./NextActionCard";
 export { ProspectNotes } from "./ProspectNotes";
 export { ProspectIntelligenceTabs } from "./ProspectIntelligenceTabs";
+export { CompanySummaryBar, type CompanySummary } from "./CompanySummaryBar";
 export type { Activity, ActivityType } from "./ActivityTimeline";

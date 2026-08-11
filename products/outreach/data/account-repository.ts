@@ -101,6 +101,46 @@ export async function getAccountById(id: string): Promise<AccountRecord | null> 
   }
 }
 
+/** The account summary as seen from one of its prospects — the same rollup the
+ * Accounts list shows, resolved through the prospect's BELONGS_TO edge, so the
+ * prospect page can show a company bar (fit / timing / target) with a link to
+ * the account. Null when the prospect has no company/account. */
+export interface AccountForProspect extends AccountListItem {
+  hardExcluded: boolean;
+}
+
+export async function getAccountForProspect(
+  prospectId: string,
+): Promise<AccountForProspect | null> {
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `
+      MATCH (:Prospect {id: $prospectId})-[:BELONGS_TO]->(a:Account)
+      OPTIONAL MATCH (a)-[:HAS_SCORE]->(sc:AccountScore)
+      OPTIONAL MATCH (a)<-[:BELONGS_TO]-(p:Prospect)
+      OPTIONAL MATCH (p)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
+      WITH a,
+           count(DISTINCT p) AS prospectCount,
+           sum(CASE WHEN q.status = 'QUALIFIED' THEN 1 ELSE 0 END) AS qualifiedCount,
+           max(sc.icpScore) AS icpScore,
+           max(sc.timingScore) AS timingScore,
+           max(CASE WHEN sc.hardExcluded THEN 1 ELSE 0 END) AS hardExcluded
+      RETURN a, prospectCount, qualifiedCount, icpScore, timingScore, hardExcluded
+      `,
+      { prospectId },
+    );
+    if (result.records.length === 0) return null;
+    const record = result.records[0];
+    return {
+      ...mapRollupRow(record),
+      hardExcluded: (toNumber(record.get("hardExcluded")) ?? 0) > 0,
+    };
+  } finally {
+    await session.close();
+  }
+}
+
 /** Ids of every prospect attached to the account (contact discovery, spec §10). */
 export async function getAccountProspects(accountId: string): Promise<string[]> {
   const session = await getSession();

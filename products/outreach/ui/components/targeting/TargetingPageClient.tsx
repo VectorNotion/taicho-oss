@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
+import { SegmentMeter } from "@/components/genui";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,16 +68,11 @@ function WeightIndicator({
 }) {
   const max = stats?.max ?? 0;
   const total = stats?.total ?? 0;
-  const relative = max > 0 ? Math.round((weight / max) * 100) : 0;
+  const relative = max > 0 ? weight / max : 0;
   const share = total > 0 ? Math.round((weight / total) * 100) : 0;
   return (
-    <div className={`w-[72px] shrink-0 ${inactive ? "opacity-40" : ""}`}>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary transition-all"
-          style={{ width: `${Math.max(relative, 4)}%` }}
-        />
-      </div>
+    <div className={`shrink-0 ${inactive ? "opacity-40" : ""}`}>
+      <SegmentMeter fraction={relative} />
       <div className="mt-1 text-[11px] leading-tight tabular-nums text-muted-foreground">
         <span className="font-semibold text-foreground">{share}%</span> of {typeLabel}
       </div>

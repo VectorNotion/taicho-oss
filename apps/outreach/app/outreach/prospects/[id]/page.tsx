@@ -23,7 +23,7 @@ import { useDimensionResearch } from "@/products/outreach/ui/components/research
 import { DimensionResearchSurface } from "@/products/outreach/ui/components/research/DimensionResearchSurface";
 import { ScoreRing } from "@/components/genui";
 
-import { ProspectHero, QuickInfo, OutreachHistory, ActivityTimeline, AddActivityDialog, NextActionCard, ProspectNotes, ProspectIntelligenceTabs, type Activity } from "@/components/prospects";
+import { ProspectHero, QuickInfo, OutreachHistory, ActivityTimeline, AddActivityDialog, NextActionCard, ProspectNotes, ProspectIntelligenceTabs, CompanySummaryBar, type CompanySummary, type Activity } from "@/components/prospects";
 import type { ActionItem } from "@/products/outreach/domain/action-items";
 import { QualificationCard } from "@/components/prospects/QualificationCard";
 import { useActionStream } from "@/hooks/use-action-stream";
@@ -105,6 +105,8 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   const [personaLoading, setPersonaLoading] = useState(true);
   const [qualification, setQualification] = useState<QualificationPayload | null>(null);
   const [qualificationLoading, setQualificationLoading] = useState(true);
+  const [account, setAccount] = useState<CompanySummary | null>(null);
+  const [accountLoading, setAccountLoading] = useState(true);
   const [notes, setNotes] = useState<ProspectNote[]>([]);
   const [notesLoading, setNotesLoading] = useState(true);
   const [activities, setActivities] = useState<ProspectActivity[]>([]);
@@ -136,6 +138,22 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
       toast.error("Could not load persona fit — refresh to try again");
     } finally {
       setPersonaLoading(false);
+    }
+  }, [prospectId]);
+
+  const fetchAccount = useCallback(async () => {
+    if (!prospectId) return;
+    setAccountLoading(true);
+    try {
+      const response = await fetch(`/api/outreach/prospects/${prospectId}/account`);
+      if (!response.ok) throw new Error("Failed to fetch account");
+      const data = await response.json();
+      setAccount(data.account ?? null);
+    } catch (error) {
+      console.error("Error fetching account:", error);
+      setAccount(null);
+    } finally {
+      setAccountLoading(false);
     }
   }, [prospectId]);
 
@@ -204,16 +222,22 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     void fetchPersona();
   }, [fetchPersona]);
 
+  // Fetch the prospect's company as an account summary (fit / timing / target).
+  useEffect(() => {
+    void fetchAccount();
+  }, [fetchAccount]);
+
   // When dimension research finishes, refresh persona fit + qualification.
   useEffect(() => {
     if (!research.final || !prospectId) return;
     toast.success("Research complete");
     void fetchPersona();
+    void fetchAccount();
     void fetch(`/api/outreach/prospects/${prospectId}/qualify`)
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error("Failed to fetch qualification"))))
       .then(setQualification)
       .catch(() => toast.error("Research completed, but the score could not be refreshed"));
-  }, [research.final, fetchPersona, prospectId]);
+  }, [research.final, fetchPersona, fetchAccount, prospectId]);
   useEffect(() => { if (research.error) toast.error(research.error); }, [research.error]);
 
   // Fetch qualification
@@ -774,6 +798,12 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
         />
       </div>
 
+      <CompanySummaryBar
+        account={account}
+        companyName={prospect.company || undefined}
+        isLoading={accountLoading}
+      />
+
       <ProspectIntelligenceTabs
         prospectId={prospectId}
         prospectName={prospect.name}
@@ -895,22 +925,6 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
                     </p>
                   </div>
                 )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Company context</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1">
-                <p className="text-sm font-medium">{prospect.company || "No company on file"}</p>
-                <p className="text-sm text-muted-foreground">Company research lives on the account.</p>
-                <Link
-                  className="inline-flex items-center gap-1 text-sm text-primary transition-colors hover:underline"
-                  href="/outreach/accounts"
-                >
-                  View accounts <ExternalLink className="size-3" />
-                </Link>
               </CardContent>
             </Card>
 
