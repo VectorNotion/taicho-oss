@@ -19,6 +19,7 @@
       "@/hooks/use-action-stream": ["./packages/ui/hooks/use-action-stream.ts"],
       "@/lib/utils": ["./packages/ui/lib/utils.ts"],
       "@/lib/prospect-scope": ["./apps/outreach/lib/prospect-scope.ts"],
+      "@/lib/score-bands": ["./apps/outreach/lib/score-bands.ts"],
       "@/*": ["./*"]
     }
   },

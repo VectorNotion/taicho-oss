@@ -15,6 +15,7 @@ import { ListRow, ListRows } from "@/components/ListRow";
 import { FilterSelect, ListSurface } from "@/components/ListSurface";
 import { PageHeader } from "@/components/PageHeader";
 import { StatRow } from "@/components/StatRow";
+import { icpBand, timingBand } from "@/lib/score-bands";
 
 type Segment = "all" | "targets" | "qualified" | "warm";
 type Sort = "icp" | "timing" | "qualified" | "prospects" | "name";
@@ -67,8 +68,52 @@ async function fetchAccounts(
   return response.json();
 }
 
-function scoreLabel(value: number | null): string {
-  return value == null ? "not scored" : String(Math.round(value));
+/** Violet ramp, light → dark, one shade per segment. Filled segments deepen as
+ * the score climbs, so a strong score reads as more blocks AND darker blocks. */
+const METER_SHADES = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5"];
+const METER_SEGMENTS = METER_SHADES.length;
+
+/**
+ * A compact segmented score meter for a list row. Five blocks, one per 20
+ * points; a block lights up in an ever-darker shade of the brand violet as the
+ * score climbs, empty blocks stay muted. Filled-vs-empty contrast plus the
+ * shade gradient make strong-vs-weak legible at a glance, and the blocks line
+ * up down the column because the label and value cells are fixed-width. Bands
+ * (excluded / not-researched) fall back to a distinct treatment.
+ */
+function ScoreMeter({
+  label,
+  score,
+  band,
+}: {
+  label: string;
+  score: number | null;
+  band: { label: string; variant: "default" | "secondary" | "outline" | "destructive" };
+}) {
+  const value = score == null ? null : Math.max(0, Math.min(100, Math.round(score)));
+  const excluded = band.variant === "destructive";
+  const filled = value == null ? 0 : Math.ceil((value / 100) * METER_SEGMENTS);
+  return (
+    <span
+      className="flex items-center gap-2"
+      title={`${label}: ${value == null ? "not researched" : value} — ${band.label}`}
+    >
+      <span className="w-[42px] shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+        {label}
+      </span>
+      <span aria-hidden className="flex items-center gap-[3px]">
+        {Array.from({ length: METER_SEGMENTS }).map((_, i) => {
+          const on = i < filled;
+          const tone = excluded ? "bg-destructive" : on ? METER_SHADES[i] : "bg-muted";
+          const dim = excluded && !on ? "bg-destructive/25" : tone;
+          return <span className={`h-3.5 w-2 rounded-[2px] ${dim}`} key={i} />;
+        })}
+      </span>
+      <span className="w-6 shrink-0 text-right text-xs font-semibold tabular-nums text-foreground">
+        {value == null ? "–" : value}
+      </span>
+    </span>
+  );
 }
 
 export default function AccountsPage() {
@@ -246,13 +291,7 @@ export default function AccountsPage() {
             {accounts.map((account) => (
               <ListRow
                 badge={
-                  account.isTarget ? (
-                    <Badge variant="default">Target</Badge>
-                  ) : account.icpScore == null ? (
-                    <Badge variant="secondary">Not scored</Badge>
-                  ) : (
-                    <Badge variant="outline">ICP {Math.round(account.icpScore)}</Badge>
-                  )
+                  account.isTarget ? <Badge variant="default">Target</Badge> : null
                 }
                 href={`/outreach/accounts/${account.id}`}
                 key={account.id}
@@ -262,10 +301,12 @@ export default function AccountsPage() {
                   </span>
                 }
                 meta={[
+                  <span className="flex items-center gap-x-4 gap-y-1" key="scores">
+                    <ScoreMeter band={icpBand(account.icpScore, false)} label="ICP" score={account.icpScore} />
+                    <ScoreMeter band={timingBand(account.timingScore)} label="Timing" score={account.timingScore} />
+                  </span>,
                   `${account.prospectCount} ${account.prospectCount === 1 ? "prospect" : "prospects"}`,
                   `${account.qualifiedCount} qualified`,
-                  `ICP ${scoreLabel(account.icpScore)}`,
-                  `Timing ${scoreLabel(account.timingScore)}`,
                 ]}
                 title={account.name}
               />

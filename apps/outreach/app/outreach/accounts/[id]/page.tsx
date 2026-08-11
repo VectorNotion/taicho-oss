@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScoreRing } from "@/components/genui";
 import { PageHeader } from "@/components/PageHeader";
+import { icpBand, timingBand, type ScoreBand } from "@/lib/score-bands";
 import { AccountProspectsSection } from "@/components/prospects/AccountProspectsSection";
 import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
 import { DimensionResearchSurface } from "@/products/outreach/ui/components/research/DimensionResearchSurface";
@@ -162,24 +163,6 @@ function TimingSignalBlock({ entry }: { entry: AccountTimingSignals }) {
   );
 }
 
-type BandVariant = "default" | "secondary" | "outline" | "destructive";
-
-function icpBand(score: number | null, hardExcluded: boolean): { label: string; variant: BandVariant } {
-  if (hardExcluded) return { label: "Hard excluded", variant: "destructive" };
-  if (score == null) return { label: "Not researched", variant: "secondary" };
-  if (score >= 70) return { label: "Strong fit · target", variant: "default" };
-  if (score >= 50) return { label: "Partial fit", variant: "secondary" };
-  return { label: "Weak fit", variant: "outline" };
-}
-
-function timingBand(score: number | null): { label: string; variant: BandVariant } {
-  if (score == null) return { label: "No signal yet", variant: "secondary" };
-  if (score >= 66) return { label: "Hot", variant: "default" };
-  if (score >= 33) return { label: "Warming", variant: "secondary" };
-  if (score > 0) return { label: "Cool", variant: "outline" };
-  return { label: "Cold", variant: "outline" };
-}
-
 /** A self-explanatory score tile: ring (fill = value / 100), qualitative band, and plain-language meaning. */
 function ScoreTile({
   label,
@@ -189,7 +172,7 @@ function ScoreTile({
 }: {
   label: string;
   score: number | null;
-  band: { label: string; variant: BandVariant };
+  band: ScoreBand;
   explanation: string;
 }) {
   return (
