@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { ReasoningTicker, ScoreRing } from "@/components/genui";
+import { ReasoningTicker, ScoreTile, SegmentMeter } from "@/components/genui";
 import { Target, Calendar, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import { icpBand, personaBand, timingBand } from "@/lib/score-bands";
 import type { LegacyQualification } from "@/products/outreach/domain/types";
 import type {
   DimensionMatch,
@@ -41,22 +42,15 @@ function formatDimensionKey(key: string): string {
 function MatchRow({ match }: { match: DimensionMatch }) {
   const percent = Math.round(match.effectiveMatch * 100);
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-xs">
-        <span className="capitalize text-muted-foreground">
-          {formatDimensionKey(match.dimensionKey)}
-          {match.hardExclusion && (
-            <AlertTriangle className="ml-1 inline h-3 w-3 text-destructive" />
-          )}
-        </span>
-        <span className="font-medium">{percent}</span>
-      </div>
-      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          className={`h-full transition-all duration-500 ${match.hardExclusion ? "bg-destructive" : "bg-chart-2"}`}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+    <div className="flex items-center justify-between gap-3">
+      <span className="min-w-0 flex-1 truncate text-xs capitalize text-muted-foreground">
+        {formatDimensionKey(match.dimensionKey)}
+        {match.hardExclusion && (
+          <AlertTriangle className="ml-1 inline h-3 w-3 text-destructive" />
+        )}
+      </span>
+      <SegmentMeter excluded={match.hardExclusion} fraction={match.effectiveMatch} />
+      <span className="w-6 text-right text-xs font-semibold tabular-nums">{percent}</span>
     </div>
   );
 }
@@ -95,21 +89,14 @@ function DimensionBreakdown({ qualification }: { qualification: ProspectQualific
             <div className="space-y-2">
               <p className="text-xs font-medium">Timing signals</p>
               {qualification.timingBreakdown.map((entry) => (
-                <div key={entry.dimensionKey} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="capitalize text-muted-foreground">
-                      {formatDimensionKey(entry.dimensionKey)}
-                    </span>
-                    <span className="font-medium">
-                      {entry.signalCount} signal{entry.signalCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full bg-chart-1 transition-all duration-500"
-                      style={{ width: `${Math.round(entry.dimensionValue * 100)}%` }}
-                    />
-                  </div>
+                <div key={entry.dimensionKey} className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 flex-1 truncate text-xs capitalize text-muted-foreground">
+                    {formatDimensionKey(entry.dimensionKey)}
+                  </span>
+                  <SegmentMeter fraction={entry.dimensionValue} />
+                  <span className="w-16 text-right text-xs font-medium tabular-nums text-muted-foreground">
+                    {entry.signalCount} signal{entry.signalCount === 1 ? "" : "s"}
+                  </span>
                 </div>
               ))}
             </div>
@@ -205,6 +192,8 @@ export function QualificationCard({
   }
 
   const status = STATUS_CONFIG[qualification.status];
+  const icpExcluded = qualification.icpMatches.some((match) => match.hardExclusion);
+  const personaExcluded = qualification.personaMatches.some((match) => match.hardExclusion);
 
   return (
     <Card>
@@ -216,12 +205,26 @@ export function QualificationCard({
           {status.label}
         </Badge>
 
-        <div className="grid grid-cols-3 gap-2">
-          <ScoreRing score={Math.round(qualification.icpScore)} label="ICP" />
-          <ScoreRing score={Math.round(qualification.personaScore)} label="Persona" />
-          <ScoreRing score={Math.round(qualification.timingScore)} label="Timing" />
+        <div className="space-y-3">
+          <ScoreTile
+            band={icpBand(qualification.icpScore, icpExcluded)}
+            explanation="How well the company matches your ideal-customer profile. Fit gates."
+            label="ICP fit"
+            score={qualification.icpScore}
+          />
+          <ScoreTile
+            band={personaBand(qualification.personaScore, personaExcluded)}
+            explanation="How well this person matches your target persona."
+            label="Persona fit"
+            score={qualification.personaScore}
+          />
+          <ScoreTile
+            band={timingBand(qualification.timingScore)}
+            explanation="How active the company's buying-window signals are right now. Timing ranks."
+            label="Timing"
+            score={qualification.timingScore}
+          />
         </div>
-        <p className="text-center text-xs text-muted-foreground">Fit gates. Timing ranks.</p>
 
         {qualification.reviewReason && (
           <p className="rounded-md border border-chart-1/40 bg-muted/20 p-2 text-xs text-muted-foreground">

@@ -20,6 +20,15 @@ export function icpBand(score: number | null, hardExcluded: boolean): ScoreBand 
   return { label: "Weak fit", variant: "outline" };
 }
 
+/** Persona (person-fit) band — same fit thresholds as ICP, worded for a person. */
+export function personaBand(score: number | null, hardExcluded: boolean): ScoreBand {
+  if (hardExcluded) return { label: "Excluded", variant: "destructive" };
+  if (score == null) return { label: "Not researched", variant: "secondary" };
+  if (score >= 70) return { label: "Strong fit", variant: "default" };
+  if (score >= 50) return { label: "Partial fit", variant: "secondary" };
+  return { label: "Weak fit", variant: "outline" };
+}
+
 export function timingBand(score: number | null): ScoreBand {
   if (score == null) return { label: "No signal yet", variant: "secondary" };
   if (score >= 66) return { label: "Hot", variant: "default" };

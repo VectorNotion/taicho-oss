@@ -8,9 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScoreRing } from "@/components/genui";
+import { ScoreTile } from "@/components/genui";
 import { PageHeader } from "@/components/PageHeader";
-import { icpBand, timingBand, type ScoreBand } from "@/lib/score-bands";
+import { icpBand, timingBand } from "@/lib/score-bands";
 import { AccountProspectsSection } from "@/components/prospects/AccountProspectsSection";
 import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
 import { DimensionResearchSurface } from "@/products/outreach/ui/components/research/DimensionResearchSurface";
@@ -159,33 +159,6 @@ function TimingSignalBlock({ entry }: { entry: AccountTimingSignals }) {
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-/** A self-explanatory score tile: ring (fill = value / 100), qualitative band, and plain-language meaning. */
-function ScoreTile({
-  label,
-  score,
-  band,
-  explanation,
-}: {
-  label: string;
-  score: number | null;
-  band: ScoreBand;
-  explanation: string;
-}) {
-  return (
-    <div className="flex items-start gap-4 rounded-xl border bg-card p-4">
-      <ScoreRing label="" score={score == null ? null : Math.round(score)} />
-      <div className="min-w-0 space-y-1.5 pt-0.5">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-sm font-medium">{label}</span>
-          <span className="text-xs text-muted-foreground">out of 100</span>
-          <Badge variant={band.variant}>{band.label}</Badge>
-        </div>
-        <p className="text-xs leading-5 text-muted-foreground">{explanation}</p>
-      </div>
     </div>
   );
 }
