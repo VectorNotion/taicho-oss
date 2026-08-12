@@ -177,7 +177,7 @@ export function DraftsWorkspace({
               </p>
               {messages.length === 0 ? (
                 <Button asChild className="mt-5">
-                  <Link href="/outreach/pipeline">Choose a person</Link>
+                  <Link href="/outreach/prospects">Choose a person</Link>
                 </Button>
               ) : filtersActive ? (
                 <Button
@@ -279,7 +279,7 @@ export function DraftsWorkspace({
                       : OUTREACH_STATUS_CONFIG[message.status].label}
                   </Badge>
                 }
-                href={`/outreach/pipeline/${prospect.id}`}
+                href={`/outreach/prospects/${prospect.id}`}
                 key={message.id}
                 leading={
                   <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">

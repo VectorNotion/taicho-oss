@@ -56,6 +56,7 @@ function makeDeps(config: {
   const rec: Rec = { researched: [], savedScore: null, progress: [] };
   const store = [...(config.existing ?? [])];
   const deps: Partial<AccountResearchDeps> = {
+    cascade: false,
     getAccountById: async () => ACCOUNT,
     getDimensionDefinitions: async () => DIMS,
     getObservations: async () => store,
@@ -120,4 +121,25 @@ test('refresh run only re-researches lapsed account dimensions', async () => {
   await runAccountResearch('acct-1', deps);
   // icp_b never observed + hiring lapsed → only those re-researched.
   assert.deepEqual(rec.researched, [['icp_b', 'hiring_activity']]);
+});
+
+test('cascade researches only unresearched prospects (background, non-recursive)', async () => {
+  const { deps } = makeDeps({ matchScores: { icp_a: { score: 1 }, icp_b: { score: 1 } } });
+  const started: Array<{ id: string; cascade: boolean }> = [];
+  const markers: string[] = [];
+  const researched = new Set(['p-done']);
+  await runAccountResearch('acct-1', {
+    ...deps,
+    cascade: true,
+    getAccountProspects: async () => ['p-new', 'p-done', 'p-new2'],
+    prospectHasResearch: async (id) => researched.has(id),
+    researchProspect: (id, opts) => { started.push({ id, cascade: opts.cascade }); },
+    onProspect: (p) => markers.push(p.prospectId),
+  });
+  assert.deepEqual(
+    started,
+    [{ id: 'p-new', cascade: false }, { id: 'p-new2', cascade: false }],
+    'researches only unresearched prospects, cascade off (loop-safe)',
+  );
+  assert.deepEqual(markers, ['p-new', 'p-new2'], 'emits one marker per queued prospect');
 });

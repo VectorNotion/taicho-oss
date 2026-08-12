@@ -10,9 +10,11 @@ import { randomUUID } from 'node:crypto';
 import { createLogger, observeOperation } from '@content-automation/observability';
 import { emitProductEventFromContext } from '@content-automation/platform/events/emit';
 import { getProspectById as getProspectByIdDefault } from '../data/prospect-repository';
+import { getAccountForProspect as getAccountForProspectDefault } from '../data/account-repository';
 import { getDimensionDefinitions as getDimensionDefinitionsDefault } from '../data/dimension-repository';
 import {
   getObservations as getObservationsDefault,
+  hasAnyResearchRun as hasAnyResearchRunDefault,
   saveMatches as saveMatchesDefault,
   saveProspectScore as saveProspectScoreDefault,
   upsertObservation as upsertObservationDefault,
@@ -53,6 +55,19 @@ export interface ProspectResearchDeps {
   now: () => Date;
   thresholds: QualificationThresholds;
   onDimension?: (part: DimensionProgress) => void;
+  /**
+   * When not false, researching a prospect also researches its account (if the
+   * account has never been researched), streaming the account's lanes as
+   * `scope: 'account'`. The cascaded account research runs with `cascade: false`
+   * so it does not bounce back to sibling prospects.
+   */
+  cascade?: boolean;
+  getAccountForProspect: (prospectId: string) => Promise<{ id: string; name: string } | null>;
+  accountHasResearch: (accountId: string) => Promise<boolean>;
+  researchAccount: (
+    accountId: string,
+    opts: { cascade: boolean; onDimension?: (part: DimensionProgress) => void },
+  ) => Promise<unknown>;
 }
 
 export interface ProspectResearchOutcome {
@@ -71,6 +86,13 @@ const defaultDeps: ProspectResearchDeps = {
   saveMatches: saveMatchesDefault,
   saveProspectScore: saveProspectScoreDefault,
   runQualifyProspect: runQualifyProspectDefault,
+  getAccountForProspect: getAccountForProspectDefault,
+  accountHasResearch: hasAnyResearchRunDefault,
+  // Lazy import breaks the prospect-research <-> account-research cycle.
+  researchAccount: async (accountId, opts) => {
+    const { runAccountResearch } = await import('./account-research');
+    return runAccountResearch(accountId, opts);
+  },
   now: () => new Date(),
   thresholds: DEFAULT_THRESHOLDS,
 };
@@ -148,6 +170,25 @@ export async function runProspectResearch(
     }
 
     log.info('outreach.prospect_research.completed', { prospect_id: prospectId, persona_score: personaScore, hard_excluded: hardExcluded });
+
+    // Cascade: also research the prospect's account if it has never been
+    // researched, streaming the account's lanes into this same stream as
+    // `scope: 'account'`. Failures here never fail the prospect research.
+    if (d.cascade !== false) {
+      try {
+        const account = await d.getAccountForProspect(prospectId);
+        if (account && !(await d.accountHasResearch(account.id))) {
+          await d.researchAccount(account.id, {
+            cascade: false,
+            onDimension: (part) =>
+              d.onDimension?.({ ...part, scope: 'account', entityName: account.name }),
+          });
+        }
+      } catch (error) {
+        log.error('outreach.research.account_cascade_failed', error, { prospect_id: prospectId });
+      }
+    }
+
     return { personaScore, hardExcluded, matches };
   });
 }

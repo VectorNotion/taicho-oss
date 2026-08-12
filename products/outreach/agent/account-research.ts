@@ -8,7 +8,10 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createLogger, observeOperation } from '@content-automation/observability';
-import { getAccountById as getAccountByIdDefault } from '../data/account-repository';
+import {
+  getAccountById as getAccountByIdDefault,
+  getAccountProspects as getAccountProspectsDefault,
+} from '../data/account-repository';
 import { getDimensionDefinitions as getDimensionDefinitionsDefault } from '../data/dimension-repository';
 import {
   getObservations as getObservationsDefault,
@@ -58,6 +61,18 @@ export interface AccountResearchDeps {
   now: () => Date;
   thresholds: QualificationThresholds;
   onDimension?: (part: DimensionProgress) => void;
+  /**
+   * When not false, researching an account also researches each of its prospects
+   * that has never been researched — in the background (an account can have many),
+   * emitting a compact `onProspect` marker so the account page can show it. The
+   * cascaded prospect research runs with `cascade: false` so it does not bounce
+   * back to the account.
+   */
+  cascade?: boolean;
+  getAccountProspects: (accountId: string) => Promise<string[]>;
+  prospectHasResearch: (prospectId: string) => Promise<boolean>;
+  researchProspect: (prospectId: string, opts: { cascade: boolean }) => void;
+  onProspect?: (part: { prospectId: string; phase: 'researching' }) => void;
 }
 
 export interface AccountResearchResult {
@@ -79,6 +94,18 @@ const defaultDeps: AccountResearchDeps = {
   recordResearchRun: recordResearchRunDefault,
   hasAnyResearchRun: hasAnyResearchRunDefault,
   saveAccountScore: saveAccountScoreDefault,
+  getAccountProspects: getAccountProspectsDefault,
+  // "Researched" for a prospect = it has at least one observation.
+  prospectHasResearch: async (prospectId) =>
+    (await getObservationsDefault({ kind: 'prospect', id: prospectId })).length > 0,
+  // Fire-and-forget; lazy import breaks the account-research <-> prospect-research cycle.
+  researchProspect: (prospectId, opts) => {
+    void import('./prospect-research').then(({ runProspectResearch }) =>
+      runProspectResearch(prospectId, { cascade: opts.cascade }).catch((error) =>
+        log.error('outreach.research.prospect_cascade_background_failed', error, { prospect_id: prospectId }),
+      ),
+    );
+  },
   now: () => new Date(),
   thresholds: DEFAULT_THRESHOLDS,
 };
@@ -172,6 +199,22 @@ export async function runAccountResearch(
     log.info('outreach.account_research.completed', {
       account_id: accountId, icp_score: icpScore, timing_score: timing.score, hard_excluded: hardExcluded,
     });
+
+    // Cascade: research each prospect on this account that has never been
+    // researched, in the background (an account can have many). A compact
+    // `onProspect` marker lets the account page show it. Never fails the account.
+    if (d.cascade !== false) {
+      try {
+        const prospectIds = await d.getAccountProspects(accountId);
+        for (const pid of prospectIds) {
+          if (await d.prospectHasResearch(pid)) continue;
+          d.onProspect?.({ prospectId: pid, phase: 'researching' });
+          d.researchProspect(pid, { cascade: false });
+        }
+      } catch (error) {
+        log.error('outreach.research.prospect_cascade_failed', error, { account_id: accountId });
+      }
+    }
 
     return { icpScore, timingScore: timing.score, hardExcluded, icpMatches, timingBreakdown: timing.breakdown };
   });

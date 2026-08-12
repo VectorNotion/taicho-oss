@@ -817,6 +817,8 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
         account={account}
         companyName={prospect.company || undefined}
         isLoading={accountLoading}
+        isResearching={research.isStreaming}
+        researchDimensions={research.accountDimensions}
       />
 
       <ProspectIntelligenceTabs

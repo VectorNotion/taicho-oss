@@ -18,6 +18,7 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -446,9 +447,12 @@ export default function PipelinePage() {
                   href={`/outreach/prospects/${prospect.id}`}
                   key={prospect.id}
                   leading={
-                    <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-                      <User className="size-4" />
-                    </span>
+                    <Avatar className="size-10 shrink-0">
+                      <AvatarImage alt={prospect.name} src={prospect.photoUrl} />
+                      <AvatarFallback className="bg-primary/10 text-primary">
+                        <User className="size-4" />
+                      </AvatarFallback>
+                    </Avatar>
                   }
                   meta={[
                     personContext,

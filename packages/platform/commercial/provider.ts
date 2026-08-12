@@ -110,7 +110,9 @@ export class UnmeteredCommercialProvider implements CommercialProvider {
   }
 
   async estimateAndReserve(input: { initiatingUserId: string }) {
-    return { id: `unmetered-${crypto.randomUUID()}`, wallet_user_id: input.initiatingUserId };
+    // Must be a bare UUID: it lands in the uuid `credit_reservation_id` column on
+    // jobs. settle/release are no-ops here and nothing reads the id, so no marker.
+    return { id: crypto.randomUUID(), wallet_user_id: input.initiatingUserId };
   }
 
   async settleReservation() {

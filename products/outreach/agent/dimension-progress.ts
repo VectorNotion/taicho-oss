@@ -16,10 +16,24 @@ export interface DimensionProgress {
   evidence?: string[];
   matchScore?: number;
   classification?: string;
+  /**
+   * Which entity this lane belongs to. Defaults to the primary entity of the
+   * operation ('person' on the prospect stream, 'account' on the account stream).
+   * The cross-entity cascade tags the *other* side so one stream can carry both:
+   * researching a prospect streams its account's lanes as 'account', and vice
+   * versa (streamed compactly). The UI groups by scope.
+   */
+  scope?: 'person' | 'account';
+  /** Name of the entity this lane belongs to (e.g. the account name), for grouping headers. */
+  entityName?: string;
 }
 
 /** Adapt dimension progress into a `data-dimension-progress` stream part. */
 export function streamingDimensionProgress(emit: StreamEmit): (part: DimensionProgress) => void {
   return (part) =>
-    emit({ type: 'data-dimension-progress', id: `${part.dimensionKey}-${part.phase}`, data: part });
+    emit({
+      type: 'data-dimension-progress',
+      id: `${part.scope ?? 'person'}-${part.dimensionKey}-${part.phase}`,
+      data: part,
+    });
 }

@@ -50,6 +50,7 @@ function makeDeps(config: { matchScores?: Record<string, { score: number; hardEx
   const rec: Rec = { researched: [], savedScore: null, qualified: [] };
   const store: ObservationRecord[] = [];
   const deps: Partial<ProspectResearchDeps> = {
+    cascade: false,
     getProspectById: async () => PROSPECT,
     getDimensionDefinitions: async () => DIMS,
     getObservations: async () => store,
@@ -98,4 +99,30 @@ test('hard exclusion on a persona dim propagates to the prospect score', async (
 test('missing prospect throws', async () => {
   const { deps } = makeDeps({});
   await assert.rejects(() => runProspectResearch('missing', { ...deps, getProspectById: async () => null }), /Prospect not found/);
+});
+
+test('cascade researches the account (once, non-recursively) when it is unresearched', async () => {
+  const { deps } = makeDeps({});
+  const calls: Array<{ id: string; cascade: boolean }> = [];
+  await runProspectResearch('p1', {
+    ...deps,
+    cascade: true,
+    getAccountForProspect: async () => ({ id: 'acct-1', name: 'Acme' }),
+    accountHasResearch: async () => false,
+    researchAccount: async (id, opts) => { calls.push({ id, cascade: opts.cascade }); },
+  });
+  assert.deepEqual(calls, [{ id: 'acct-1', cascade: false }], 'researches the account with cascade off (loop-safe)');
+});
+
+test('cascade skips the account when it has already been researched', async () => {
+  const { deps } = makeDeps({});
+  let called = false;
+  await runProspectResearch('p1', {
+    ...deps,
+    cascade: true,
+    getAccountForProspect: async () => ({ id: 'acct-1', name: 'Acme' }),
+    accountHasResearch: async () => true,
+    researchAccount: async () => { called = true; },
+  });
+  assert.equal(called, false, 'no redundant account research');
 });
