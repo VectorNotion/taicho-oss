@@ -11,7 +11,11 @@ export async function deleteReport(reportId: string, tenantId = process.env.CMS_
   return withRemoteMcp({
     url: CMS_MCP_URL,
     name: "vector-notion-cms-client",
-    headers: { "X-API-Key": CMS_MCP_API_KEY, Accept: "application/json, text/event-stream" },
+    headers: {
+      "X-API-Key": CMS_MCP_API_KEY,
+      "X-CMS-Tenant-ID": tenantId,
+      Accept: "application/json, text/event-stream",
+    },
   }, async (client) => {
     const tools = await client.listTools();
     for (const required of ["cms_set_tenant", "cms_delete_report"]) {

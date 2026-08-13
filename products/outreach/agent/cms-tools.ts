@@ -30,6 +30,7 @@ async function callMcpTool(tenantId: string, toolName: string, args: Record<stri
       name: 'vector-notion-cms-client',
       headers: {
         'X-API-Key': CMS_MCP_API_KEY,
+        'X-CMS-Tenant-ID': tenantId,
         Accept: 'application/json, text/event-stream',
       },
     }, async (client) => {
