@@ -108,7 +108,26 @@ export async function actionStreamResponse(opts: {
   commercial?: JobCommercialContext;
   estimatedCredits?: number;
 }): Promise<Response> {
-  const jobId = await createJob(opts.action, opts.entityId, opts.entityType, opts.commercial);
+  let jobId: string;
+  try {
+    jobId = await createJob(opts.action, opts.entityId, opts.entityType, opts.commercial);
+  } catch (error) {
+    // Reservation happens before durable job creation. If persistence fails,
+    // no provider work can have occurred, so release the hold before returning
+    // the infrastructure error to the route.
+    if (opts.commercial) {
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        await releaseReservation(opts.commercial.creditReservationId, message);
+      } catch (releaseError) {
+        log.error('job.creation_reservation_release_failed', releaseError, {
+          action: opts.action,
+          entity_id: opts.entityId,
+        });
+      }
+    }
+    throw error;
+  }
   const parent = currentExecutionContext();
   const organizationId = opts.commercial?.organizationId ?? parent?.organizationId;
   if (!organizationId) throw new Error('A job organization is required.');

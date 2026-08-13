@@ -91,6 +91,7 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0020_add_action_items",
       "0021_action_items_followup_unique",
       "0022_grant_renamed_outreach_tables",
+      "0023_restore_jobs_runtime_grant",
     ],
   );
 });
@@ -125,6 +126,19 @@ test("runtime grants for post-baseline tables are migration-managed", async () =
   assert.match(migration, /job_workspace_member_ids/);
   assert.doesNotMatch(migration, /DISABLE\s+ROW\s+LEVEL\s+SECURITY/i);
   assert.doesNotMatch(migration, /BYPASSRLS|SUPERUSER/i);
+});
+
+test("the tenant-scoped jobs runtime can manage durable job lifecycle rows", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0023_restore_jobs_runtime_grant.sql",
+    "utf8",
+  );
+  assert.match(migration, /GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "jobs" TO jobs_app/i);
+  assert.doesNotMatch(migration, /DISABLE\s+ROW\s+LEVEL\s+SECURITY/i);
+  assert.doesNotMatch(migration, /BYPASSRLS|SUPERUSER/i);
+
+  const migrator = await readFile("packages/database/migrate.ts", "utf8");
+  assert.match(migrator, /\["public\.jobs", \["SELECT", "INSERT", "UPDATE", "DELETE"\]\]/);
 });
 
 test("capability control-plane grants are migration-managed and column-restricted", async () => {
