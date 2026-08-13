@@ -59,7 +59,6 @@ export async function POST(
             prospectId: id,
             medium,
             targetContent: body.targetContent,
-            tenantId: process.env.CMS_TENANT_ID,
           }, {
             onProgress: writeProgress,
             onPartial: (partial) => writer.write({

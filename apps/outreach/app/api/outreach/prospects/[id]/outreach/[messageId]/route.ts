@@ -6,7 +6,6 @@ import {
   updateOutreachMessage,
   deleteOutreachMessage,
 } from '@/products/outreach/data/prospect-repository';
-import { deleteReport } from '@/products/outreach/agent/payload-cms';
 
 export const maxDuration = 600;
 
@@ -89,23 +88,11 @@ export async function DELETE(
    try {
     const { id, messageId } = await params;
 
-    // Get message first to check for reportId
     const message = await getOutreachById(messageId);
     if (!message || message.prospectId !== id) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 });
     }
 
-    // If this is an inmail with a report, delete the CMS report first
-    if (message.reportId) {
-      try {
-        await deleteReport(message.reportId);
-      } catch (error) {
-        console.error('Error deleting CMS report:', error);
-        // Continue with Neo4j deletion even if CMS delete fails
-      }
-    }
-
-    // Delete from Neo4j
     const deleted = await deleteOutreachMessage(messageId);
     if (!deleted) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 });

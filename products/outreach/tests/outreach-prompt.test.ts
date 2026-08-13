@@ -69,7 +69,7 @@ const priorMessages: OutreachMessage[] = [{
 }];
 
 test('outreach prompt grounds generation in the full prospect history without leaking markup', () => {
-  const prompt = buildOutreachPrompt(prospect, research, 'email', undefined, undefined, {
+  const prompt = buildOutreachPrompt(prospect, research, 'email', undefined, {
     notes,
     activities,
     priorMessages,

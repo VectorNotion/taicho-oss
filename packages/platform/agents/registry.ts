@@ -123,7 +123,6 @@ export const actionHandlers: Record<ExecutableAction, ActionHandler> = {
       prospectId: payload.prospectId as string,
       medium: payload.medium as OutreachMedium,
       targetContent: payload.targetContent as string | undefined,
-      tenantId: process.env.CMS_TENANT_ID,
     });
     if (!result.success || !result.message) {
       throw new Error(result.error ?? 'Outreach generation failed.');

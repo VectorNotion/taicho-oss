@@ -76,13 +76,10 @@ export async function POST(
     // If generate flag is set, generate outreach using Mastra agent
     if (generate) {
       const billing = await reserveVariableCost(request, { action: 'generate_outreach', credits: 30, capability: 'outreach' }); reservationId = billing.reservationId;
-      const tenantId = process.env.CMS_TENANT_ID;
-
       const result = await generateOutreach({
         prospectId: id,
         medium: medium as OutreachMedium,
         targetContent,
-        tenantId,
         signal: AbortSignal.any([request.signal, AbortSignal.timeout(OUTREACH_TIMEOUT_MS)]),
       });
 

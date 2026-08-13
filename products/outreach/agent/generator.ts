@@ -49,7 +49,6 @@ export interface GenerateOutreachInput {
   prospectId: string;
   medium: OutreachMedium;
   targetContent?: string; // For content_comment
-  tenantId?: string; // CMS tenant ID for report creation
   signal?: AbortSignal;
 }
 
@@ -171,7 +170,6 @@ export function buildOutreachPrompt(
   research: ProspectResearch | null,
   medium: OutreachMedium,
   targetContent?: string,
-  tenantId?: string,
   context: OutreachPromptContext = {},
 ): string {
   const firstName = prospect.name.trim().split(/\s+/)[0] || prospect.name;
@@ -207,12 +205,6 @@ ${research.talkingPoints.map((tp) => `- ${tp}`).join('\n')}
 
 **FIRST:** Use \`list-projects\` to find one verified proof point relevant to their problem.
 
-${tenantId ? `CMS Tenant ID: ${tenantId}
-1. Validate the CMS tenant using cms-set-tenant
-2. Pass tenantId to every cms-create-report and cms-get-report call
-3. Create a useful report page using cms-create-report
-4. Write the InMail` : 'No CMS tenant - skip report creation, just write the message'}
-
 **Your InMail must follow this order:**
 0. Start with "Hi ${firstName}," on its own line, followed by a blank line
 1. Their industry or operating pain and its consequence
@@ -234,8 +226,6 @@ Write each numbered move as its own short paragraph of one or two sentences. Sep
 ## Task: Write a Traditional InMail
 
 A lighter touch using the same customer-first structure.
-
-${tenantId ? `CMS Tenant ID: ${tenantId} (optional - create a report if it adds value)` : ''}
 
 **Your message should:**
 - Start with "Hi ${firstName}," on its own line, followed by a blank line
@@ -339,7 +329,7 @@ async function saveGeneratedOutreach(
 export async function generateOutreach(
   input: GenerateOutreachInput
 ): Promise<GenerateOutreachResult> {
-  const { prospectId, medium, targetContent, tenantId, signal } = input;
+  const { prospectId, medium, targetContent, signal } = input;
 
   log.info('outreach.generation.started', { prospect_id: prospectId, medium });
 
@@ -367,7 +357,7 @@ export async function generateOutreach(
   ]);
 
   // Build prompt with storytelling approach
-  const prompt = buildOutreachPrompt(prospect, research, medium, targetContent, tenantId, {
+  const prompt = buildOutreachPrompt(prospect, research, medium, targetContent, {
     notes,
     activities,
     priorMessages,
@@ -422,7 +412,7 @@ export async function streamOutreach(
   input: GenerateOutreachInput,
   callbacks: OutreachStreamCallbacks = {},
 ): Promise<OutreachMessage> {
-  const { prospectId, medium, targetContent, tenantId } = input;
+  const { prospectId, medium, targetContent } = input;
 
   log.info('outreach.generation_stream.started', { prospect_id: prospectId, medium });
   callbacks.onProgress?.({
@@ -449,7 +439,7 @@ export async function streamOutreach(
     getProspectOutreach(prospectId),
     intelligencePromise,
   ]);
-  const prompt = buildOutreachPrompt(prospect, research, medium, targetContent, tenantId, {
+  const prompt = buildOutreachPrompt(prospect, research, medium, targetContent, {
     notes,
     activities,
     priorMessages,

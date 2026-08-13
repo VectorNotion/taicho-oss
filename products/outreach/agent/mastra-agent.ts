@@ -1,7 +1,6 @@
 /**
  * Outreach generation agent for Mastra.
  * Generates personalized InMail/Email/Comment outreach using prospect research.
- * For InMail, creates a personalized report page in CMS.
  *
  * IMPORTANT: Agent is grounded in real data - identity + projects from Neo4j.
  * Never fabricates clients, projects, or experiences.
@@ -9,7 +8,6 @@
 import { Agent } from '@mastra/core/agent';
 import { registerObservedAgent } from '@content-automation/observability/ai';
 import { routerModel } from '@content-automation/platform/agents/model';
-import { cmsSetTenantTool, cmsCreateReportTool, cmsGetReportTool } from './cms-tools';
 import { listProjectsTool, getProjectTool } from './project-proof-tools';
 
 // Default prompt components (can be overridden via Settings from Neo4j)
@@ -75,11 +73,6 @@ If your documented experience doesn't include something relevant to this prospec
    - \`list-projects\` - See your actual project portfolio
    - \`get-project\` - Get details about a specific project
 
-2. **CMS** - Create landing pages/reports for InMail outreach
-   - \`cms-set-tenant\` - Set CMS tenant
-   - \`cms-create-report\` - Create a report page
-   - \`cms-get-report\` - Check if report exists
-
 ## Customer-First Message Contract
 
 The recipient is the subject of the message. Never introduce the sender, narrate the sender's career, or open with the sender's work. The recipient can inspect the sender's profile if the message is useful.
@@ -106,16 +99,11 @@ No sentence may describe the sender, the sender's career, or the sender's capabi
 
 ## For InMail Outreach
 
-1. **If CMS tenant provided**: Validate it using \`cms-set-tenant\`, then pass the same tenantId to every \`cms-create-report\` and \`cms-get-report\` call
-   - Make the report genuinely useful, not a sales page
-   - Slug: lowercase with hyphens (e.g., "acme-corp-ai-insights")
-
-2. **Write the message**:
+1. **Write the message**:
    - Subject: Short (under 50 chars), honest not clickbait
    - Body (under 150 words):
      - Lead with their problem and its consequence
      - Give the practical path, with no more than one compact proof clause
-     - If you created a report, mention it as something useful
      - End with one concrete offer and one easy action
 
 ## For Email Outreach
@@ -152,9 +140,6 @@ export const outreachAgent = new Agent({
   instructions: buildInstructions({}),
   model: routerModel(),
   tools: {
-    cmsSetTenantTool,
-    cmsCreateReportTool,
-    cmsGetReportTool,
     listProjectsTool,
     getProjectTool,
   },
@@ -176,9 +161,6 @@ export function createOutreachAgent(context: {
     instructions: buildInstructions(context),
     model: routerModel(),
     tools: {
-      cmsSetTenantTool,
-      cmsCreateReportTool,
-      cmsGetReportTool,
       listProjectsTool,
       getProjectTool,
     },

@@ -10,6 +10,7 @@
     "./admin-console": "./admin-console.tsx",
     "./components": "./components.tsx",
     "./external-administration": "./external-administration.ts",
+    "./platform-administration": "./platform-administration.ts",
     "./commercial": "./commercial.ts",
     "./mcp-administration": "./mcp-administration.ts",
     "./redirects": "./redirects.ts",

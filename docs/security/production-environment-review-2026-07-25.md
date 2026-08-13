@@ -95,7 +95,7 @@ Optional unless intentionally enabled:
 
 - `AUTH_OAUTH_PROVIDERS` and `NEXT_PUBLIC_AUTH_PROVIDERS` (both must be valid,
   matching JSON arrays when present).
-- The `CMS_MCP_URL`, `CMS_MCP_API_KEY`, and `CMS_TENANT_ID` bundle (all three
+- The `CMS_MCP_URL` and `CMS_MCP_API_KEY` bundle (both
   become required together).
 - `MCP_OUTBOUND_PRIVATE_HOSTS` (every exception must also be in the ordinary
   outbound allowlist).

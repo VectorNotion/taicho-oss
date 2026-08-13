@@ -76,7 +76,6 @@ payment session.
    RAZORPAY_SUBSCRIPTION_TOTAL_COUNT=120
    PAYLOAD_BILLING_CATALOG_URL=https://cms.example.com/api/billing/catalog
    PAYLOAD_BILLING_API_KEY=...
-   PAYLOAD_BILLING_TENANT=taicho
    ```
 
 8. Run the durable commerce worker:
