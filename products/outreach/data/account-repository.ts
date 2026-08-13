@@ -184,16 +184,16 @@ export interface AccountListFilters {
 function orderByClause(sort: AccountSort | undefined): string {
   switch (sort) {
     case "timing":
-      return "coalesce(timingScore, -1) DESC, coalesce(icpScore, -1) DESC, a.name";
+      return "coalesce(timingScore, -1) DESC, coalesce(icpScore, -1) DESC, a.name, a.id";
     case "qualified":
-      return "qualifiedCount DESC, coalesce(icpScore, -1) DESC, a.name";
+      return "qualifiedCount DESC, coalesce(icpScore, -1) DESC, a.name, a.id";
     case "prospects":
-      return "prospectCount DESC, a.name";
+      return "prospectCount DESC, a.name, a.id";
     case "name":
-      return "a.name";
+      return "a.name, a.id";
     case "icp":
     default:
-      return "coalesce(icpScore, -1) DESC, coalesce(timingScore, -1) DESC, a.name";
+      return "coalesce(icpScore, -1) DESC, coalesce(timingScore, -1) DESC, a.name, a.id";
   }
 }
 
@@ -292,6 +292,64 @@ export async function getAccountsPage(
       total: toNumber(totalResult.records[0]?.get("total")) ?? 0,
       page,
       pageSize,
+    };
+  } finally {
+    await session.close();
+  }
+}
+
+export interface AccountNavigationItem {
+  id: string;
+  name: string;
+}
+
+export interface AccountNavigation {
+  previous: AccountNavigationItem | null;
+  next: AccountNavigationItem | null;
+  position: number;
+  total: number;
+}
+
+/** Return this account's neighbours in the Accounts list's default ICP-first order. */
+export async function getAccountNavigation(id: string): Promise<AccountNavigation | null> {
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `
+      ${ACCOUNT_ROLLUP}
+      WITH a, prospectCount, qualifiedCount, icpScore, timingScore
+      ORDER BY ${orderByClause("icp")}
+      WITH collect(a) AS ordered, collect(a.id) AS orderedIds
+      WITH ordered,
+           [index IN range(0, size(ordered) - 1) WHERE orderedIds[index] = $id][0] AS currentIndex
+      RETURN
+        CASE WHEN currentIndex > 0 THEN ordered[currentIndex - 1] ELSE null END AS previous,
+        CASE WHEN currentIndex < size(ordered) - 1 THEN ordered[currentIndex + 1] ELSE null END AS next,
+        currentIndex + 1 AS position,
+        size(ordered) AS total
+      `,
+      { id },
+    );
+
+    const record = result.records[0];
+    const position = toNumber(record?.get("position"));
+    if (!record || position == null || position < 1) return null;
+
+    const mapItem = (
+      value: { properties: Record<string, unknown> } | null,
+    ): AccountNavigationItem | null => {
+      if (!value) return null;
+      return {
+        id: value.properties.id as string,
+        name: value.properties.name as string,
+      };
+    };
+
+    return {
+      previous: mapItem(record.get("previous")),
+      next: mapItem(record.get("next")),
+      position,
+      total: toNumber(record.get("total")) ?? 0,
     };
   } finally {
     await session.close();

@@ -13,11 +13,14 @@ import {
   getAccountById,
   getAccountCounts,
   getAccountDetail,
+  getAccountForProspect,
+  getAccountNavigation,
   getAccountProspects,
   getAccountsPage,
   normalizeCompanyName,
   resolveAccountForProspect,
 } from '../data/account-repository';
+import { runProspectResearch } from '../agent/prospect-research';
 import {
   saveAccountScore,
   saveMatches,
@@ -77,6 +80,43 @@ test('resolveAccountForProspect returns null without a company', async () => {
   const prospect = await createProspect({ name: 'No Company', source: 'manual' });
   assert.equal(await resolveAccountForProspect(prospect), null);
   assert.equal(await resolveAccountForProspect({ id: 'x', company: '   ' }), null);
+});
+
+test('prospect research creates a missing account edge before the company stage', async () => {
+  const prospect = await createProspect({
+    name: 'Imported Person',
+    company: 'Imported Company',
+    source: 'manual',
+  });
+  assert.equal(await getAccountForProspect(prospect.id), null, 'pre-existing import has no account edge');
+
+  let researchedAccountId: string | null = null;
+  const result = await runProspectResearch(prospect.id, {
+    getDimensionDefinitions: async () => [],
+    getObservations: async () => [],
+    upsertObservation: async (_entity, observation) => ({ id: 'unused', ...observation }),
+    researchDimensions: async () => [],
+    evaluateFitMatches: async () => [],
+    saveMatches: async () => undefined,
+    saveProspectScore: async () => undefined,
+    researchAccount: async (accountId) => {
+      researchedAccountId = accountId;
+      return {
+        icpScore: 72,
+        timingScore: 18,
+        hardExcluded: false,
+        icpMatches: [],
+        timingBreakdown: [],
+      };
+    },
+    runQualifyProspect: async () => undefined,
+  });
+
+  const linked = await getAccountForProspect(prospect.id);
+  assert.ok(linked, 'research created and linked the account');
+  assert.equal(linked.name, 'Imported Company');
+  assert.equal(researchedAccountId, linked.id, 'company research used the newly linked account');
+  assert.equal(result.account?.id, linked.id, 'completion proves the company stage finished');
 });
 
 test('resolving repeatedly is idempotent (one BELONGS_TO edge)', async () => {
@@ -209,4 +249,18 @@ test('accounts sort by ICP, timing, prospects, qualified and name', async () => 
   assert.deepEqual(await names('prospects'), ['Beta', 'Alpha'], 'most prospects first');
   assert.deepEqual(await names('qualified'), ['Alpha', 'Beta'], 'most qualified first');
   assert.deepEqual(await names('name'), ['Alpha', 'Beta'], 'alphabetical');
+
+  assert.deepEqual(await getAccountNavigation(beta.id), {
+    previous: { id: alpha.id, name: 'Alpha' },
+    next: null,
+    position: 2,
+    total: 2,
+  });
+  assert.deepEqual(await getAccountNavigation(alpha.id), {
+    previous: null,
+    next: { id: beta.id, name: 'Beta' },
+    position: 1,
+    total: 2,
+  });
+  assert.equal(await getAccountNavigation('missing'), null);
 });

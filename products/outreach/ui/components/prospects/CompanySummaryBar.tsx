@@ -8,10 +8,23 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SegmentMeter } from "@/components/genui";
 import { icpBand, timingBand, type ScoreBand } from "@/lib/score-bands";
-import { DimensionResearchSurface } from "../research/DimensionResearchSurface";
-import type { DimensionLane } from "../research/useDimensionResearch";
 
 /** The account summary as seen from a prospect — mirrors AccountForProspect. */
+export interface CompanyResearchObservation {
+  dimensionKey: string;
+  observedValue?: string;
+  evidence: string[];
+  effectiveMatch?: number;
+  hardExclusion?: boolean;
+}
+
+export interface CompanyTimingSignals {
+  dimensionKey: string;
+  signals: Array<{ signal: string; date: string; evidence: string[] }>;
+  dimensionValue?: number;
+  signalCount: number;
+}
+
 export interface CompanySummary {
   id: string;
   name: string;
@@ -21,6 +34,9 @@ export interface CompanySummary {
   timingScore: number | null;
   isTarget: boolean;
   hardExcluded: boolean;
+  computedAt?: string;
+  icpObservations?: CompanyResearchObservation[];
+  timingSignals?: CompanyTimingSignals[];
 }
 
 function ScoreCell({
@@ -66,33 +82,12 @@ export function CompanySummaryBar({
   account,
   isLoading,
   companyName,
-  researchDimensions = [],
-  isResearching = false,
 }: {
   account: CompanySummary | null;
   isLoading: boolean;
   /** Fallback name when the prospect has a company but no resolved account yet. */
   companyName?: string;
-  /** Account research lanes, cascaded from prospect research (scope: 'account'). */
-  researchDimensions?: DimensionLane[];
-  /** Whether the prospect research (which cascades to the company) is streaming. */
-  isResearching?: boolean;
 }) {
-  // The company's research fills in on this card — no need to open the account.
-  const showResearch = isResearching || researchDimensions.length > 0;
-  const research = showResearch ? (
-    <div className="border-t px-4 py-3">
-      <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
-        Company research
-      </p>
-      <DimensionResearchSurface
-        dimensions={researchDimensions}
-        entityName={account?.name ?? companyName ?? "company"}
-        isStreaming={isResearching}
-      />
-    </div>
-  ) : null;
-
   if (isLoading) {
     return (
       <Card>
@@ -119,13 +114,10 @@ export function CompanySummaryBar({
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{companyName}</p>
             <p className="text-xs text-muted-foreground">
-              {showResearch
-                ? "Researching this company…"
-                : "Not researched yet — researching a prospect researches the company too."}
+              Not researched yet — researching a prospect researches the company too.
             </p>
           </div>
         </CardContent>
-        {research}
       </Card>
     );
   }
@@ -170,7 +162,6 @@ export function CompanySummaryBar({
           </Link>
         </Button>
       </CardContent>
-      {research}
     </Card>
   );
 }

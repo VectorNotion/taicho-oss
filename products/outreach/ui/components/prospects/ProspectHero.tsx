@@ -19,37 +19,19 @@ import {
   MapPin,
   Pencil,
   Trash2,
-  Search,
-  Linkedin,
-  Mail,
-  MessageSquare,
   Loader2,
-  ChevronDown,
-  Sparkles,
-  FileText,
   Mic,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import Link from "next/link";
-import type { Prospect, ProspectStatus, OutreachMedium } from "@/products/outreach/domain/types";
+import type { Prospect, ProspectStatus } from "@/products/outreach/domain/types";
 import { PROSPECT_STATUS_CONFIG, PROSPECT_PRIORITY_CONFIG } from "@/products/outreach/domain/types";
 
 interface ProspectHeroProps {
   prospect: Prospect;
-  isGeneratingOutreach: boolean;
   isDeleting: boolean;
   updatingStatus: boolean;
   onStatusChange: (status: ProspectStatus) => void;
-  onGenerateOutreach: (medium: OutreachMedium) => void;
-  onOpenCommentDialog: () => void;
   onDelete: () => void;
-  /** Slot for the prospect research stream trigger. */
-  researchButton?: React.ReactNode;
   /** Optional cross-product action, present when Nurture is available. */
   nurtureAction?: React.ReactNode;
   /** Opens the standalone Call Recording app with this prospect selected. */
@@ -58,14 +40,10 @@ interface ProspectHeroProps {
 
 export function ProspectHero({
   prospect,
-  isGeneratingOutreach,
   isDeleting,
   updatingStatus,
   onStatusChange,
-  onGenerateOutreach,
-  onOpenCommentDialog,
   onDelete,
-  researchButton,
   nurtureAction,
   callRecordingUrl,
 }: ProspectHeroProps) {
@@ -142,16 +120,6 @@ export function ProspectHero({
 
         {/* Right: Actions */}
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          {/* Primary Actions */}
-          {researchButton && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>{researchButton}</span>
-              </TooltipTrigger>
-              <TooltipContent>Research this person</TooltipContent>
-            </Tooltip>
-          )}
-
           {nurtureAction}
 
           {callRecordingUrl && (
@@ -168,76 +136,7 @@ export function ProspectHero({
             </Tooltip>
           )}
 
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    disabled={isGeneratingOutreach}
-                  >
-                    {isGeneratingOutreach ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Linkedin className="h-4 w-4" />
-                    )}
-                    <span className="ml-1.5 hidden sm:inline">Draft outreach</span>
-                    <ChevronDown className="ml-1 h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Draft LinkedIn outreach</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onGenerateOutreach("inmail")}>
-                <Sparkles className="h-4 w-4 mr-2" />
-                <div>
-                  <div className="font-medium">Personalized</div>
-                  <div className="text-xs text-muted-foreground">Custom report + deep research</div>
-                </div>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onGenerateOutreach("inmail_traditional")}>
-                <FileText className="h-4 w-4 mr-2" />
-                <div>
-                  <div className="font-medium">Traditional</div>
-                  <div className="text-xs text-muted-foreground">Link existing content or generic report</div>
-                </div>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Secondary Actions Dropdown or buttons */}
           <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label="Draft email"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onGenerateOutreach("email")}
-                  disabled={isGeneratingOutreach}
-                >
-                  <Mail className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Draft email</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label="Draft content comment"
-                  size="sm"
-                  variant="outline"
-                  onClick={onOpenCommentDialog}
-                  disabled={isGeneratingOutreach}
-                >
-                  <MessageSquare className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Draft content comment</TooltipContent>
-            </Tooltip>
-
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button size="sm" variant="outline" asChild>

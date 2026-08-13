@@ -75,10 +75,10 @@ export const actionHandlers: Record<ExecutableAction, ActionHandler> = {
   // --- outreach --------------------------------------------------------------
 
   // Persona research → persona score → chained qualify (design §6).
-  research_prospect: async (payload) => runProspectResearch(payload.prospectId as string),
+  research_prospect: async (payload) => runProspectResearch(payload.prospectId as string, { forceRefresh: true }),
 
   // ICP fit + timing research → account ICP/timing score (design §6).
-  research_account: async (payload) => runAccountResearch(payload.accountId as string),
+  research_account: async (payload) => runAccountResearch(payload.accountId as string, { forceRefresh: true }),
 
   // Route sends { prospectId }; the decision reads scores only (design §8).
   qualify_prospect: async (payload) => runQualifyProspect(payload.prospectId as string),

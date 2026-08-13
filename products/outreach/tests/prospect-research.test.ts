@@ -61,7 +61,11 @@ function makeDeps(config: { matchScores?: Record<string, { score: number; hardEx
     },
     researchDimensions: async (lapsed) => {
       rec.researched.push(lapsed.map((x) => x.key));
-      return lapsed.map((x) => { const { id: _id, ...rest } = obsFor(x); return rest; });
+      return lapsed.map((x) => {
+        const { id: ignoredId, ...rest } = obsFor(x);
+        void ignoredId;
+        return rest;
+      });
     },
     evaluateFitMatches: async (fitDims, observations) => {
       const observed = new Set(observations.map((o) => o.dimensionKey));
@@ -86,6 +90,7 @@ test('runProspectResearch researches persona dims only, scores, chains qualify',
   assert.ok(Math.abs(result.personaScore - 85) < 1e-6);
   assert.equal(rec.savedScore?.personaScore.toFixed(0), '85');
   assert.equal(result.hardExcluded, false);
+  assert.equal(result.account, null);
   assert.deepEqual(rec.qualified, ['p1'], 'chains qualification');
 });
 
@@ -101,28 +106,150 @@ test('missing prospect throws', async () => {
   await assert.rejects(() => runProspectResearch('missing', { ...deps, getProspectById: async () => null }), /Prospect not found/);
 });
 
-test('cascade researches the account (once, non-recursively) when it is unresearched', async () => {
+test('cascade resolves, force-refreshes and returns the account before qualifying', async () => {
   const { deps } = makeDeps({});
-  const calls: Array<{ id: string; cascade: boolean }> = [];
-  await runProspectResearch('p1', {
+  const calls: Array<{ id: string; cascade: boolean; forceRefresh?: boolean }> = [];
+  const order: string[] = [];
+  const result = await runProspectResearch('p1', {
     ...deps,
     cascade: true,
-    getAccountForProspect: async () => ({ id: 'acct-1', name: 'Acme' }),
-    accountHasResearch: async () => false,
-    researchAccount: async (id, opts) => { calls.push({ id, cascade: opts.cascade }); },
+    forceRefresh: true,
+    resolveAccountForProspect: async (prospect) => {
+      assert.equal(prospect.id, 'p1');
+      order.push('resolve');
+      return { id: 'acct-1', name: 'Acme' };
+    },
+    researchAccount: async (id, opts) => {
+      calls.push({ id, cascade: opts.cascade, forceRefresh: opts.forceRefresh });
+      order.push('account');
+      return {
+        icpScore: 80,
+        timingScore: 30,
+        hardExcluded: false,
+        icpMatches: [],
+        timingBreakdown: [],
+      };
+    },
+    runQualifyProspect: async () => {
+      order.push('qualify');
+      return { status: 'success' };
+    },
   });
-  assert.deepEqual(calls, [{ id: 'acct-1', cascade: false }], 'researches the account with cascade off (loop-safe)');
+  assert.deepEqual(
+    calls,
+    [{ id: 'acct-1', cascade: false, forceRefresh: true }],
+    'force-refreshes the account with cascade off (loop-safe)',
+  );
+  assert.deepEqual(order, ['resolve', 'account', 'qualify'], 'qualifies with the newly saved account score');
+  assert.deepEqual(result.account, {
+    id: 'acct-1',
+    name: 'Acme',
+    icpScore: 80,
+    timingScore: 30,
+    hardExcluded: false,
+    icpMatches: [],
+    timingBreakdown: [],
+  });
 });
 
-test('cascade skips the account when it has already been researched', async () => {
+test('cascade still invokes account research when the account has prior research', async () => {
   const { deps } = makeDeps({});
   let called = false;
   await runProspectResearch('p1', {
     ...deps,
     cascade: true,
-    getAccountForProspect: async () => ({ id: 'acct-1', name: 'Acme' }),
-    accountHasResearch: async () => true,
-    researchAccount: async () => { called = true; },
+    resolveAccountForProspect: async () => ({ id: 'acct-1', name: 'Acme' }),
+    researchAccount: async () => {
+      called = true;
+      return { icpScore: 80, timingScore: 30, hardExcluded: false, icpMatches: [], timingBreakdown: [] };
+    },
   });
-  assert.equal(called, false, 'no redundant account research');
+  assert.equal(called, true, 'account pipeline decides whether evidence needs refreshing');
+});
+
+test('an explicit refresh researches every persona dimension even when evidence is fresh', async () => {
+  const { deps } = makeDeps({});
+  const existing = DIMS.filter((dimension) => dimension.appliesTo === 'prospect').map((dimension) => obsFor(dimension));
+  const researched: string[][] = [];
+
+  await runProspectResearch('p1', {
+    ...deps,
+    forceRefresh: true,
+    getObservations: async () => existing,
+    researchDimensions: async (dimensions) => {
+      researched.push(dimensions.map((dimension) => dimension.key));
+      return dimensions.map((dimension) => {
+        const { id: ignoredId, ...observation } = obsFor(dimension);
+        void ignoredId;
+        return observation;
+      });
+    },
+  });
+
+  assert.deepEqual(researched, [['authority', 'ownership']]);
+});
+
+test('person research fails instead of completing when a requested criterion has no result', async () => {
+  const { deps } = makeDeps({});
+
+  await assert.rejects(
+    () => runProspectResearch('p1', {
+      ...deps,
+      forceRefresh: true,
+      researchDimensions: async (dimensions) => dimensions
+        .filter((dimension) => dimension.key !== 'ownership')
+        .map((dimension) => {
+          const { id: ignoredId, ...observation } = obsFor(dimension);
+          void ignoredId;
+          return observation;
+        }),
+    }),
+    /Person research returned no result for: ownership/,
+  );
+});
+
+test('company research failure fails the composite run and never qualifies stale data', async () => {
+  const { deps, rec } = makeDeps({});
+  await assert.rejects(
+    () => runProspectResearch('p1', {
+      ...deps,
+      cascade: true,
+      resolveAccountForProspect: async () => ({ id: 'acct-1', name: 'Acme' }),
+      researchAccount: async () => { throw new Error('provider unavailable'); },
+    }),
+    /Company research failed for Acme/,
+  );
+  assert.deepEqual(rec.qualified, [], 'does not qualify against stale company data');
+});
+
+test('research resolves an account from the company instead of requiring an existing edge', async () => {
+  const { deps } = makeDeps({});
+  let resolvedCompany: string | undefined;
+  await runProspectResearch('p1', {
+    ...deps,
+    cascade: true,
+    resolveAccountForProspect: async (prospect) => {
+      resolvedCompany = prospect.company;
+      return { id: 'new-account', name: prospect.company ?? '' };
+    },
+    researchAccount: async () => ({
+      icpScore: 75,
+      timingScore: 10,
+      hardExcluded: false,
+      icpMatches: [],
+      timingBreakdown: [],
+    }),
+  });
+  assert.equal(resolvedCompany, 'Acme');
+});
+
+test('qualification failure keeps the composite run failed', async () => {
+  const { deps } = makeDeps({});
+  await assert.rejects(
+    () => runProspectResearch('p1', {
+      ...deps,
+      runQualifyProspect: async () => { throw new Error('qualification write failed'); },
+    }),
+    /qualification write failed/,
+  );
 });

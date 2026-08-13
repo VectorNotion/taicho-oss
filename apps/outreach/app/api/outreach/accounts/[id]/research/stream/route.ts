@@ -22,7 +22,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     commercial: billing.commercial, estimatedCredits: billing.estimatedCredits,
     run: (emit) => runWithGraphOrganization(
       organizationId,
-      () => runAccountResearch(id, { onDimension: streamingDimensionProgress(emit) }),
+      () => runAccountResearch(id, {
+        forceRefresh: true,
+        onDimension: streamingDimensionProgress(emit),
+        onProspect: (part) => emit({
+          type: 'data-research-cascade',
+          id: `person-${part.prospectId}`,
+          data: { entityId: part.prospectId, scope: 'person', phase: part.phase },
+        }),
+      }),
     ) as unknown as Promise<Record<string, unknown>>,
   });
 }

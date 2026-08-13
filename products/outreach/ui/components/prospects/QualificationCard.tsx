@@ -141,8 +141,8 @@ export function QualificationCard({
   const shell = (children: ReactNode) => (
     <ListCard
       actions={actions}
-      description="ICP fit, persona fit, and buying-window timing."
-      title="Fit assessment"
+      description="The current qualification decision from company fit, person fit, and buying-window timing."
+      title="Qualification"
     >
       <div className="space-y-4 p-6">{children}</div>
     </ListCard>

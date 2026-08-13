@@ -84,3 +84,23 @@ test('outreach prompt grounds generation in the full prospect history without le
   assert.match(prompt, /avoid repeating prior outreach/);
   assert.doesNotMatch(prompt, /<p>/);
 });
+
+test('outreach prompt enforces a customer-first pain, path, next-step structure', () => {
+  const prompt = buildOutreachPrompt(prospect, research, 'email');
+
+  assert.match(prompt, /1\. THEIR PAIN/);
+  assert.match(prompt, /2\. THE PATH/);
+  assert.match(prompt, /3\. NEXT STEP/);
+  assert.match(prompt, /recipient must remain the subject/i);
+  assert.match(prompt, /never open with the sender/i);
+  assert.match(prompt, /at most one compact verified proof clause/i);
+  assert.match(prompt, /one concrete offer and one easy action/i);
+  assert.match(prompt, /only place first-person language is allowed/i);
+  assert.match(prompt, /Hi Ada,/);
+  assert.match(prompt, /one or two sentences each/i);
+  assert.match(prompt, /blank line between them/i);
+  assert.match(prompt, /Do not write "I built"/i);
+  assert.match(prompt, /merely adjacent rather than directly relevant, omit it/i);
+  assert.doesNotMatch(prompt, /Open with something TRUE about your work/);
+  assert.doesNotMatch(prompt, /Reference your ACTUAL documented work/);
+});

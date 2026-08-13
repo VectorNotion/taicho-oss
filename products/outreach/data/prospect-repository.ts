@@ -274,7 +274,7 @@ export async function getProspects(filters?: ProspectFilters): Promise<Prospect[
       MATCH (l:Prospect)
       ${whereClause}
       RETURN l
-      ORDER BY l.createdAt DESC
+      ORDER BY l.createdAt DESC, l.id ASC
       `,
       params
     );
@@ -325,7 +325,7 @@ export async function getProspectsPage(
       `
       MATCH (l:Prospect)
       ${where}
-      WITH l ORDER BY l.createdAt DESC
+      WITH l ORDER BY l.createdAt DESC, l.id ASC
       WITH collect(l) AS matching
       RETURN size(matching) AS total, matching[$skip..$end] AS prospects
       `,
@@ -339,6 +339,76 @@ export async function getProspectsPage(
       total: typeof rawTotal?.toNumber === "function" ? rawTotal.toNumber() : Number(rawTotal ?? 0),
       page,
       pageSize,
+    };
+  } finally {
+    await session.close();
+  }
+}
+
+export interface ProspectNavigationItem {
+  id: string;
+  name: string;
+  company?: string;
+  title?: string;
+}
+
+export interface ProspectNavigation {
+  previous: ProspectNavigationItem | null;
+  next: ProspectNavigationItem | null;
+  position: number;
+  total: number;
+}
+
+/** Return this prospect's neighbours in the pipeline's canonical newest-first order. */
+export async function getProspectNavigation(id: string): Promise<ProspectNavigation | null> {
+  const session = await getSession();
+
+  try {
+    const result = await session.run(
+      `
+      MATCH (current:Prospect {id: $id})
+      MATCH (candidate:Prospect)
+      WITH current, candidate
+      ORDER BY candidate.createdAt DESC, candidate.id ASC
+      WITH collect(candidate) AS ordered, collect(candidate.id) AS orderedIds
+      WITH ordered,
+           [index IN range(0, size(ordered) - 1) WHERE orderedIds[index] = $id][0] AS currentIndex
+      RETURN
+        CASE WHEN currentIndex > 0 THEN ordered[currentIndex - 1] ELSE null END AS previous,
+        CASE WHEN currentIndex < size(ordered) - 1 THEN ordered[currentIndex + 1] ELSE null END AS next,
+        currentIndex + 1 AS position,
+        size(ordered) AS total
+      `,
+      { id },
+    );
+
+    const record = result.records[0];
+    if (!record) return null;
+
+    const mapItem = (
+      value: { properties: Record<string, unknown> } | null,
+    ): ProspectNavigationItem | null => {
+      if (!value) return null;
+      const properties = value.properties;
+      return {
+        id: properties.id as string,
+        name: properties.name as string,
+        company: (properties.company as string | null) ?? undefined,
+        title: (properties.title as string | null) ?? undefined,
+      };
+    };
+    const toNumber = (value: unknown): number =>
+      typeof (value as { toNumber?: () => number } | null)?.toNumber === "function"
+        ? (value as { toNumber: () => number }).toNumber()
+        : Number(value ?? 0);
+    const total = toNumber(record.get("total"));
+    if (total === 0) return null;
+
+    return {
+      previous: mapItem(record.get("previous")),
+      next: mapItem(record.get("next")),
+      position: toNumber(record.get("position")),
+      total,
     };
   } finally {
     await session.close();

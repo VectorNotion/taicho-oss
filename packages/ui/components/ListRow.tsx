@@ -50,6 +50,7 @@ export function ListRow({
   external = false,
   badge,
   meta = [],
+  detail,
   leading,
   actions = [],
   className,
@@ -60,6 +61,8 @@ export function ListRow({
   external?: boolean;
   badge?: React.ReactNode;
   meta?: React.ReactNode[];
+  /** Optional multi-line record content rendered below the dot-separated metadata. */
+  detail?: React.ReactNode;
   leading?: React.ReactNode;
   actions?: ListRowAction[];
   className?: string;
@@ -104,6 +107,7 @@ export function ListRow({
             ))}
           </p>
         )}
+        {detail ? <div className="mt-3">{detail}</div> : null}
       </div>
       {actions.length > 0 && (
         <div className="flex shrink-0 items-center gap-1.5">

@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@/lib/score-bands': fileURLToPath(new URL('../../apps/outreach/lib/score-bands.ts', import.meta.url)),
       '@': fileURLToPath(new URL('.', import.meta.url)),
     },
   },

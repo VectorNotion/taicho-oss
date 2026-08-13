@@ -52,7 +52,7 @@ export async function POST(
 
     const billing = await reserveBackgroundAction(request, 'research_prospect');
     reservationId = billing.commercial.creditReservationId;
-    const result = await runProspectResearch(id);
+    const result = await runProspectResearch(id, { forceRefresh: true });
     await settleReservation({
       reservationId,
       actualCredits: billing.estimatedCredits,

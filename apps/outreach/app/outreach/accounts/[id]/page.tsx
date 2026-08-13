@@ -4,7 +4,6 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Building2, ExternalLink, Search } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,8 +11,12 @@ import { ScoreTile } from "@/components/genui";
 import { PageHeader } from "@/components/PageHeader";
 import { icpBand, timingBand } from "@/lib/score-bands";
 import { AccountProspectsSection } from "@/components/prospects/AccountProspectsSection";
+import {
+  DetailNavigation,
+  type DetailNavigationData,
+} from "@/components/prospects";
 import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
-import { DimensionResearchSurface } from "@/products/outreach/ui/components/research/DimensionResearchSurface";
+import { ResearchProgressPanel } from "@/products/outreach/ui/components/research/ResearchProgressPanel";
 
 type DimensionMatch = {
   dimensionKey: string;
@@ -184,11 +187,18 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const research = useDimensionResearch(`/api/outreach/accounts/${id}/research/stream`);
+  const [navigation, setNavigation] = useState<DetailNavigationData | null>(null);
+  const [navigationLoading, setNavigationLoading] = useState(true);
+  const [navigationError, setNavigationError] = useState(false);
+  const research = useDimensionResearch(
+    `/api/outreach/accounts/${id}/research/stream`,
+    { primaryScope: "account" },
+  );
 
   const loadAccount = useCallback(
     async (options?: { silent?: boolean }) => {
       if (!options?.silent) setLoading(true);
+      setNotFound(false);
       try {
         const response = await fetch(`/api/outreach/accounts/${id}`);
         if (response.status === 404) {
@@ -210,6 +220,31 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   useEffect(() => {
     void loadAccount();
   }, [loadAccount]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setNavigationLoading(true);
+    setNavigationError(false);
+    setNavigation(null);
+    void fetch(`/api/outreach/accounts/${id}/navigation`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => response.ok
+        ? response.json()
+        : Promise.reject(new Error("Failed to fetch account navigation")))
+      .then((data: DetailNavigationData) => setNavigation(data))
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          console.error("Error fetching account navigation:", error);
+          setNavigationError(true);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setNavigationLoading(false);
+      });
+    return () => controller.abort();
+  }, [id]);
 
   useEffect(() => {
     if (!research.final) return;
@@ -238,7 +273,13 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const qualifiedCount = account.prospects.filter((p) => p.qualificationStatus === "QUALIFIED").length;
-  const showResearchSurface = research.isStreaming || research.dimensions.length > 0;
+  const backgroundResearch = research.backgroundTargets
+    .filter((target) => target.scope === "person")
+    .map((target) => ({
+      id: target.entityId,
+      name: account.prospects.find((prospect) => prospect.id === target.entityId)?.name ?? "A prospect",
+    }));
+  const showResearchProgress = research.isStreaming || Boolean(research.error);
 
   return (
     <div className="w-full min-w-0 space-y-8">
@@ -249,6 +290,13 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         >
           <ArrowLeft className="size-4" /> All accounts
         </Link>
+        <DetailNavigation
+          entityLabel="Account"
+          hasError={navigationError}
+          hrefBase="/outreach/accounts"
+          isLoading={navigationLoading}
+          navigation={navigation}
+        />
         <PageHeader
           actions={
             <Button disabled={research.isStreaming} onClick={() => research.start()}>
@@ -259,6 +307,25 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
           title={account.name}
         />
       </div>
+
+      {showResearchProgress ? (
+        <ResearchProgressPanel
+          backgroundItems={backgroundResearch}
+          error={research.error}
+          groups={[
+            {
+              id: "account",
+              entityName: account.name,
+              kind: "account",
+              label: "Company research",
+              dimensions: research.dimensions,
+              pendingLabel: "Loading the ICP fit and timing criteria for this account.",
+            },
+          ]}
+          isComplete={research.isComplete}
+          isStreaming={research.isStreaming}
+        />
+      ) : null}
 
       {/* Two self-explanatory score tiles: value out of 100, a qualitative band, and what it measures. */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -318,23 +385,6 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
           </CardContent>
         </Card>
       </div>
-
-      {showResearchSurface && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Search className="size-4" /> Live research
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DimensionResearchSurface
-              dimensions={research.dimensions}
-              entityName={account.name}
-              isStreaming={research.isStreaming}
-            />
-          </CardContent>
-        </Card>
-      )}
 
       <AccountProspectsSection
         accountId={account.id}

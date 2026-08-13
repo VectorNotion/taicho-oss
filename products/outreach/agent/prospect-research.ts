@@ -10,11 +10,10 @@ import { randomUUID } from 'node:crypto';
 import { createLogger, observeOperation } from '@content-automation/observability';
 import { emitProductEventFromContext } from '@content-automation/platform/events/emit';
 import { getProspectById as getProspectByIdDefault } from '../data/prospect-repository';
-import { getAccountForProspect as getAccountForProspectDefault } from '../data/account-repository';
+import { resolveAccountForProspect as resolveAccountForProspectDefault } from '../data/account-repository';
 import { getDimensionDefinitions as getDimensionDefinitionsDefault } from '../data/dimension-repository';
 import {
   getObservations as getObservationsDefault,
-  hasAnyResearchRun as hasAnyResearchRunDefault,
   saveMatches as saveMatchesDefault,
   saveProspectScore as saveProspectScoreDefault,
   upsertObservation as upsertObservationDefault,
@@ -32,6 +31,7 @@ import {
   type QualificationThresholds,
 } from '../domain/qualification';
 import type { Prospect } from '../domain/types';
+import type { AccountResearchResult } from './account-research';
 
 const log = createLogger('prospect-research');
 
@@ -56,24 +56,26 @@ export interface ProspectResearchDeps {
   thresholds: QualificationThresholds;
   onDimension?: (part: DimensionProgress) => void;
   /**
-   * When not false, researching a prospect also researches its account (if the
-   * account has never been researched), streaming the account's lanes as
-   * `scope: 'account'`. The cascaded account research runs with `cascade: false`
-   * so it does not bounce back to sibling prospects.
+   * When not false, researching a prospect also runs its account research,
+   * streaming the account's lanes as `scope: 'account'`. Account research
+   * refreshes stale dimensions and reuses fresh evidence. It runs with
+   * `cascade: false` so it does not bounce back to sibling prospects.
    */
   cascade?: boolean;
-  getAccountForProspect: (prospectId: string) => Promise<{ id: string; name: string } | null>;
-  accountHasResearch: (accountId: string) => Promise<boolean>;
+  /** Explicit user-triggered research refreshes every person and company dimension. */
+  forceRefresh?: boolean;
+  resolveAccountForProspect: (prospect: Prospect) => Promise<{ id: string; name: string } | null>;
   researchAccount: (
     accountId: string,
-    opts: { cascade: boolean; onDimension?: (part: DimensionProgress) => void },
-  ) => Promise<unknown>;
+    opts: { cascade: boolean; forceRefresh?: boolean; onDimension?: (part: DimensionProgress) => void },
+  ) => Promise<AccountResearchResult>;
 }
 
 export interface ProspectResearchOutcome {
   personaScore: number;
   hardExcluded: boolean;
   matches: DimensionMatch[];
+  account: ({ id: string; name: string } & AccountResearchResult) | null;
 }
 
 const defaultDeps: ProspectResearchDeps = {
@@ -86,8 +88,7 @@ const defaultDeps: ProspectResearchDeps = {
   saveMatches: saveMatchesDefault,
   saveProspectScore: saveProspectScoreDefault,
   runQualifyProspect: runQualifyProspectDefault,
-  getAccountForProspect: getAccountForProspectDefault,
-  accountHasResearch: hasAnyResearchRunDefault,
+  resolveAccountForProspect: resolveAccountForProspectDefault,
   // Lazy import breaks the prospect-research <-> account-research cycle.
   researchAccount: async (accountId, opts) => {
     const { runAccountResearch } = await import('./account-research');
@@ -127,15 +128,22 @@ export async function runProspectResearch(
     const byKey = new Map(personaDims.map((dim) => [dim.key, dim]));
 
     const existing = await d.getObservations({ kind: 'prospect', id: prospectId });
-    const lapsed = lapsedDimensions(personaDims, existing, now);
-    for (const dim of lapsed) emit({ dimensionKey: dim.key, name: dim.name, type: 'fit', phase: 'searching' });
-    if (lapsed.length > 0) {
+    const dimensionsToResearch = d.forceRefresh
+      ? personaDims
+      : lapsedDimensions(personaDims, existing, now);
+    for (const dim of dimensionsToResearch) emit({ dimensionKey: dim.key, name: dim.name, type: 'fit', phase: 'searching' });
+    if (dimensionsToResearch.length > 0) {
       const fresh = await d.researchDimensions(
-        lapsed,
+        dimensionsToResearch,
         { kind: 'prospect', name: prospect.name, company: prospect.company, title: prospect.title },
         runId,
         now,
       );
+      const returnedKeys = new Set(fresh.map((observation) => observation.dimensionKey));
+      const missing = dimensionsToResearch.filter((dimension) => !returnedKeys.has(dimension.key));
+      if (missing.length > 0) {
+        throw new Error(`Person research returned no result for: ${missing.map((dimension) => dimension.name).join(', ')}.`);
+      }
       for (const obs of fresh) await d.upsertObservation({ kind: 'prospect', id: prospectId }, obs);
     }
     const observations = await d.getObservations({ kind: 'prospect', id: prospectId });
@@ -162,34 +170,39 @@ export async function runProspectResearch(
 
     emitProductEventFromContext({ name: 'prospect.researched', refs: { prospectId } });
 
-    // Qualification is useful follow-on work but must not invalidate research.
-    try {
-      await d.runQualifyProspect(prospectId);
-    } catch (error) {
-      log.error('outreach.research.qualification_failed', error, { prospect_id: prospectId });
-    }
-
-    log.info('outreach.prospect_research.completed', { prospect_id: prospectId, persona_score: personaScore, hard_excluded: hardExcluded });
-
-    // Cascade: also research the prospect's account if it has never been
-    // researched, streaming the account's lanes into this same stream as
-    // `scope: 'account'`. Failures here never fail the prospect research.
-    if (d.cascade !== false) {
+    // A company name is sufficient to resolve/create the Account here. Imported
+    // prospects may predate the BELONGS_TO edge, so merely looking up an
+    // existing edge can silently skip required company research.
+    let accountResearch: ProspectResearchOutcome['account'] = null;
+    if (d.cascade !== false && prospect.company?.trim()) {
+      const account = await d.resolveAccountForProspect(prospect);
+      if (!account) {
+        throw new Error(`Could not resolve the company account for ${prospect.company}.`);
+      }
       try {
-        const account = await d.getAccountForProspect(prospectId);
-        if (account && !(await d.accountHasResearch(account.id))) {
-          await d.researchAccount(account.id, {
-            cascade: false,
-            onDimension: (part) =>
-              d.onDimension?.({ ...part, scope: 'account', entityName: account.name }),
-          });
-        }
+        const result = await d.researchAccount(account.id, {
+          cascade: false,
+          forceRefresh: d.forceRefresh,
+          onDimension: (part) =>
+            d.onDimension?.({ ...part, scope: 'account', entityName: account.name }),
+        });
+        accountResearch = { id: account.id, name: account.name, ...result };
       } catch (error) {
         log.error('outreach.research.account_cascade_failed', error, { prospect_id: prospectId });
+        throw new Error(`Company research failed for ${account.name}.`, { cause: error });
       }
     }
 
-    return { personaScore, hardExcluded, matches };
+    // Qualify only after the required account cascade. Qualification reads the
+    // saved Persona + ICP + Timing scores, so running it earlier would persist
+    // the account's pre-research values and force the user to re-score manually.
+    // It is part of the research contract: a stale qualification must never be
+    // reported as a successfully completed composite run.
+    await d.runQualifyProspect(prospectId);
+
+    log.info('outreach.prospect_research.completed', { prospect_id: prospectId, persona_score: personaScore, hard_excluded: hardExcluded });
+
+    return { personaScore, hardExcluded, matches, account: accountResearch };
   });
 }
 

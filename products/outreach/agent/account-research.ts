@@ -62,16 +62,19 @@ export interface AccountResearchDeps {
   thresholds: QualificationThresholds;
   onDimension?: (part: DimensionProgress) => void;
   /**
-   * When not false, researching an account also researches each of its prospects
-   * that has never been researched — in the background (an account can have many),
-   * emitting a compact `onProspect` marker so the account page can show it. The
-   * cascaded prospect research runs with `cascade: false` so it does not bounce
-   * back to the account.
+   * When not false, researching an account requalifies prospects that already
+   * have Persona research and starts missing Persona research in the background.
+   * A compact `onProspect` marker lets the account page show those background
+   * runs. Cascaded prospect research uses `cascade: false` to avoid a loop.
    */
   cascade?: boolean;
+  /** Explicit user-triggered research refreshes every account dimension. */
+  forceRefresh?: boolean;
   getAccountProspects: (accountId: string) => Promise<string[]>;
   prospectHasResearch: (prospectId: string) => Promise<boolean>;
   researchProspect: (prospectId: string, opts: { cascade: boolean }) => void;
+  /** Recompute an already-researched prospect against this account's new score. */
+  qualifyProspect: (prospectId: string) => Promise<unknown>;
   onProspect?: (part: { prospectId: string; phase: 'researching' }) => void;
 }
 
@@ -105,6 +108,10 @@ const defaultDeps: AccountResearchDeps = {
         log.error('outreach.research.prospect_cascade_background_failed', error, { prospect_id: prospectId }),
       ),
     );
+  },
+  qualifyProspect: async (prospectId) => {
+    const { runQualifyProspect } = await import('./qualify-prospect');
+    return runQualifyProspect(prospectId);
   },
   now: () => new Date(),
   thresholds: DEFAULT_THRESHOLDS,
@@ -146,12 +153,19 @@ export async function runAccountResearch(
 
     // ── Research lapsed dimensions (spec §14) ────────────────────────────
     const existing = await d.getObservations({ kind: 'account', id: accountId });
-    const lapsed = lapsedDimensions(allAccountDims, existing, now);
-    for (const dim of lapsed) {
+    const dimensionsToResearch = d.forceRefresh
+      ? allAccountDims
+      : lapsedDimensions(allAccountDims, existing, now);
+    for (const dim of dimensionsToResearch) {
       emit({ dimensionKey: dim.key, name: dim.name, type: dim.dimensionType, phase: 'searching' });
     }
-    if (lapsed.length > 0) {
-      const fresh = await d.researchDimensions(lapsed, { kind: 'account', name: account.name }, runId, now);
+    if (dimensionsToResearch.length > 0) {
+      const fresh = await d.researchDimensions(dimensionsToResearch, { kind: 'account', name: account.name }, runId, now);
+      const returnedKeys = new Set(fresh.map((observation) => observation.dimensionKey));
+      const missing = dimensionsToResearch.filter((dimension) => !returnedKeys.has(dimension.key));
+      if (missing.length > 0) {
+        throw new Error(`Company research returned no result for: ${missing.map((dimension) => dimension.name).join(', ')}.`);
+      }
       for (const obs of fresh) await d.upsertObservation({ kind: 'account', id: accountId }, obs);
     }
     const observations = await d.getObservations({ kind: 'account', id: accountId });
@@ -194,22 +208,37 @@ export async function runAccountResearch(
       icpScore, icpScoreConfident, timingScore: timing.score, hardExcluded,
       timingBreakdown: timing.breakdown, computedAt: now.toISOString(),
     });
-    await d.recordResearchRun(accountId, { runType, refreshedDimensions: lapsed.map((dim) => dim.key) });
+    await d.recordResearchRun(accountId, {
+      runType,
+      refreshedDimensions: dimensionsToResearch.map((dimension) => dimension.key),
+    });
 
     log.info('outreach.account_research.completed', {
       account_id: accountId, icp_score: icpScore, timing_score: timing.score, hard_excluded: hardExcluded,
     });
 
-    // Cascade: research each prospect on this account that has never been
-    // researched, in the background (an account can have many). A compact
-    // `onProspect` marker lets the account page show it. Never fails the account.
+    // Cascade: requalify prospects whose Persona score already exists, and
+    // research the rest in the background. A compact `onProspect` marker lets
+    // the account page show background work. Never fails the account.
     if (d.cascade !== false) {
       try {
         const prospectIds = await d.getAccountProspects(accountId);
         for (const pid of prospectIds) {
-          if (await d.prospectHasResearch(pid)) continue;
-          d.onProspect?.({ prospectId: pid, phase: 'researching' });
-          d.researchProspect(pid, { cascade: false });
+          if (await d.prospectHasResearch(pid)) {
+            // Account research changes the ICP/timing inputs of every attached
+            // prospect's qualification, even when their Persona score is fresh.
+            try {
+              await d.qualifyProspect(pid);
+            } catch (error) {
+              log.error('outreach.research.prospect_requalification_failed', error, {
+                account_id: accountId,
+                prospect_id: pid,
+              });
+            }
+          } else {
+            d.onProspect?.({ prospectId: pid, phase: 'researching' });
+            d.researchProspect(pid, { cascade: false });
+          }
         }
       } catch (error) {
         log.error('outreach.research.prospect_cascade_failed', error, { account_id: accountId });

@@ -6,7 +6,7 @@ import { ArrowRight, Loader2, Plus, Search, User } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -26,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDimensionResearch } from "../research/useDimensionResearch";
-import { DimensionResearchSurface } from "../research/DimensionResearchSurface";
+import { ResearchProgressPanel } from "../research/ResearchProgressPanel";
 import { DueBadge } from "../action-items/DueBadge";
 
 export interface AccountProspectRow {
@@ -106,7 +106,7 @@ function ProspectResearchSurface({
   prospectName: string;
   onComplete: () => void;
 }) {
-  const { start, final, error, isStreaming, dimensions } = useDimensionResearch(
+  const { start, final, error, isStreaming, isComplete, dimensions } = useDimensionResearch(
     `/api/outreach/prospects/${prospectId}/research/stream`,
   );
   const completed = useRef(false);
@@ -129,19 +129,24 @@ function ProspectResearchSurface({
     if (error) toast.error(error);
   }, [error]);
 
+  if (isComplete && !error) return null;
+
   return (
-    <Card className={isStreaming ? "border-primary/20 shadow-sm" : undefined}>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium">Researching {prospectName}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <DimensionResearchSurface
-          entityName={prospectName}
-          dimensions={dimensions}
-          isStreaming={isStreaming}
-        />
-      </CardContent>
-    </Card>
+    <ResearchProgressPanel
+      error={error}
+      groups={[
+        {
+          id: prospectId,
+          entityName: prospectName,
+          kind: "person",
+          label: "Person research",
+          dimensions,
+          pendingLabel: "Loading the persona criteria for this person.",
+        },
+      ]}
+      isComplete={isComplete}
+      isStreaming={isStreaming}
+    />
   );
 }
 

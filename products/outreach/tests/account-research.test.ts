@@ -68,7 +68,11 @@ function makeDeps(config: {
     },
     researchDimensions: async (lapsed) => {
       rec.researched.push(lapsed.map((x) => x.key));
-      return lapsed.map((x) => { const { id: _id, ...rest } = obsFor(x); return rest; });
+      return lapsed.map((x) => {
+        const { id: ignoredId, ...rest } = obsFor(x);
+        void ignoredId;
+        return rest;
+      });
     },
     evaluateFitMatches: async (fitDims, observations) => {
       const observed = new Set(observations.map((o) => o.dimensionKey));
@@ -123,10 +127,39 @@ test('refresh run only re-researches lapsed account dimensions', async () => {
   assert.deepEqual(rec.researched, [['icp_b', 'hiring_activity']]);
 });
 
-test('cascade researches only unresearched prospects (background, non-recursive)', async () => {
+test('an explicit refresh researches every account dimension even when evidence is fresh', async () => {
+  const existing = DIMS.filter((dimension) => dimension.appliesTo === 'account').map((dimension) => obsFor(dimension));
+  const { deps, rec } = makeDeps({ existing, hasRun: true });
+
+  await runAccountResearch('acct-1', { ...deps, forceRefresh: true });
+
+  assert.deepEqual(rec.researched, [['icp_a', 'icp_b', 'hiring_activity']]);
+});
+
+test('account research fails instead of completing when a requested criterion has no result', async () => {
+  const { deps } = makeDeps({});
+
+  await assert.rejects(
+    () => runAccountResearch('acct-1', {
+      ...deps,
+      forceRefresh: true,
+      researchDimensions: async (dimensions) => dimensions
+        .filter((dimension) => dimension.key !== 'icp_b')
+        .map((dimension) => {
+          const { id: ignoredId, ...observation } = obsFor(dimension);
+          void ignoredId;
+          return observation;
+        }),
+    }),
+    /Company research returned no result for: icp_b/,
+  );
+});
+
+test('cascade researches new prospects and requalifies researched prospects', async () => {
   const { deps } = makeDeps({ matchScores: { icp_a: { score: 1 }, icp_b: { score: 1 } } });
   const started: Array<{ id: string; cascade: boolean }> = [];
   const markers: string[] = [];
+  const qualified: string[] = [];
   const researched = new Set(['p-done']);
   await runAccountResearch('acct-1', {
     ...deps,
@@ -134,6 +167,7 @@ test('cascade researches only unresearched prospects (background, non-recursive)
     getAccountProspects: async () => ['p-new', 'p-done', 'p-new2'],
     prospectHasResearch: async (id) => researched.has(id),
     researchProspect: (id, opts) => { started.push({ id, cascade: opts.cascade }); },
+    qualifyProspect: async (id) => { qualified.push(id); },
     onProspect: (p) => markers.push(p.prospectId),
   });
   assert.deepEqual(
@@ -141,5 +175,6 @@ test('cascade researches only unresearched prospects (background, non-recursive)
     [{ id: 'p-new', cascade: false }, { id: 'p-new2', cascade: false }],
     'researches only unresearched prospects, cascade off (loop-safe)',
   );
+  assert.deepEqual(qualified, ['p-done'], 'requalifies existing prospects against the new account score');
   assert.deepEqual(markers, ['p-new', 'p-new2'], 'emits one marker per queued prospect');
 });

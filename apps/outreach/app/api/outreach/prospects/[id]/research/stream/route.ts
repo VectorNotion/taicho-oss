@@ -20,7 +20,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     commercial: billing.commercial, estimatedCredits: billing.estimatedCredits,
     run: (emit) => runWithGraphOrganization(
       organizationId,
-      () => runProspectResearch(id, { onDimension: streamingDimensionProgress(emit) }),
+      () => runProspectResearch(id, {
+        forceRefresh: true,
+        onDimension: streamingDimensionProgress(emit),
+      }),
     ) as unknown as Promise<Record<string, unknown>>,
   });
 }
