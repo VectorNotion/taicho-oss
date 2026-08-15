@@ -102,6 +102,16 @@ export async function runPublishPass(
             "publishing.destination": post.destination,
             "publishing.status": outcome.status,
           },
+          workflow: {
+            name: "publishing.result.persist",
+            input: {
+              postId: post.id,
+              destination: post.destination,
+              status: outcome.status,
+              resultUrl: outcome.resultUrl ?? null,
+            },
+            processOutput: () => ({ persisted: true }),
+          },
         },
         () => onResult(outcome),
       ).catch((error) => log.error("publishing.result_sink.failed", error, {
@@ -131,6 +141,21 @@ async function publishOne(pool: Pool, post: PostRecord, media: R2Media | null): 
           "publishing.destination": post.destination,
           "publishing.attempt": post.attempts + 1,
           "publishing.has_media": Boolean(post.mediaKey),
+        },
+        workflow: {
+          name: "publishing.post.publish",
+          input: {
+            postId: post.id,
+            draftId: post.draftId,
+            destination: post.destination,
+            attempt: post.attempts + 1,
+            hasMedia: Boolean(post.mediaKey),
+          },
+          processOutput: (output) => ({
+            status: output.status,
+            resultUrl: output.resultUrl ?? null,
+            error: output.error ?? null,
+          }),
         },
       },
       async () => {

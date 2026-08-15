@@ -365,6 +365,20 @@ export async function generateOutreach(
     const result = await observeOperation('ai.outreach.generate', {
       runId: prospectId,
       attributes: { prospect_id: prospectId, medium },
+      workflow: {
+        name: 'outreach.message.generate',
+        input: {
+          prospectId,
+          medium,
+          targetContent: targetContent ?? null,
+          promptVersion: promptVersion.version,
+        },
+        processOutput: (output) => ({
+          draft: output.object,
+          usage: output.totalUsage,
+          finishReason: output.finishReason,
+        }),
+      },
     }, () => agent.generate(prompt, {
       structuredOutput: { schema: outreachOutputSchema },
       maxSteps: OUTREACH_GENERATION_MAX_STEPS,
@@ -462,6 +476,15 @@ export async function streamOutreach(
   const parsed = await observeOperation('ai.outreach.generate_stream', {
     runId: prospectId,
     attributes: { prospect_id: prospectId, medium },
+    workflow: {
+      name: 'outreach.message.generate_stream',
+      input: {
+        prospectId,
+        medium,
+        targetContent: targetContent ?? null,
+        promptVersion: promptVersion.version,
+      },
+    },
   }, async () => {
     const result = await agent.stream(prompt, {
       structuredOutput: { schema: outreachOutputSchema },

@@ -137,7 +137,21 @@ export async function generateProspectInsights(input: {
 }) {
   return runWithGraphOrganization(input.organizationId, () => observeOperation(
     'ai.outreach.prospect_insights',
-    { runId: input.prospectId, attributes: { prospect_id: input.prospectId, reason: input.reason } },
+    {
+      runId: input.prospectId,
+      attributes: { prospect_id: input.prospectId, reason: input.reason },
+      workflow: {
+        name: 'outreach.prospect.insights',
+        input: { prospectId: input.prospectId, reason: input.reason },
+        processOutput: (output) => ({
+          insightId: output.id,
+          revision: output.revision,
+          summary: output.summary,
+          content: output.content,
+          sourceRefs: output.sourceRefs,
+        }),
+      },
+    },
     async () => {
       const [prospect, notes, activities, outreach, workspace] = await Promise.all([
         getProspectById(input.prospectId),

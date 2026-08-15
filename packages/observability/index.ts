@@ -54,7 +54,11 @@ export {
   type ExecutionLedgerStatus,
 } from "./ledger";
 export { supportCodeFor } from "./support";
-export { observeOperation, type ObserveOperationInput } from "./operation";
+export {
+  observeOperation,
+  type ObserveOperationInput,
+  type SemanticOperationTrace,
+} from "./operation";
 export {
   annotateWorkflow,
   observeWorkflow,

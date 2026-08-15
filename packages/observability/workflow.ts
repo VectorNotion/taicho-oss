@@ -33,6 +33,7 @@ export type WorkflowSpanKind =
   | "data"
   | "tool"
   | "generation"
+  | "embedding"
   | "scoring"
   | "decision"
   | "persistence";
@@ -43,6 +44,8 @@ export type ObserveWorkflowOptions = {
   kind: WorkflowSpanKind;
   input?: unknown;
   attributes?: Record<string, unknown>;
+  /** Compacts or redacts a workflow result before it becomes output.value. */
+  processOutput?: (output: unknown) => unknown;
 };
 
 export type TraceableOptions<TArgs extends unknown[], TResult> = {
@@ -159,6 +162,7 @@ function openInferenceKind(kind: WorkflowSpanKind): OpenInferenceSpanKind {
     case "data": return OpenInferenceSpanKind.RETRIEVER;
     case "tool": return OpenInferenceSpanKind.TOOL;
     case "generation": return OpenInferenceSpanKind.LLM;
+    case "embedding": return OpenInferenceSpanKind.EMBEDDING;
     case "scoring": return OpenInferenceSpanKind.EVALUATOR;
     case "decision": return OpenInferenceSpanKind.CHAIN;
     case "persistence": return OpenInferenceSpanKind.TOOL;
@@ -182,7 +186,6 @@ async function observeWorkflowSpan<T>(
   name: string,
   options: ObserveWorkflowOptions,
   callback: (recorder: WorkflowRecorder) => T | Promise<T>,
-  processOutput: (output: T) => unknown = (output) => output,
 ): Promise<T> {
   const tracer = trace.getTracer("taicho.workflow");
   const semanticParent = workflowContext.getStore();
@@ -206,7 +209,7 @@ async function observeWorkflowSpan<T>(
       return workflowContext.run(activeSemanticContext, async () => {
         try {
           const result = await callback(recorder);
-          recorder.setOutput(processOutput(result));
+          recorder.setOutput(options.processOutput ? options.processOutput(result) : result);
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
         } catch (error) {

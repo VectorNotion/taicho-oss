@@ -11,6 +11,7 @@
  */
 import { Agent } from '@mastra/core/agent';
 import { registerObservedAgent } from '@content-automation/observability/ai';
+import { observeWorkflowStep, traceable } from '@content-automation/observability';
 import { routerModel } from '@content-automation/platform/agents/model';
 import { emitProductEventFromContext } from '@content-automation/platform/events/emit';
 import { z } from 'zod';
@@ -53,13 +54,22 @@ const defaultGenerate: StructuredGenerate = async ({
     instructions,
     model: routerModel(),
   }), 'taicho-content-agents');
-  const result = await agent.generate(prompt, {
-    structuredOutput: { schema },
-    // Drafts are the longest generations; the provider default cap can
-    // truncate mid-JSON and fail structured parsing.
-    modelSettings: { temperature, maxOutputTokens: 32768 },
-  });
-  return result.object as z.infer<typeof schema>;
+  return traceable(
+    async () => {
+      const result = await agent.generate(prompt, {
+        structuredOutput: { schema },
+        // Drafts are the longest generations; the provider default cap can
+        // truncate mid-JSON and fail structured parsing.
+        modelSettings: { temperature, maxOutputTokens: 32768 },
+      });
+      return result.object as z.infer<typeof schema>;
+    },
+    {
+      name: 'content.draft.generate',
+      kind: 'generation',
+      processInputs: () => ({ agentId, agentName, instructions, prompt, temperature }),
+    },
+  )();
 };
 
 // --------------------------------------------------------------------------
@@ -469,7 +479,7 @@ output a variation.
 ${input.sourceContent}`;
 }
 
-async function loadGenerationContext(idea: ContentIdea, deps: DraftDeps): Promise<GenerationContext> {
+async function loadGenerationContextInternal(idea: ContentIdea, deps: DraftDeps): Promise<GenerationContext> {
   const { mission, identity, voice } = await deps.getSettings();
   const outline = idea.outline ?? [];
   const keyPoints = idea.keyPoints ?? [];
@@ -500,6 +510,18 @@ async function loadGenerationContext(idea: ContentIdea, deps: DraftDeps): Promis
     hook: idea.rationale ?? '',
   };
 }
+
+const loadGenerationContext = traceable(loadGenerationContextInternal, {
+  name: 'content.draft.load_context',
+  kind: 'data',
+  processInputs: ([idea]) => ({ ideaId: idea.id, sourceTopicCount: idea.sourceTopics?.length ?? 0 }),
+  processOutputs: (output) => ({
+    ideaId: output.idea.id,
+    relatedContentCount: output.relatedContentIds.length,
+    outlinePointCount: output.idea.outline?.length ?? 0,
+    keyPointCount: output.idea.keyPoints?.length ?? 0,
+  }),
+});
 
 async function generateContentArtifact(input: {
   type: ContentType;
@@ -624,7 +646,7 @@ async function generateContentArtifact(input: {
   };
 }
 
-export async function runGenerateContentDraft(
+async function runGenerateContentDraftInternal(
   payload: { ideaId: string; contentType: string },
   options: { deps?: Partial<DraftDeps> } = {},
 ): Promise<{ draftId: string }> {
@@ -635,7 +657,14 @@ export async function runGenerateContentDraft(
     throw new Error('INVALID_CONTENT_TYPE');
   }
 
-  const idea = await deps.getContentIdeaById(ideaId);
+  const idea = await observeWorkflowStep('content.draft.load_idea', {
+    kind: 'data',
+    input: { ideaId },
+    processOutput: (output) => {
+      const value = output as ContentIdea | null;
+      return value ? { found: true, status: value.status, contentType } : { found: false };
+    },
+  }, () => deps.getContentIdeaById(ideaId));
   if (!idea) {
     throw new Error('IDEA_NOT_FOUND');
   }
@@ -650,14 +679,24 @@ export async function runGenerateContentDraft(
     generate: deps.generate,
   });
 
-  const draft = await deps.createContentDraft({
-    ideaId,
-    title: artifact.title,
-    type: contentType,
-    content: artifact.content,
-    citations: [],
-    innerLinks: context.relatedContentIds,
-  });
+  const draft = await observeWorkflowStep('content.draft.persist', {
+    kind: 'persistence',
+    input: {
+      ideaId,
+      contentType,
+      title: artifact.title,
+      contentCharacters: artifact.content.length,
+      innerLinkCount: context.relatedContentIds.length,
+    },
+    processOutput: (output) => ({ draftId: (output as { id: string }).id }),
+  }, () => deps.createContentDraft({
+      ideaId,
+      title: artifact.title,
+      type: contentType,
+      content: artifact.content,
+      citations: [],
+      innerLinks: context.relatedContentIds,
+    }));
 
   // Deliberately NOT emitted from runGenerateContentVariation: resonance
   // variation candidates are not persisted drafts.
@@ -670,7 +709,13 @@ export async function runGenerateContentDraft(
   return { draftId: draft.id };
 }
 
-export async function runGenerateContentVariation(
+export const runGenerateContentDraft = traceable(runGenerateContentDraftInternal, {
+  name: 'content.draft.generate_workflow',
+  kind: 'workflow',
+  processInputs: ([payload]) => payload,
+});
+
+async function runGenerateContentVariationInternal(
   payload: { sourceDraftId: string; variationIndex: number },
   options: { deps?: Partial<DraftDeps> } = {},
 ): Promise<ContentResonanceCandidate> {
@@ -707,7 +752,20 @@ export async function runGenerateContentVariation(
   };
 }
 
-export async function runGenerateContentVariations(
+export const runGenerateContentVariation = traceable(runGenerateContentVariationInternal, {
+  name: 'content.draft.generate_variation',
+  kind: 'workflow',
+  processInputs: ([payload]) => payload,
+  processOutputs: (output) => ({
+    id: output.id,
+    label: output.label,
+    title: output.title,
+    contentType: output.contentType,
+    contentCharacters: output.content.length,
+  }),
+});
+
+async function runGenerateContentVariationsInternal(
   payload: { sourceDraftId: string; variationCount: number },
   options: {
     deps?: Partial<DraftDeps>;
@@ -731,3 +789,10 @@ export async function runGenerateContentVariations(
   }
   return { candidates };
 }
+
+export const runGenerateContentVariations = traceable(runGenerateContentVariationsInternal, {
+  name: 'content.draft.generate_variations',
+  kind: 'workflow',
+  processInputs: ([payload]) => payload,
+  processOutputs: (output) => ({ candidateCount: output.candidates.length }),
+});

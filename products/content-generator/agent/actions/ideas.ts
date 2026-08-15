@@ -8,6 +8,7 @@
  */
 import { Agent } from '@mastra/core/agent';
 import { registerObservedAgent } from '@content-automation/observability/ai';
+import { observeWorkflowStep, traceable } from '@content-automation/observability';
 import { routerModel } from '@content-automation/platform/agents/model';
 import { z } from 'zod';
 import { getSettings } from '@content-automation/platform/settings/repository';
@@ -50,11 +51,20 @@ const defaultGenerate: StructuredGenerate = async ({
     instructions,
     model: routerModel(),
   }), 'taicho-content-agents');
-  const result = await agent.generate(prompt, {
-    structuredOutput: { schema },
-    modelSettings: { temperature },
-  });
-  return result.object as z.infer<typeof schema>;
+  return traceable(
+    async () => {
+      const result = await agent.generate(prompt, {
+        structuredOutput: { schema },
+        modelSettings: { temperature },
+      });
+      return result.object as z.infer<typeof schema>;
+    },
+    {
+      name: 'content.ideas.generate',
+      kind: 'generation',
+      processInputs: () => ({ agentId, agentName, instructions, prompt, temperature }),
+    },
+  )();
 };
 
 // --------------------------------------------------------------------------
@@ -163,22 +173,42 @@ const defaultDeps: IdeasDeps = {
   generate: defaultGenerate,
 };
 
-export async function runGenerateContentIdeas(
+async function runGenerateContentIdeasInternal(
   payload: { count?: number },
   options: { deps?: Partial<IdeasDeps> } = {},
 ): Promise<{ ideasCreated: number }> {
   const deps = { ...defaultDeps, ...options.deps };
   const count = payload.count ?? 5;
 
-  const { mission, identity, voice } = await deps.getSettings();
-
-  const [researchItems, topicsResponse, contentGaps, highPerforming] =
-    await Promise.all([
+  const context = await observeWorkflowStep('content.ideas.load_context', {
+    kind: 'data',
+    input: { researchWindowDays: 14, includeDismissedTopics: false },
+    processOutput: (output) => {
+      const value = output as {
+        researchItems: unknown[];
+        topicsResponse: { topics: unknown[] };
+        contentGaps: unknown[];
+        highPerforming: unknown[];
+      };
+      return {
+        researchItemCount: value.researchItems.length,
+        topicCount: value.topicsResponse.topics.length,
+        contentGapCount: value.contentGaps.length,
+        highPerformingCount: value.highPerforming.length,
+      };
+    },
+  }, async () => {
+    const [{ mission, identity, voice }, researchItems, topicsResponse, contentGaps, highPerforming] =
+      await Promise.all([
+        deps.getSettings(),
       deps.getRecentResearchItems(14),
       deps.getTopics(false),
       deps.queryContentGaps(10),
       deps.queryHighPerformingContent(5),
-    ]);
+      ]);
+    return { mission, identity, voice, researchItems, topicsResponse, contentGaps, highPerforming };
+  });
+  const { mission, identity, voice, researchItems, topicsResponse, contentGaps, highPerforming } = context;
 
   const topics = topicsResponse.topics;
 
@@ -234,23 +264,36 @@ export async function runGenerateContentIdeas(
     if (key) topicLookup.set(key, t.id);
   }
 
-  let ideasCreated = 0;
-  for (const idea of batch.ideas.slice(0, count)) {
-    const sourceTopicIds: string[] = [];
-    for (const name of idea.source_topics) {
-      const id = topicLookup.get(name.toLowerCase());
-      if (id) sourceTopicIds.push(id);
-    }
+  const ideasCreated = await observeWorkflowStep('content.ideas.persist', {
+    kind: 'persistence',
+    input: { generatedCount: batch.ideas.length, requestedCount: count },
+    processOutput: (output) => ({ ideasCreated: output }),
+  }, async () => {
+    let created = 0;
+    for (const idea of batch.ideas.slice(0, count)) {
+      const sourceTopicIds: string[] = [];
+      for (const name of idea.source_topics) {
+        const id = topicLookup.get(name.toLowerCase());
+        if (id) sourceTopicIds.push(id);
+      }
 
-    await deps.createContentIdea({
-      title: idea.title,
-      description: idea.description,
-      rationale: idea.rationale,
-      priority: idea.priority,
-      sourceTopicIds: sourceTopicIds.length > 0 ? sourceTopicIds : undefined,
-    });
-    ideasCreated += 1;
-  }
+      await deps.createContentIdea({
+        title: idea.title,
+        description: idea.description,
+        rationale: idea.rationale,
+        priority: idea.priority,
+        sourceTopicIds: sourceTopicIds.length > 0 ? sourceTopicIds : undefined,
+      });
+      created += 1;
+    }
+    return created;
+  });
 
   return { ideasCreated };
 }
+
+export const runGenerateContentIdeas = traceable(runGenerateContentIdeasInternal, {
+  name: 'content.ideas.generate_workflow',
+  kind: 'workflow',
+  processInputs: ([payload]) => payload,
+});

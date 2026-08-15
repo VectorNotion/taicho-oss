@@ -9,6 +9,7 @@ import {
   createLogger,
   currentExecutionContext,
   observeOperation,
+  traceable,
 } from '@content-automation/observability';
 import { registerObservedAgent } from '@content-automation/observability/ai';
 
@@ -70,34 +71,48 @@ export function streamingStructuredGenerate(
     prompt: string;
     schema: S;
     temperature: number;
-  }): Promise<z.infer<S>> => {
-    const chunks = await agentStream(args);
-    const eventId = opts.eventId ?? 'default';
-    let reasoning = '';
-    let final: unknown;
-    let haveFinal = false;
+  }): Promise<z.infer<S>> => traceable(
+    async () => {
+      const chunks = await agentStream(args);
+      const eventId = opts.eventId ?? 'default';
+      let reasoning = '';
+      let final: unknown;
+      let haveFinal = false;
 
-    for await (const chunk of chunks) {
-      if (chunk.type === 'reasoning-delta') {
-        reasoning += chunk.payload?.text ?? '';
-        emit({
-          type: 'data-reasoning',
-          id: eventId,
-          data: { text: reasoning },
-        });
-      } else if (chunk.type === 'object') {
-        emit({ type: 'data-partial', id: eventId, data: chunk.object });
-      } else if (chunk.type === 'object-result') {
-        final = chunk.object;
-        haveFinal = true;
-      } else if (chunk.type === 'error') {
-        throw new Error(`agent stream error: ${JSON.stringify(chunk.payload ?? chunk)}`);
+      for await (const chunk of chunks) {
+        if (chunk.type === 'reasoning-delta') {
+          reasoning += chunk.payload?.text ?? '';
+          emit({
+            type: 'data-reasoning',
+            id: eventId,
+            data: { text: reasoning },
+          });
+        } else if (chunk.type === 'object') {
+          emit({ type: 'data-partial', id: eventId, data: chunk.object });
+        } else if (chunk.type === 'object-result') {
+          final = chunk.object;
+          haveFinal = true;
+        } else if (chunk.type === 'error') {
+          throw new Error(`agent stream error: ${JSON.stringify(chunk.payload ?? chunk)}`);
+        }
       }
-    }
 
-    if (!haveFinal) throw new Error('agent stream produced no structured result');
-    return args.schema.parse(final) as z.infer<S>;
-  };
+      if (!haveFinal) throw new Error('agent stream produced no structured result');
+      return args.schema.parse(final) as z.infer<S>;
+    },
+    {
+      name: `content.${args.agentId.replace(/-agent$/, '').replaceAll('-', '_')}.generate_stream`,
+      kind: 'generation',
+      processInputs: () => ({
+        agentId: args.agentId,
+        agentName: args.agentName,
+        instructions: args.instructions,
+        prompt: args.prompt,
+        temperature: args.temperature,
+        streaming: true,
+      }),
+    },
+  )();
 }
 
 export async function actionStreamResponse(opts: {
@@ -155,6 +170,15 @@ export async function actionStreamResponse(opts: {
               'job.action': opts.action,
               'job.entity_type': opts.entityType ?? 'unknown',
             },
+            workflow: {
+              name: `product.${opts.action}`,
+              input: {
+                action: opts.action,
+                entityId: opts.entityId,
+                entityType: opts.entityType ?? null,
+                estimatedCredits: opts.estimatedCredits ?? null,
+              },
+            },
           },
           async () => {
             await updateJobStatus(organizationId, jobId, 'processing');
@@ -167,6 +191,7 @@ export async function actionStreamResponse(opts: {
               idempotencyKey: `job:${jobId}:settlement`,
               usageKind: 'agent_action', metadata: { action: opts.action, streaming: true },
             });
+            return result;
           },
         );
       } catch (error) {

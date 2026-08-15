@@ -39,6 +39,15 @@ export async function runRefreshPass(
             "publishing.channel.id": channel.id,
             "publishing.destination": channel.destination,
           },
+          workflow: {
+            name: "publishing.channel.refresh",
+            input: {
+              channelId: channel.id,
+              destination: channel.destination,
+              expiresAt: channel.tokenExpiry,
+            },
+            processOutput: () => ({ refreshed: true }),
+          },
         },
         async () => {
           const result = await adapter.refresh!(channel);

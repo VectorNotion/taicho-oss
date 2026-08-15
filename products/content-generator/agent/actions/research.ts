@@ -36,6 +36,7 @@ import {
   type ExtractedResearchItems,
 } from './research-agent';
 import { streamingStructuredGenerate, type StreamEmit } from '@content-automation/platform/agents/streaming';
+import { observeWorkflowStep, traceable } from '@content-automation/observability';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -125,45 +126,55 @@ async function defaultSearch(
     );
   }
 
-  const body: Record<string, unknown> = {
-    api_key: apiKey,
-    query: params.query,
-    topic: 'news',
-    search_depth: 'advanced',
-    time_range: params.timeRange,
-    max_results: params.maxResults ?? 5,
-    include_raw_content: 'markdown',
-  };
-  if (params.includeDomains && params.includeDomains.length > 0) {
-    body.include_domains = params.includeDomains;
-  }
+  return traceable(
+    async () => {
+      const body: Record<string, unknown> = {
+        api_key: apiKey,
+        query: params.query,
+        topic: 'news',
+        search_depth: 'advanced',
+        time_range: params.timeRange,
+        max_results: params.maxResults ?? 5,
+        include_raw_content: 'markdown',
+      };
+      if (params.includeDomains && params.includeDomains.length > 0) {
+        body.include_domains = params.includeDomains;
+      }
 
-  const response = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+      const response = await fetch('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    console.warn(
-      `[do_research] Tavily search failed for "${params.query}": ${response.status} - ${errText}`
-    );
-    return { content: '', results: [] };
-  }
+      if (!response.ok) {
+        const errText = await response.text();
+        console.warn(
+          `[do_research] Tavily search failed for "${params.query}": ${response.status} - ${errText}`
+        );
+        return { content: '', results: [] };
+      }
 
-  const data = (await response.json()) as { results?: TavilyResult[] };
-  const results = data.results ?? [];
+      const data = (await response.json()) as { results?: TavilyResult[] };
+      const results = data.results ?? [];
 
-  const formattedParts = results.map((r) => {
-    let content = r.raw_content || r.content || '';
-    if (content.length > CONTENT_TRUNCATE_CHARS) {
-      content = content.slice(0, CONTENT_TRUNCATE_CHARS) + '... [truncated]';
-    }
-    return `Title: ${r.title ?? 'Untitled'}\nURL: ${r.url ?? ''}\nContent: ${content}`;
-  });
+      const formattedParts = results.map((r) => {
+        let content = r.raw_content || r.content || '';
+        if (content.length > CONTENT_TRUNCATE_CHARS) {
+          content = content.slice(0, CONTENT_TRUNCATE_CHARS) + '... [truncated]';
+        }
+        return `Title: ${r.title ?? 'Untitled'}\nURL: ${r.url ?? ''}\nContent: ${content}`;
+      });
 
-  return { content: formattedParts.join('\n\n---\n\n'), results };
+      return { content: formattedParts.join('\n\n---\n\n'), results };
+    },
+    {
+      name: 'content.research.search',
+      kind: 'tool',
+      processInputs: () => params,
+      processOutputs: (output) => ({ resultCount: output.results.length, results: output.results }),
+    },
+  )();
 }
 
 /** Default extraction: local research agent, structured output, temp 0.3. */
@@ -171,14 +182,21 @@ async function defaultGenerateItems(
   input: GenerateItemsInput
 ): Promise<ExtractedResearchItems> {
   const agent = createResearchAgent(input.mission, input.identity);
-  const result = await agent.generate(
-    `Source: ${input.sourceName}\n\nSearch Results:\n${input.searchResults}`,
+  const prompt = `Source: ${input.sourceName}\n\nSearch Results:\n${input.searchResults}`;
+  return traceable(
+    async () => {
+      const result = await agent.generate(prompt, {
+        structuredOutput: { schema: extractedResearchItemsSchema },
+        modelSettings: { temperature: 0.3 },
+      });
+      return result.object as ExtractedResearchItems;
+    },
     {
-      structuredOutput: { schema: extractedResearchItemsSchema },
-      modelSettings: { temperature: 0.3 },
-    }
-  );
-  return result.object as ExtractedResearchItems;
+      name: 'content.research.extract',
+      kind: 'generation',
+      processInputs: () => ({ sourceName: input.sourceName, prompt, temperature: 0.3 }),
+    },
+  )();
 }
 
 export function streamingGenerateItems(emit: StreamEmit): ResearchDeps['generateItems'] {
@@ -258,29 +276,49 @@ interface CollectedItem {
 // Orchestrator
 // ---------------------------------------------------------------------------
 
-export async function runDoResearch(
+async function runDoResearchInternal(
   payload: DoResearchPayload,
   { deps }: { deps?: ResearchDeps } = {}
 ): Promise<DoResearchResult> {
   const d = deps ?? makeDefaultResearchDeps();
   const timeRange = payload.timeRange || 'day';
 
-  const settings = await d.repos.getSettings();
-  const topicsResponse = await d.repos.getTopics(false);
+  const { settings, topicsResponse } = await observeWorkflowStep('content.research.load_context', {
+    kind: 'data',
+    input: { includeDismissedTopics: false },
+    processOutput: (output) => {
+      const value = output as { topicsResponse: { topics: unknown[] } };
+      return { activeTopicCount: value.topicsResponse.topics.length, settingsLoaded: true };
+    },
+  }, async () => {
+    const [settings, topicsResponse] = await Promise.all([
+      d.repos.getSettings(),
+      d.repos.getTopics(false),
+    ]);
+    return { settings, topicsResponse };
+  });
   const activeTopics = topicsResponse.topics;
   const topicsQuery = buildTopicsQuery(activeTopics);
 
   // 1. Source selection: explicit ids → all enabled → (fallback below).
-  let sources: ResearchSource[];
-  if (payload.sourceIds && payload.sourceIds.length > 0) {
-    sources = [];
-    for (const sid of payload.sourceIds) {
-      const source = await d.repos.getResearchSourceById(sid);
-      if (source) sources.push(source);
+  const sources = await observeWorkflowStep('content.research.load_sources', {
+    kind: 'data',
+    input: {
+      requestedSourceIds: payload.sourceIds ?? [],
+      selection: payload.sourceIds?.length ? 'explicit' : 'all_enabled',
+    },
+    processOutput: (output) => ({ sourceCount: (output as ResearchSource[]).length }),
+  }, async () => {
+    if (payload.sourceIds && payload.sourceIds.length > 0) {
+      const selected: ResearchSource[] = [];
+      for (const sid of payload.sourceIds) {
+        const source = await d.repos.getResearchSourceById(sid);
+        if (source) selected.push(source);
+      }
+      return selected;
     }
-  } else {
-    sources = await d.repos.getEnabledResearchSources();
-  }
+    return d.repos.getEnabledResearchSources();
+  });
 
   const collected: CollectedItem[] = [];
   let sourcesSearched = 0;
@@ -370,23 +408,35 @@ export async function runDoResearch(
   let itemsCreated = 0;
   let itemsDeduped = 0;
 
-  for (const item of collected) {
-    const { id, deduped } = await d.repos.createResearchItemFromAgent({
-      title: item.title,
-      content: item.content,
-      sourceUrl: item.sourceUrl,
-      sourceId: item.sourceId,
-      tags: item.tags,
-      priority: item.priority,
-    });
+  await observeWorkflowStep('content.research.persist', {
+    kind: 'persistence',
+    input: { collectedItemCount: collected.length },
+    processOutput: () => ({ itemsCreated, itemsDeduped }),
+  }, async () => {
+    for (const item of collected) {
+      const { id, deduped } = await d.repos.createResearchItemFromAgent({
+        title: item.title,
+        content: item.content,
+        sourceUrl: item.sourceUrl,
+        sourceId: item.sourceId,
+        tags: item.tags,
+        priority: item.priority,
+      });
 
-    if (deduped) {
-      itemsDeduped++;
-    } else {
-      itemsCreated++;
-      await d.repos.linkResearchToMatchingTopics(id, item.tags);
+      if (deduped) {
+        itemsDeduped++;
+      } else {
+        itemsCreated++;
+        await d.repos.linkResearchToMatchingTopics(id, item.tags);
+      }
     }
-  }
+  });
 
   return { itemsCreated, itemsDeduped, sourcesSearched };
 }
+
+export const runDoResearch = traceable(runDoResearchInternal, {
+  name: 'content.research.run',
+  kind: 'workflow',
+  processInputs: ([payload]) => payload,
+});

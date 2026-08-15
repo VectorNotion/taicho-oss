@@ -33,6 +33,7 @@ import {
   type ExtractedTopics,
 } from './topics-agent';
 import { streamingStructuredGenerate, type StreamEmit } from '@content-automation/platform/agents/streaming';
+import { observeWorkflowStep, traceable } from '@content-automation/observability';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -94,14 +95,21 @@ async function defaultGenerateTopics(
   input: GenerateTopicsInput
 ): Promise<ExtractedTopics> {
   const agent = createTopicsAgent(input.entitiesFormatted, input.existingTopicNames);
-  const result = await agent.generate(
-    'Extract content topics from the project entities above.',
+  const prompt = 'Extract content topics from the project entities above.';
+  return traceable(
+    async () => {
+      const result = await agent.generate(prompt, {
+        structuredOutput: { schema: extractedTopicsSchema },
+        modelSettings: { temperature: 0.3 },
+      });
+      return result.object as ExtractedTopics;
+    },
     {
-      structuredOutput: { schema: extractedTopicsSchema },
-      modelSettings: { temperature: 0.3 },
-    }
-  );
-  return result.object as ExtractedTopics;
+      name: 'content.topics.extract',
+      kind: 'generation',
+      processInputs: () => ({ ...input, prompt, temperature: 0.3 }),
+    },
+  )();
 }
 
 export function streamingGenerateTopics(emit: StreamEmit): TopicsDeps['generateTopics'] {
@@ -135,22 +143,32 @@ async function defaultEmbed(texts: string[]): Promise<number[][]> {
     throw new Error('OPENAI_API_KEY is not configured — cannot embed topics');
   }
 
-  const response = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+  return traceable(
+    async () => {
+      const response = await fetch('https://api.openai.com/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ model: 'text-embedding-3-small', input: texts }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`OpenAI embeddings error: ${response.status} - ${errText}`);
+      }
+
+      const data = (await response.json()) as { data: Array<{ embedding: number[] }> };
+      return data.data.map((row) => row.embedding);
     },
-    body: JSON.stringify({ model: 'text-embedding-3-small', input: texts }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`OpenAI embeddings error: ${response.status} - ${errText}`);
-  }
-
-  const data = (await response.json()) as { data: Array<{ embedding: number[] }> };
-  return data.data.map((row) => row.embedding);
+    {
+      name: 'content.topics.embed',
+      kind: 'embedding',
+      processInputs: () => ({ model: 'text-embedding-3-small', texts, count: texts.length }),
+      processOutputs: (output) => ({ vectorCount: output.length, dimensions: output[0]?.length ?? 0 }),
+    },
+  )();
 }
 
 export function makeDefaultTopicsDeps(): TopicsDeps {
@@ -243,7 +261,7 @@ function normalizeName(name: string): string {
 // Orchestrator
 // ---------------------------------------------------------------------------
 
-export async function runExtractTopics(
+async function runExtractTopicsInternal(
   { deps }: { deps?: TopicsDeps } = {}
 ): Promise<ExtractTopicsResult> {
   const d = deps ?? makeDefaultTopicsDeps();
@@ -256,8 +274,11 @@ export async function runExtractTopics(
   }
 
   // 1. Existing topics (incl. dismissed) for dedup.
-  const existingResponse = await d.repos.getTopics(true);
-  const existingTopics = existingResponse.topics;
+  const existingTopics = await observeWorkflowStep('content.topics.load_existing', {
+    kind: 'data',
+    input: { includeDismissed: true },
+    processOutput: (output) => ({ existingTopicCount: (output as Topic[]).length }),
+  }, async () => (await d.repos.getTopics(true)).topics);
   const existingNames = existingTopics.map((t) => t.name.toLowerCase());
   const existingNamesStr = existingNames.length
     ? existingNames.join(', ')
@@ -274,7 +295,11 @@ export async function runExtractTopics(
   }
 
   // 2. Entities ordered by project count.
-  const entities = await d.repos.getEntitiesByProjectCount();
+  const entities = await observeWorkflowStep('content.topics.load_entities', {
+    kind: 'data',
+    input: { orderBy: 'project_count', limit: 100 },
+    processOutput: (output) => ({ entityCount: (output as EntityRow[]).length }),
+  }, () => d.repos.getEntitiesByProjectCount());
   if (entities.length === 0) {
     return { topicsCreated: 0, topicsDeduped: 0 };
   }
@@ -355,3 +380,9 @@ export async function runExtractTopics(
 
   return { topicsCreated, topicsDeduped };
 }
+
+export const runExtractTopics = traceable(runExtractTopicsInternal, {
+  name: 'content.topics.extract_workflow',
+  kind: 'workflow',
+  processInputs: () => ({ useConfiguredDependencies: true }),
+});

@@ -13,6 +13,7 @@ import {
   serializeWorkflowContent,
   traceable,
 } from "../workflow";
+import { observeOperation } from "../operation";
 
 test("workflow content keeps useful AI input and output while redacting credentials", () => {
   const content = serializeWorkflowContent({
@@ -148,6 +149,40 @@ test("traceable automatically captures processed function inputs, outputs, and n
   assert.match(load.attributes["output.value"] as string, /logicalRecords/);
   assert.doesNotMatch(load.attributes["input.value"] as string, /must-not-appear/);
   assert.equal(load.attributes["openinference.span.kind"], "RETRIEVER");
+
+  delete process.env.OBSERVABILITY_WORKFLOW_CONTENT;
+  await provider.shutdown();
+  trace.disable();
+  context.disable();
+});
+
+test("semantic operations add one deliberate OpenInference workflow without exporting protocol detail", async () => {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  trace.setGlobalTracerProvider(provider);
+  process.env.OBSERVABILITY_WORKFLOW_CONTENT = "full";
+
+  const result = await observeOperation("ai.content.generate", {
+    workflow: {
+      name: "content.draft.generate",
+      input: { ideaId: "idea-1", objective: "Write a useful draft" },
+      processOutput: (output) => ({ draftId: (output as { draftId: string }).draftId }),
+    },
+  }, async () => ({ draftId: "draft-1", privateInternalState: "not needed" }));
+  assert.equal(result.draftId, "draft-1");
+  await provider.forceFlush();
+
+  const spans = exporter.getFinishedSpans();
+  const workflow = spans.find((span) => span.name === "content.draft.generate");
+  assert.ok(workflow);
+  assert.equal(workflow.attributes["taicho.trace.category"], "workflow");
+  assert.equal(workflow.attributes["openinference.span.kind"], "CHAIN");
+  assert.match(workflow.attributes["input.value"] as string, /Write a useful draft/);
+  assert.match(workflow.attributes["output.value"] as string, /draft-1/);
+  assert.doesNotMatch(workflow.attributes["output.value"] as string, /privateInternalState/);
 
   delete process.env.OBSERVABILITY_WORKFLOW_CONTENT;
   await provider.shutdown();

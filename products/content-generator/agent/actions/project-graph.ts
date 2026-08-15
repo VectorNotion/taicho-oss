@@ -13,6 +13,7 @@
  */
 import { Agent } from '@mastra/core/agent';
 import { registerObservedAgent } from '@content-automation/observability/ai';
+import { observeWorkflowStep, traceable } from '@content-automation/observability';
 import { routerModel } from '@content-automation/platform/agents/model';
 import { z } from 'zod';
 import { getSettings as getSettingsDefault } from '@content-automation/platform/settings/repository';
@@ -138,12 +139,23 @@ async function defaultExtractEntities(
     model: routerModel(),
   }), 'taicho-content-agents');
 
-  const result = await agent.generate(buildExtractionPrompt(project), {
-    structuredOutput: { schema: projectEntitiesSchema },
-    modelSettings: { temperature: 0.3 },
-  });
-
-  return result.object;
+  const instructions = buildExtractionInstructions(settings);
+  const prompt = buildExtractionPrompt(project);
+  return traceable(
+    async () => {
+      const result = await agent.generate(prompt, {
+        structuredOutput: { schema: projectEntitiesSchema },
+        modelSettings: { temperature: 0.3 },
+      });
+      return result.object;
+    },
+    {
+      name: 'content.project_graph.extract',
+      kind: 'generation',
+      processInputs: () => ({ instructions, prompt, temperature: 0.3 }),
+      processOutputs: (output) => ({ entityCount: output.entities.length, entities: output.entities }),
+    },
+  )();
 }
 
 export function streamingExtractEntities(emit: StreamEmit): BuildProjectGraphDeps['extractEntities'] {
@@ -172,14 +184,18 @@ const defaultDeps: BuildProjectGraphDeps = {
  * @param payload - `{ projectId }`
  * @param deps - optional dependency overrides (for testing / injection)
  */
-export async function runBuildProjectGraph(
+async function runBuildProjectGraphInternal(
   payload: BuildProjectGraphPayload,
   deps: Partial<BuildProjectGraphDeps> = {}
 ): Promise<BuildProjectGraphResult> {
   const d: BuildProjectGraphDeps = { ...defaultDeps, ...deps };
   const { projectId } = payload;
 
-  const state = await d.getProjectProcessingState(projectId);
+  const state = await observeWorkflowStep('content.project_graph.load_state', {
+    kind: 'data',
+    input: { projectId },
+    processOutput: (output) => output ?? { found: false },
+  }, () => d.getProjectProcessingState(projectId));
   if (state === null) {
     throw new Error(`Project not found: ${projectId}`);
   }
@@ -195,7 +211,11 @@ export async function runBuildProjectGraph(
     };
   }
 
-  const project = await d.getProjectById(projectId);
+  const project = await observeWorkflowStep('content.project_graph.load_project', {
+    kind: 'data',
+    input: { projectId },
+    processOutput: (output) => output ? { found: true } : { found: false },
+  }, () => d.getProjectById(projectId));
   if (!project) {
     throw new Error(`Project not found: ${projectId}`);
   }
@@ -206,11 +226,16 @@ export async function runBuildProjectGraph(
     settings
   );
 
-  for (const entity of entities) {
-    await d.storeProjectEntity(projectId, entity);
-  }
-
-  await d.markProjectProcessed(projectId, entities.length);
+  await observeWorkflowStep('content.project_graph.persist', {
+    kind: 'persistence',
+    input: { projectId, entityCount: entities.length, entities },
+    processOutput: () => ({ persistedEntityCount: entities.length, markedProcessed: true }),
+  }, async () => {
+    for (const entity of entities) {
+      await d.storeProjectEntity(projectId, entity);
+    }
+    await d.markProjectProcessed(projectId, entities.length);
+  });
 
   console.log(
     `[ProjectGraph] Project ${projectId} processed: ${entities.length} entities`
@@ -223,3 +248,9 @@ export async function runBuildProjectGraph(
     entities,
   };
 }
+
+export const runBuildProjectGraph = traceable(runBuildProjectGraphInternal, {
+  name: 'content.project_graph.build',
+  kind: 'workflow',
+  processInputs: ([payload]) => payload,
+});

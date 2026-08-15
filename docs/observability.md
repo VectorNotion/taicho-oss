@@ -1,5 +1,15 @@
 # Observability and execution attribution
 
+Implementation guides:
+
+- [OTL operational logging and execution history](./observability/otl-logging.md)
+- [OTEL semantic workflow tracing with OpenInference](./observability/otel-tracing.md)
+
+In this repository, **OTL** is the internal name for structured operational
+logs, metrics, and the support ledger, while **OTEL** means the OpenTelemetry
+trace layer used to transport the OpenInference business waterfall; OTL is not
+an OpenTelemetry standard or another telemetry vendor.
+
 The production system keeps operational logs and metrics separate from the
 semantic OTLP workflow traces used to understand AI behaviour. Datadog is the
 configured production operational backend, while any OTLP-compatible trace

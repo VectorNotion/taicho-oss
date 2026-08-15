@@ -729,6 +729,14 @@ export async function onboardCurrentUser(requestHeaders: Headers, products: Prod
     headers: requestHeaders,
     actorType: "system",
     attributes: { product_count: products.length },
+    workflow: {
+      name: "workspace.onboard_user",
+      input: { products },
+      processOutput: (output) => ({
+        status: output.status,
+        organizationId: "organization" in output ? output.organization?.id ?? null : null,
+      }),
+    },
   }, async () => {
     const session = await auth.api.getSession({ headers: requestHeaders });
     if (!session) return { status: 401 as const, error: "Unauthenticated" };

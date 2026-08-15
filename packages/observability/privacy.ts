@@ -88,14 +88,11 @@ export function safeError(error: unknown): {
     ? rawCode
     : undefined;
   const type = classifiedErrorType(error);
-  // In non-production, surface the real message + stack so local logs are
-  // actually debuggable. Production stays fully redacted.
-  const reveal = process.env.NODE_ENV !== "production";
   return {
     type,
     code,
-    message: reveal ? error.message : "Operation failed.",
+    message: "Operation failed.",
     fingerprint: ERROR_FINGERPRINTS[type],
-    stack: reveal ? error.stack : undefined,
+    stack: undefined,
   };
 }

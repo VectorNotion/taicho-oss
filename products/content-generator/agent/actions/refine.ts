@@ -11,6 +11,7 @@
  */
 import { Agent } from '@mastra/core/agent';
 import { registerObservedAgent } from '@content-automation/observability/ai';
+import { observeWorkflowStep, traceable } from '@content-automation/observability';
 import { routerModel } from '@content-automation/platform/agents/model';
 import { z } from 'zod';
 import { getSettings } from '@content-automation/platform/settings/repository';
@@ -49,11 +50,20 @@ const defaultGenerate: StructuredGenerate = async ({
     instructions,
     model: routerModel(),
   }), 'taicho-content-agents');
-  const result = await agent.generate(prompt, {
-    structuredOutput: { schema },
-    modelSettings: { temperature },
-  });
-  return result.object as z.infer<typeof schema>;
+  return traceable(
+    async () => {
+      const result = await agent.generate(prompt, {
+        structuredOutput: { schema },
+        modelSettings: { temperature },
+      });
+      return result.object as z.infer<typeof schema>;
+    },
+    {
+      name: 'content.idea.refine',
+      kind: 'generation',
+      processInputs: () => ({ agentId, agentName, instructions, prompt, temperature }),
+    },
+  )();
 };
 
 // --------------------------------------------------------------------------
@@ -171,14 +181,21 @@ const defaultDeps: RefineDeps = {
   generate: defaultGenerate,
 };
 
-export async function runRefineContentIdea(
+async function runRefineContentIdeaInternal(
   payload: { ideaId: string },
   options: { deps?: Partial<RefineDeps> } = {},
 ): Promise<{ refined: true }> {
   const deps = { ...defaultDeps, ...options.deps };
   const { ideaId } = payload;
 
-  const idea = await deps.getContentIdeaById(ideaId);
+  const idea = await observeWorkflowStep('content.idea.load', {
+    kind: 'data',
+    input: { ideaId },
+    processOutput: (output) => {
+      const value = output as Awaited<ReturnType<typeof getContentIdeaById>>;
+      return value ? { found: true, status: value.status, sourceTopicCount: value.sourceTopics?.length ?? 0 } : { found: false };
+    },
+  }, () => deps.getContentIdeaById(ideaId));
   if (!idea) {
     throw new Error('IDEA_NOT_FOUND');
   }
@@ -187,18 +204,31 @@ export async function runRefineContentIdea(
     throw new Error('ALREADY_REFINED');
   }
 
-  const { mission, identity, voice } = await deps.getSettings();
-
   const sourceTopics = idea.sourceTopics ?? [];
   const sourceTopicIds = sourceTopics.map((t) => t.id).filter(Boolean);
   const sourceResearch = idea.sourceResearch ?? [];
 
-  const [relatedContent, researchItems] = await Promise.all([
-    deps.queryRelatedPublishedContent(sourceTopicIds, 5),
-    sourceTopicIds.length
-      ? deps.getResearchItemsByTopicIds(sourceTopicIds, 10)
-      : Promise.resolve([] as Awaited<ReturnType<typeof getResearchItemsByTopicIds>>),
-  ]);
+  const { mission, identity, voice, relatedContent, researchItems } = await observeWorkflowStep(
+    'content.idea.load_refinement_context',
+    {
+      kind: 'data',
+      input: { ideaId, sourceTopicIds },
+      processOutput: (output) => {
+        const value = output as { relatedContent: unknown[]; researchItems: unknown[] };
+        return { relatedContentCount: value.relatedContent.length, researchItemCount: value.researchItems.length };
+      },
+    },
+    async () => {
+      const [{ mission, identity, voice }, relatedContent, researchItems] = await Promise.all([
+        deps.getSettings(),
+        deps.queryRelatedPublishedContent(sourceTopicIds, 5),
+        sourceTopicIds.length
+          ? deps.getResearchItemsByTopicIds(sourceTopicIds, 10)
+          : Promise.resolve([] as Awaited<ReturnType<typeof getResearchItemsByTopicIds>>),
+      ]);
+      return { mission, identity, voice, relatedContent, researchItems };
+    },
+  );
 
   // Combine idea's own source research (title only) with topic-derived research
   // items (title/content/url), matching the Python (source_research + research_items).
@@ -258,12 +288,22 @@ export async function runRefineContentIdea(
     temperature: 0.7,
   });
 
-  await deps.updateContentIdea(ideaId, {
-    status: 'refined',
-    outline: refined.outline,
-    keyPoints: refined.key_points,
-    suggestedCitations: refined.suggested_citations,
-  });
+  await observeWorkflowStep('content.idea.persist_refinement', {
+    kind: 'persistence',
+    input: { ideaId, outlinePoints: refined.outline.length, keyPoints: refined.key_points.length },
+    processOutput: () => ({ refined: true }),
+  }, () => deps.updateContentIdea(ideaId, {
+      status: 'refined',
+      outline: refined.outline,
+      keyPoints: refined.key_points,
+      suggestedCitations: refined.suggested_citations,
+    }));
 
   return { refined: true };
 }
+
+export const runRefineContentIdea = traceable(runRefineContentIdeaInternal, {
+  name: 'content.idea.refine_workflow',
+  kind: 'workflow',
+  processInputs: ([payload]) => payload,
+});
