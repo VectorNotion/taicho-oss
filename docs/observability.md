@@ -1,8 +1,10 @@
 # Observability and execution attribution
 
-The production system uses **Datadog Cloud** for operational telemetry and
-**Langfuse Cloud** for AI traces. A small Datadog Agent runs beside the
-containers only as a collector; neither cloud platform is self-hosted.
+The production system keeps operational logs and metrics separate from the
+semantic OTLP workflow traces used to understand AI behaviour. Datadog is the
+configured production operational backend, while any OTLP-compatible trace
+backend can render the workflow waterfall; Langfuse remains an optional
+evaluation integration rather than the only place an AI run can be understood.
 
 Every meaningful operation has one correlation chain:
 
@@ -35,8 +37,9 @@ flowchart TD
 
 | System | Purpose | Identity stored | Content policy |
 |---|---|---|---|
-| Datadog Cloud | HTTP, DB, worker, tool, queue and provider health; logs; metrics; traces | request/execution/job/run IDs plus keyed pseudonyms for organization, actor, session and business entities | prompts, messages, payloads, email addresses, raw error messages, stack traces, URL queries and SQL text are rejected at the exporter |
-| Langfuse Cloud | model latency, model/provider, token usage, tool timing, failures and evaluations | request/execution IDs plus keyed pseudonyms for organization, user, session and agent | prompts, completions, instructions, tool payloads and arbitrary metadata are always redacted |
+| Operational backend (Datadog/O2) | HTTP, DB, worker, queue and provider health through structured logs and metrics | request/execution/job/run IDs plus keyed pseudonyms for organization, actor, session and business entities | prompts, messages, payloads, email addresses, raw error messages, stack traces, URL queries and SQL text are rejected |
+| OTLP workflow traces | chronological AI and business workflow waterfall, including tool calls, generation, scoring, decisions and persistence summaries | request/execution IDs plus keyed pseudonyms for organization, user, session and business entities | explicit workflow inputs and outputs follow `OBSERVABILITY_WORKFLOW_CONTENT`; credential fields and email addresses are always redacted |
+| Langfuse Cloud | optional AI evaluation, experiment and model-quality workspace | request/execution IDs plus keyed pseudonyms for organization, user, session and agent | configured independently of the primary OTLP workflow trace |
 | Postgres `observability.execution_event` | authoritative support lookup and execution history | raw organization and actor IDs, request/execution/parent IDs, trace/span IDs | allowlisted metadata and error type/code/fingerprint only |
 | Product databases | the business record and durable queues | raw tenant and actor attribution where needed to execute work | unchanged; remains inside Vector Notion's application data boundary |
 
@@ -108,24 +111,67 @@ Attribution is persisted for:
 This is what keeps the user and trace association intact after a process
 restart or a delayed retry.
 
+## Semantic workflow trace contract
+
+The default OTLP export uses OpenInference's AI-native semantic conventions
+and function instrumentation plus a final Taicho allowlist; it is not a dump
+of every instrumented library call. Phoenix renders these spans as a
+LangSmith-style waterfall. A person research run is expected to read like this:
+
+```text
+research.person
+├── research.person.load_context
+├── research.person.plan_refresh
+├── research.search.<dimension> (one parallel step per research dimension)
+├── research.synthesis
+├── research.person.persist_observations
+├── research.person.reload_evidence
+├── research.person.score
+├── research.person.persist_assessment
+└── research.qualification
+    ├── research.qualification.load_context
+    └── research.qualification.persist
+```
+
+Meaningful functions use the observability package's OpenInference-backed
+`traceable` wrapper, which automatically records their readable `input.value`,
+`output.value`, duration, error, AI span kind and async parent/child
+relationship; `processInputs` and `processOutputs` provide a function-level
+privacy and presentation boundary when raw arguments or results are unsuitable.
+Grouped database reads expose the loaded records, logical read count, counts by
+record type and serialized bytes materialized into the workflow, while raw
+Cypher commands remain excluded. Provider functions expose the model input and
+output plus request reference, tokens, credits and cost when the provider
+returns them. Database persistence is summarized by records and identifiers
+written; SQL, Redis commands, HTTP methods, sockets and framework rendering
+spans never enter the default workflow trace.
+
+The Node SDK runs with automatic resource detection disabled, and the exporter
+rebuilds every span resource from an exact allowlist. Process commands and
+arguments, executable paths, source code, usernames, host names and IDs, PIDs,
+runtime details and CPU architecture therefore cannot reach the AI trace
+backend even if another instrumentation package adds them upstream.
+
+Set `OBSERVABILITY_INCLUDE_INFRASTRUCTURE_SPANS=true` only for a temporary
+low-level diagnostic capture. It re-enables Node auto-instrumentation and mixes
+infrastructure spans into OTLP, so it must not be the normal operator view.
+
 ## Runtime coverage
 
 | Service | Datadog service name | Explicit operations |
 |---|---|---|
-| unified Next.js app | `taicho-unified` | authorization, chat, MCP protocol/tools, AI streams and automatically instrumented HTTP/DB calls |
-| standalone outreach app | `taicho-outreach` | HTTP/DB, research, qualification and outreach AI |
-| standalone content app | `taicho-content` | HTTP/DB, chat and content AI |
+| unified Next.js app | `taicho-unified` | semantic research, qualification and AI workflow spans |
+| standalone outreach app | `taicho-outreach` | semantic research, qualification and outreach AI spans |
+| standalone content app | `taicho-content` | semantic research, chat and content AI spans |
 | Cascade worker | `taicho-cascade-worker` | each enrollment step, send and public tracking request |
 | publishing worker | `taicho-publishing-worker` | token refresh, post publish and result sink |
 | MCP operation worker | `taicho-mcp-worker` | each durable MCP operation |
 
-The Node HTTP instrumentation activates execution context before route code,
-so legacy routes receive the same correlation even if they do not create a
-custom span. A privacy-safe console bridge converts remaining server-side
-`console.*` calls into metadata-only structured records. A final OpenTelemetry
-export filter also removes URL queries, SQL statements, error messages, stacks,
-and non-allowlisted attributes from automatically generated spans before they
-can reach the Datadog Agent.
+Authenticated boundaries activate execution context explicitly, and a
+privacy-safe console bridge converts remaining server-side `console.*` calls
+into metadata-only structured records. The default exporter accepts only spans
+marked by Taicho's workflow tracer, then applies a final credential and privacy
+filter before sending them to the OTLP collector.
 
 ## Production configuration
 
@@ -151,6 +197,10 @@ Operational settings:
 ```dotenv
 OBSERVABILITY_LOG_LEVEL=info
 OBSERVABILITY_LEDGER_RETENTION_DAYS=180
+OBSERVABILITY_INCLUDE_INFRASTRUCTURE_SPANS=false
+OBSERVABILITY_WORKFLOW_ONLY=false
+# Keep traces explainable; credential fields and email addresses are still redacted.
+OBSERVABILITY_WORKFLOW_CONTENT=full
 ```
 
 Generate the identity key independently:
@@ -175,13 +225,32 @@ OBSERVABILITY_ENABLED=true
 OBSERVABILITY_ID_HASH_KEY=...
 OBSERVABILITY_LEDGER_ENABLED=true
 OBSERVABILITY_LOG_LEVEL=debug
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OBSERVABILITY_INCLUDE_INFRASTRUCTURE_SPANS=false
+OBSERVABILITY_WORKFLOW_ONLY=true
+OBSERVABILITY_WORKFLOW_CONTENT=full
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006
 DD_API_KEY=...
 DD_SITE=us5.datadoghq.com
 DD_ENV=development
 DD_VERSION=development
 LANGFUSE_REALTIME=true
 ```
+
+For a local AI waterfall, run Phoenix with deliberately small host limits and
+send workflow-only OTLP/HTTP Protobuf traces directly to it:
+
+```bash
+docker run -d --name taicho-phoenix-local \
+  --memory=512m --cpus=1 \
+  -p 127.0.0.1:6006:6006 \
+  -e PHOENIX_ALLOW_EXTERNAL_RESOURCES=false \
+  -e PHOENIX_DEFAULT_RETENTION_POLICY_DAYS=1 \
+  arizephoenix/phoenix:latest
+open http://localhost:6006
+```
+
+Phoenix serves its UI and OTLP receiver on port `6006`; no Jaeger or generic
+HTTP/database instrumentation is required for this view.
 
 Start the profile-scoped local Datadog collector only when operational tracing
 is needed:
@@ -246,12 +315,12 @@ docker compose -f docker-compose.prod.yml logs --tail=100 datadog-agent
 Then make one authenticated request and one queued worker operation:
 
 1. Confirm the response contains the three public correlation headers.
-2. Confirm one request trace and its worker child appear in Datadog.
+2. Confirm operational request details appear in the structured logs, not the workflow trace.
 3. Confirm the ledger has the same request, parent execution and actor.
-4. Run one AI action and confirm Langfuse shows model/usage metadata but
-   `[CONTENT REDACTED]` for input and output.
-5. Search both cloud systems for a real email address or prompt used in the
-   check; the search must return nothing.
+4. Run one AI action and confirm the OTLP trace shows a single semantic root,
+   readable input/output, named tool and generation steps, model usage and cost.
+5. Confirm the trace contains no generic `GET`, `POST`, `GRAPH.QUERY`, socket or
+   framework spans, and that credential values and email addresses are redacted.
 
 ## Cloud controls
 
@@ -266,6 +335,6 @@ Configure these in the Datadog and Langfuse organizations before production:
   ledger write failures, model error rate and model cost anomalies.
 
 The Postgres ledger defaults to 180 days and deletes expired rows at service
-startup. Raw prompt, completion and tool-payload capture is deliberately not
-supported by the shared exporter; incident debugging uses correlation,
-metadata, error fingerprints and the tenant-authoritative business records.
+startup. Full workflow content is the default so traces remain explainable;
+deployments that cannot satisfy tenant access control, retention, region and
+audit requirements must explicitly select `metadata` or `off` instead.

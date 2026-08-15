@@ -84,10 +84,12 @@ test('ensureFollowUpForProspect creates once, +3 days, and never duplicates', as
   assert.ok(Math.abs(new Date(items[0].dueAt).getTime() - expected) < 60_000);
 });
 
-test('ensureFollowUpForProspect skips when a manual item is open', async () => {
+test('ensureFollowUpForProspect preserves manual items and creates the automatic chain beside them', async () => {
   await createActionItem({ title: 'Deliberate plan', dueAt: inDays(10), prospectId: 'p-manual' });
   await ensureFollowUpForProspect('p-manual', 'Grace Hopper');
   const grouped = await getOpenActionItemsForProspects(['p-manual']);
-  assert.equal(grouped.get('p-manual')?.length, 1);
-  assert.equal(grouped.get('p-manual')?.[0]?.title, 'Deliberate plan');
+  const items = grouped.get('p-manual') ?? [];
+  assert.equal(items.length, 2);
+  assert.ok(items.some((item) => item.title === 'Deliberate plan' && item.source === 'manual'));
+  assert.ok(items.some((item) => item.title === 'Follow up with Grace Hopper' && item.source === 'auto_followup'));
 });

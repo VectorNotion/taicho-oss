@@ -1,4 +1,5 @@
 import { Client, Pool, type ClientConfig, type PoolConfig } from 'pg';
+import { dedicatedDatabaseRolesRequired } from '@content-automation/database';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -31,9 +32,9 @@ function runtimeConfig(organizationId: string): PoolConfig {
   if (process.env.JOBS_DATABASE_URL) {
     return { connectionString: process.env.JOBS_DATABASE_URL, options };
   }
-  if (process.env.NODE_ENV === 'production') {
+  if (dedicatedDatabaseRolesRequired()) {
     throw new Error(
-      'JOBS_DATABASE_URL is required in production and must use a non-superuser, non-BYPASSRLS role.',
+      'JOBS_DATABASE_URL is required in production or strict database-role mode and must use a non-superuser, non-BYPASSRLS role.',
     );
   }
   return { ...baseConfig(), options };
@@ -43,9 +44,9 @@ function adminConfig(): PoolConfig {
   if (process.env.JOBS_ADMIN_DATABASE_URL) {
     return { connectionString: process.env.JOBS_ADMIN_DATABASE_URL };
   }
-  if (process.env.NODE_ENV === 'production') {
+  if (dedicatedDatabaseRolesRequired()) {
     throw new Error(
-      'JOBS_ADMIN_DATABASE_URL is required in production and must use the dedicated migration/control-plane role.',
+      'JOBS_ADMIN_DATABASE_URL is required in production or strict database-role mode and must use the dedicated migration/control-plane role.',
     );
   }
   return baseConfig();

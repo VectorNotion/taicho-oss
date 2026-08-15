@@ -8,8 +8,13 @@
  *   recency; recency is arithmetic in domain/scoring.ts (spec §7, §12).
  */
 import { z } from 'zod';
-import { createLogger } from '@content-automation/observability';
+import {
+  annotateWorkflow,
+  createLogger,
+  traceable,
+} from '@content-automation/observability';
 import { searchTavily, type TavilySearchOutput } from './tavily-tool';
+import { captureResearchProviderUsage } from './provider-usage-capture';
 import type { DimensionDefinition, ObservationRecord } from '../domain/qualification';
 
 const log = createLogger('dimension-research');
@@ -50,6 +55,7 @@ export type DimensionSynthesis = z.infer<typeof dimensionSynthesisSchema>;
 
 export interface ResearchEntity {
   kind: 'account' | 'prospect';
+  id?: string;
   name: string;
   company?: string;
   title?: string;
@@ -62,6 +68,11 @@ export interface DimensionResearchDeps {
     schema: z.ZodType;
     system: string;
     prompt: string;
+    usageContext?: {
+      runId: string;
+      entityKind: ResearchEntity['kind'];
+      entityId?: string;
+    };
   }) => Promise<unknown>;
 }
 
@@ -75,6 +86,11 @@ export async function defaultCompleteJson(args: {
   schema: z.ZodType;
   system: string;
   prompt: string;
+  usageContext?: {
+    runId: string;
+    entityKind: ResearchEntity['kind'];
+    entityId?: string;
+  };
 }): Promise<unknown> {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) throw new Error('Dimension research is not configured.');
@@ -107,8 +123,57 @@ export async function defaultCompleteJson(args: {
   if (!response.ok) throw new Error(`Dimension research model returned ${response.status}.`);
 
   const payload = (await response.json()) as {
+    id?: string;
+    model?: string;
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+      cost_details?: { upstream_inference_cost?: number };
+      prompt_tokens_details?: { cached_tokens?: number };
+      completion_tokens_details?: { reasoning_tokens?: number };
+    };
   };
+  if (args.usageContext) {
+    await captureResearchProviderUsage({
+      provider: 'openrouter',
+      operation: 'synthesis',
+      runId: args.usageContext.runId,
+      entityKind: args.usageContext.entityKind,
+      entityId: args.usageContext.entityId,
+      requestId: payload.id,
+      model: payload.model ?? researchModelSlug(),
+      inputTokens: payload.usage?.prompt_tokens,
+      outputTokens: payload.usage?.completion_tokens,
+      reasoningTokens: payload.usage?.completion_tokens_details?.reasoning_tokens,
+      cachedInputTokens: payload.usage?.prompt_tokens_details?.cached_tokens,
+      totalTokens: payload.usage?.total_tokens,
+      costUsd: payload.usage?.cost,
+      upstreamInferenceCostUsd: payload.usage?.cost_details?.upstream_inference_cost,
+    });
+  }
+  annotateWorkflow({
+    provider: 'openrouter',
+    'llm.provider': 'openrouter',
+    'llm.model_name': payload.model ?? researchModelSlug(),
+    'llm.token_count.prompt': payload.usage?.prompt_tokens,
+    'llm.token_count.completion': payload.usage?.completion_tokens,
+    'llm.token_count.completion_details.reasoning': payload.usage?.completion_tokens_details?.reasoning_tokens,
+    'llm.token_count.prompt_details.cache_input': payload.usage?.prompt_tokens_details?.cached_tokens,
+    'llm.token_count.total': payload.usage?.total_tokens,
+    'llm.cost.total': payload.usage?.cost,
+    'taicho.provider.model': payload.model ?? researchModelSlug(),
+    'taicho.provider.request_ref': payload.id,
+    'taicho.usage.tokens.in': payload.usage?.prompt_tokens,
+    'taicho.usage.tokens.out': payload.usage?.completion_tokens,
+    'taicho.usage.tokens.reasoning': payload.usage?.completion_tokens_details?.reasoning_tokens,
+    'taicho.usage.tokens.cached': payload.usage?.prompt_tokens_details?.cached_tokens,
+    'taicho.usage.tokens.total': payload.usage?.total_tokens,
+    'taicho.usage.cost.usd': payload.usage?.cost,
+    'taicho.usage.cost.upstream_usd': payload.usage?.cost_details?.upstream_inference_cost,
+  });
   const content = payload.choices?.[0]?.message?.content;
   if (!content) throw new Error('Dimension research model returned no result.');
   return JSON.parse(content);
@@ -193,9 +258,27 @@ export async function researchDimensions(
   const searches = await Promise.all(
     dims.map(async (dim) => {
       try {
-        const result = await search(
-          { topic: 'company', query: buildDimensionQuery(dim, entity), maxResults: 5 },
+        const query = buildDimensionQuery(dim, entity);
+        const tracedSearch = traceable(search, {
+            name: `research.search.${dim.key}`,
+            kind: 'tool',
+            attributes: {
+              provider: 'tavily',
+              'taicho.research.dimension_key': dim.key,
+              'taicho.research.dimension_label': dim.name,
+              'taicho.research.entity_kind': entity.kind,
+            },
+            processInputs: ([input]) => input,
+          });
+        const result = await tracedSearch(
+          { topic: 'company', query, maxResults: 5 },
           AbortSignal.timeout(RESEARCH_TIMEOUT_MS),
+          {
+            runId,
+            entityKind: entity.kind,
+            entityId: entity.id,
+            dimensionKey: dim.key,
+          },
         );
         return { dimensionKey: dim.key, results: result.results };
       } catch (error) {
@@ -205,12 +288,33 @@ export async function researchDimensions(
     }),
   );
 
-  const raw = await completeJson({
+  const system =
+    'Synthesize the supplied web evidence into per-dimension observations. Extract facts and dates only; never judge recency, never score fit. Return only evidence-grounded JSON.';
+  const prompt = buildSynthesisPrompt(dims, searches, entity, now);
+  const tracedCompletion = traceable(completeJson, {
+      name: 'research.synthesis',
+      kind: 'generation',
+      attributes: {
+        provider: 'openrouter',
+        'llm.provider': 'openrouter',
+        'llm.model_name': researchModelSlug(),
+        'taicho.provider.model': researchModelSlug(),
+        'taicho.research.dimension_count': dims.length,
+        'taicho.research.entity_kind': entity.kind,
+      },
+      processInputs: ([input]) => ({
+        model: researchModelSlug(),
+        system: input.system,
+        prompt: input.prompt,
+        schema: input.schemaName,
+      }),
+    });
+  const raw = await tracedCompletion({
     schemaName: 'dimension_observations',
     schema: dimensionSynthesisSchema,
-    system:
-      'Synthesize the supplied web evidence into per-dimension observations. Extract facts and dates only; never judge recency, never score fit. Return only evidence-grounded JSON.',
-    prompt: buildSynthesisPrompt(dims, searches, entity, now),
+    system,
+    prompt,
+    usageContext: { runId, entityKind: entity.kind, entityId: entity.id },
   });
   const synthesis = dimensionSynthesisSchema.parse(raw);
 

@@ -56,7 +56,22 @@ export {
 export { supportCodeFor } from "./support";
 export { observeOperation, type ObserveOperationInput } from "./operation";
 export {
+  annotateWorkflow,
+  observeWorkflow,
+  observeWorkflowStep,
+  runDetachedWorkflow,
+  serializeWorkflowContent,
+  traceable,
+  type ObserveWorkflowOptions,
+  type SerializedWorkflowContent,
+  type WorkflowContentMode,
+  type WorkflowRecorder,
+  type WorkflowSpanKind,
+  type TraceableOptions,
+} from "./workflow";
+export {
   PrivacySafeSpanExporter,
+  WorkflowFocusedSpanExporter,
   privacySafeReadableSpan,
   safeOtelAttributes,
 } from "./otel-privacy";

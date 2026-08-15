@@ -169,6 +169,13 @@
       "when": 1786925100000,
       "tag": "0023_restore_jobs_runtime_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786925200000,
+      "tag": "0024_restore_jobs_admin_grant",
+      "breakpoints": true
     }
   ]
 }

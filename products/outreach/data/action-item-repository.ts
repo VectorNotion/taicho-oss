@@ -9,11 +9,13 @@ import { getJobPool, validateJobOrganizationId } from '@content-automation/platf
 import { currentGraphOrganizationId } from '@content-automation/platform/data/organization-context';
 import {
   FOLLOW_UP_DEFAULT_DAYS,
+  generatedFollowUpPayload,
   type ActionItem,
   type ActionItemSource,
   type ActionItemStatus,
   type CreateActionItemInput,
   type UpdateActionItemInput,
+  type FollowUpGenerationType,
 } from '../domain/action-items';
 
 function organizationId(): string {
@@ -155,13 +157,22 @@ export async function getOpenActionItemsForProspects(
 export async function ensureFollowUpForProspect(
   prospectId: string,
   prospectName: string,
-): Promise<void> {
-  const open = await getOpenActionItemsForProspects([prospectId]);
-  if ((open.get(prospectId)?.length ?? 0) > 0) return;
+): Promise<ActionItem> {
+  const [existing] = await database()
+    .select()
+    .from(actionItemsTable)
+    .where(and(
+      eq(actionItemsTable.status, 'open'),
+      eq(actionItemsTable.source, 'auto_followup'),
+      eq(actionItemsTable.prospect_id, prospectId),
+      inOrganization(),
+    ))
+    .limit(1);
+  if (existing) return mapRow(existing);
   // onConflictDoNothing + the partial unique index (one open auto follow-up
   // per prospect) close the check-then-insert race between concurrent
   // touchpoints.
-  await database()
+  const [created] = await database()
     .insert(actionItemsTable)
     .values({
       organization_id: organizationId(),
@@ -170,7 +181,83 @@ export async function ensureFollowUpForProspect(
       source: 'auto_followup',
       prospect_id: prospectId,
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning();
+  if (created) return mapRow(created);
+  const [raced] = await database()
+    .select()
+    .from(actionItemsTable)
+    .where(and(
+      eq(actionItemsTable.status, 'open'),
+      eq(actionItemsTable.source, 'auto_followup'),
+      eq(actionItemsTable.prospect_id, prospectId),
+      inOrganization(),
+    ))
+    .limit(1);
+  if (!raced) throw new Error(`Could not ensure a follow-up for prospect ${prospectId}.`);
+  return mapRow(raced);
+}
+
+/**
+ * Generation boundary: manual tasks coexist, a retry returns the same next
+ * step, and a newly generated follow-up supersedes the previous automatic one.
+ */
+export async function ensureGeneratedFollowUp(input: {
+  prospectId: string;
+  prospectName: string;
+  messageId: string;
+  medium: string;
+  generationType: FollowUpGenerationType;
+  cadenceKey?: string;
+  cadenceVersion?: number;
+  cadenceDays?: number;
+  now?: Date;
+}): Promise<ActionItem> {
+  const payload = generatedFollowUpPayload(input);
+  const now = input.now ?? new Date();
+  return database().transaction(async (transaction) => {
+    const [existing] = await transaction
+      .select()
+      .from(actionItemsTable)
+      .where(and(
+        eq(actionItemsTable.status, 'open'),
+        eq(actionItemsTable.source, 'auto_followup'),
+        eq(actionItemsTable.prospect_id, input.prospectId),
+        inOrganization(),
+      ))
+      .limit(1);
+    const existingPayload = existing?.payload as Record<string, unknown> | null | undefined;
+    if (existing && existingPayload?.triggerMessageId === input.messageId
+      && existingPayload?.cadenceKey === payload.cadenceKey) {
+      return mapRow(existing);
+    }
+    if (existing) {
+      await transaction
+        .update(actionItemsTable)
+        .set({
+          status: 'done',
+          completed_at: now.toISOString(),
+          updated_at: now.toISOString(),
+          payload: {
+            ...(existingPayload ?? {}),
+            supersededByMessageId: input.messageId,
+          },
+        })
+        .where(and(eq(actionItemsTable.id, existing.id), inOrganization()));
+    }
+    const [created] = await transaction
+      .insert(actionItemsTable)
+      .values({
+        organization_id: organizationId(),
+        title: `Follow up with ${input.prospectName}`,
+        due_at: new Date(now.getTime() + payload.cadenceDays * 86_400_000).toISOString(),
+        source: 'auto_followup',
+        prospect_id: input.prospectId,
+        payload,
+      })
+      .returning();
+    return mapRow(created);
+  });
 }
 
 /** Cross-store cleanup for prospect deletion: open items lose their target. */

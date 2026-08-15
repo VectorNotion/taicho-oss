@@ -670,6 +670,12 @@ importers:
 
   packages/observability:
     dependencies:
+      '@arizeai/openinference-core':
+        specifier: 2.5.1
+        version: 2.5.1
+      '@arizeai/openinference-semantic-conventions':
+        specifier: 2.7.0
+        version: 2.7.0
       '@content-automation/database':
         specifier: workspace:*
         version: link:../database
@@ -691,7 +697,7 @@ importers:
       '@opentelemetry/exporter-metrics-otlp-http':
         specifier: ^0.221.0
         version: 0.221.0(@opentelemetry/api@1.9.0)
-      '@opentelemetry/exporter-trace-otlp-http':
+      '@opentelemetry/exporter-trace-otlp-proto':
         specifier: ^0.221.0
         version: 0.221.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/resources':
@@ -713,6 +719,9 @@ importers:
         specifier: ^8.16.3
         version: 8.20.0
     devDependencies:
+      '@opentelemetry/context-async-hooks':
+        specifier: ^2.10.0
+        version: 2.10.0(@opentelemetry/api@1.9.0)
       '@types/node':
         specifier: ^20
         version: 20.19.30
@@ -1144,6 +1153,12 @@ packages:
   '@antfu/ni@25.0.0':
     resolution: {integrity: sha512-9q/yCljni37pkMr4sPrI3G4jqdIk074+iukc5aFJl7kmDCCsiJrbZ6zKxnES1Gwg+i9RcDZwvktl23puGslmvA==}
     hasBin: true
+
+  '@arizeai/openinference-core@2.5.1':
+    resolution: {integrity: sha512-gM0c65ImDLiTuFzSgbjJ0KHadZzRqsEJTIDHQHFyxia7kPk/3shlf7eMWIEC/T+pXHR5SQUkz2Rx23LLSeCb3Q==}
+
+  '@arizeai/openinference-semantic-conventions@2.7.0':
+    resolution: {integrity: sha512-POJ0LN6akXRsZnx5KPOyYY19zzOeBUlKx4Sg8zQCgmL12uCPxygagjfa+xGWf76NvIqwZ0bYzDxjICk5JbxHMw==}
 
   '@asamuzakjp/css-color@5.1.11':
     resolution: {integrity: sha512-KVw6qIiCTUQhByfTd78h2yD1/00waTmm9uy/R7Ck/ctUyAPj+AEDLkQIdJW0T8+qGgj3j5bpNKK7Q3G+LedJWg==}
@@ -8594,6 +8609,14 @@ snapshots:
       fzf: 0.5.2
       package-manager-detector: 1.6.0
       tinyexec: 1.0.2
+
+  '@arizeai/openinference-core@2.5.1':
+    dependencies:
+      '@arizeai/openinference-semantic-conventions': 2.7.0
+      '@opentelemetry/api': 1.9.0
+      '@opentelemetry/core': 2.10.0(@opentelemetry/api@1.9.0)
+
+  '@arizeai/openinference-semantic-conventions@2.7.0': {}
 
   '@asamuzakjp/css-color@5.1.11':
     dependencies:

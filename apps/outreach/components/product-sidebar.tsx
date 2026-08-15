@@ -7,6 +7,7 @@ import {
   FileText,
   LayoutDashboard,
   ListFilter,
+  SlidersHorizontal,
   ShieldCheck,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
@@ -29,6 +30,7 @@ const navItems = [
   { href: "/outreach/accounts", label: "Accounts", icon: Building2, exact: false },
   { href: "/outreach/prospects", label: "Prospects", icon: ListFilter, exact: false },
   { href: "/outreach/drafts", label: "Drafts", icon: FileText, exact: false },
+  { href: "/outreach/settings/prompts", label: "Prompts", icon: SlidersHorizontal, exact: false },
 ];
 
 export function ProductSidebar({ canAdmin }: { canAdmin: boolean }) {

@@ -1,5 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import { annotateWorkflow } from '@content-automation/observability';
+import { captureResearchProviderUsage } from './provider-usage-capture';
 
 const TAVILY_SEARCH_TIMEOUT_MS = 20_000;
 
@@ -13,6 +15,8 @@ const tavilySearchInputSchema = z.object({
 
 const tavilySearchOutputSchema = z.object({
   topic: z.string(),
+  requestId: z.string().optional(),
+  usage: z.object({ credits: z.number() }).optional(),
   results: z.array(
     z.object({
       title: z.string(),
@@ -30,6 +34,12 @@ export type TavilySearchOutput = z.output<typeof tavilySearchOutputSchema>;
 export async function searchTavily(
   input: TavilySearchInput,
   signal?: AbortSignal,
+  usageContext?: {
+    runId: string;
+    entityKind: 'account' | 'prospect';
+    entityId?: string;
+    dimensionKey: string;
+  },
 ): Promise<TavilySearchOutput> {
   if (!process.env.TAVILY_API_KEY) throw new Error('Tavily search is not configured.');
   const parsed = tavilySearchInputSchema.parse(input);
@@ -46,12 +56,15 @@ export async function searchTavily(
       search_depth: 'basic',
       include_raw_content: false,
       include_answer: false,
+      include_usage: true,
     }),
     signal: searchSignal,
   });
 
   if (!response.ok) throw new Error(`Tavily search returned ${response.status}.`);
   const data = await response.json() as {
+    request_id?: string;
+    usage?: { credits?: number };
     results?: Array<{
       title: string;
       url: string;
@@ -60,8 +73,10 @@ export async function searchTavily(
       score?: number;
     }>;
   };
-  return tavilySearchOutputSchema.parse({
+  const output = tavilySearchOutputSchema.parse({
     topic: parsed.topic,
+    requestId: data.request_id,
+    usage: typeof data.usage?.credits === 'number' ? { credits: data.usage.credits } : undefined,
     results: data.results?.map((result) => ({
       title: result.title,
       url: result.url,
@@ -70,6 +85,25 @@ export async function searchTavily(
       score: result.score,
     })) ?? [],
   });
+  if (usageContext) {
+    await captureResearchProviderUsage({
+      provider: 'tavily',
+      operation: 'search',
+      runId: usageContext.runId,
+      entityKind: usageContext.entityKind,
+      entityId: usageContext.entityId,
+      dimensionKey: usageContext.dimensionKey,
+      requestId: output.requestId,
+      providerCredits: output.usage?.credits,
+    });
+  }
+  annotateWorkflow({
+    provider: 'tavily',
+    'taicho.provider.request_ref': output.requestId,
+    'taicho.usage.credits': output.usage?.credits,
+    'taicho.research.evidence_count': output.results.length,
+  });
+  return output;
 }
 
 export const tavilySearchTool = createTool({

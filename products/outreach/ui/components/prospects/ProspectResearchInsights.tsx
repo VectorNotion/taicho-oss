@@ -124,7 +124,7 @@ export function ProspectResearchInsights({
   account,
   accountLoading,
   companyName,
-  isResearching,
+  isResearching = false,
   onResearch,
 }: {
   persona: PersonaInsights | null;
@@ -132,8 +132,8 @@ export function ProspectResearchInsights({
   account: CompanySummary | null;
   accountLoading: boolean;
   companyName?: string;
-  isResearching: boolean;
-  onResearch: () => void;
+  isResearching?: boolean;
+  onResearch?: () => void;
 }) {
   const hasResearch = Boolean(persona?.dimensions.length)
     || account?.icpScore != null
@@ -144,12 +144,12 @@ export function ProspectResearchInsights({
 
   return (
     <ListCard
-      actions={(
+      actions={onResearch ? (
         <Button disabled={isResearching} onClick={onResearch} size="sm" variant="secondary">
           {isResearching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
           {isResearching ? "Researching…" : hasResearch ? "Re-research" : "Research"}
         </Button>
-      )}
+      ) : undefined}
       description="What research found about this person and their company, with evidence behind each score."
       title="Research insights"
     >

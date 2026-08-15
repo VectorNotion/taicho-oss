@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { dedicatedDatabaseRolesRequired } from "@content-automation/database";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -33,9 +34,9 @@ function runtimeDatabaseConfig(organizationId: string) {
   if (process.env.PUBLISHING_DATABASE_URL) {
     return { connectionString: process.env.PUBLISHING_DATABASE_URL, options };
   }
-  if (process.env.NODE_ENV === "production") {
+  if (dedicatedDatabaseRolesRequired()) {
     throw new Error(
-      "PUBLISHING_DATABASE_URL is required in production and must use a non-superuser, non-BYPASSRLS role.",
+      "PUBLISHING_DATABASE_URL is required in production or strict database-role mode and must use a non-superuser, non-BYPASSRLS role.",
     );
   }
   return { ...baseConfig(), options };
@@ -57,8 +58,8 @@ export function getPublishingAdminPool(): Pool {
   if (!globalThis.__publishingAdminPool) {
     const options = `-csearch_path=${publishingSchemaName()}`;
     const connectionString = process.env.PUBLISHING_ADMIN_DATABASE_URL;
-    if (!connectionString && process.env.NODE_ENV === "production") {
-      throw new Error("PUBLISHING_ADMIN_DATABASE_URL is required in production.");
+    if (!connectionString && dedicatedDatabaseRolesRequired()) {
+      throw new Error("PUBLISHING_ADMIN_DATABASE_URL is required in production or strict database-role mode.");
     }
     globalThis.__publishingAdminPool = new Pool({
       ...(connectionString ? { connectionString } : baseConfig()),

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildOutreachPrompt } from '../agent/generator';
+import {
+  DEFAULT_OUTREACH_PROMPT_CONTENT,
+  renderOutreachPromptTemplate,
+  validateOutreachPromptContent,
+} from '../domain/outreach-prompts';
 import type {
   Prospect,
   ProspectActivity,
@@ -87,20 +92,40 @@ test('outreach prompt grounds generation in the full prospect history without le
 
 test('outreach prompt enforces a customer-first pain, path, next-step structure', () => {
   const prompt = buildOutreachPrompt(prospect, research, 'email');
+  const completeInstructions = `${DEFAULT_OUTREACH_PROMPT_CONTENT.systemInstructions}\n${prompt}`;
 
-  assert.match(prompt, /1\. THEIR PAIN/);
-  assert.match(prompt, /2\. THE PATH/);
-  assert.match(prompt, /3\. NEXT STEP/);
-  assert.match(prompt, /recipient must remain the subject/i);
-  assert.match(prompt, /never open with the sender/i);
-  assert.match(prompt, /at most one compact verified proof clause/i);
-  assert.match(prompt, /one concrete offer and one easy action/i);
-  assert.match(prompt, /only place first-person language is allowed/i);
+  assert.match(completeInstructions, /their evidence-grounded pain and its consequence/i);
+  assert.match(completeInstructions, /practical path forward/i);
+  assert.match(completeInstructions, /one concrete next step with one easy action/i);
+  assert.match(completeInstructions, /at most one verified proof clause/i);
+  assert.match(completeInstructions, /never introduce the sender/i);
   assert.match(prompt, /Hi Ada,/);
-  assert.match(prompt, /one or two sentences each/i);
-  assert.match(prompt, /blank line between them/i);
-  assert.match(prompt, /Do not write "I built"/i);
-  assert.match(prompt, /merely adjacent rather than directly relevant, omit it/i);
+  assert.match(prompt, /separate short paragraphs/i);
+  assert.match(prompt, /Do not use first-person language before the final concrete offer/i);
+  assert.match(completeInstructions, /omit weak or adjacent proof/i);
   assert.doesNotMatch(prompt, /Open with something TRUE about your work/);
   assert.doesNotMatch(prompt, /Reference your ACTUAL documented work/);
+});
+
+test('workspace templates compile documented variables without invoking a model', () => {
+  const compiled = renderOutreachPromptTemplate(
+    'Hi {{ first_name }} — {{prospect_context}} — {{target_content}}',
+    {
+      first_name: 'Ada',
+      prospect_context: 'Founder at Analytical Engines',
+      resonance_context: 'Reliable automation',
+      target_content: 'Scaling operations',
+    },
+  );
+
+  assert.equal(compiled, 'Hi Ada — Founder at Analytical Engines — Scaling operations');
+});
+
+test('workspace prompt validation rejects undocumented variables', () => {
+  const content = structuredClone(DEFAULT_OUTREACH_PROMPT_CONTENT);
+  content.mediumTemplates.email += '\n{{secret_token}}';
+
+  assert.deepEqual(validateOutreachPromptContent(content), [
+    'email uses unsupported variable {{secret_token}}.',
+  ]);
 });

@@ -45,9 +45,11 @@ export async function drainTouchpointWrites(): Promise<void> {
  * operation (same contract as emitProductEvent).
  */
 function scheduleFollowUp(prospectId: string, prospectName: string): void {
-  const task = ensureFollowUpForProspect(prospectId, prospectName).catch((error) => {
-    console.error('action_items.auto_followup_failed', error);
-  });
+  const task = ensureFollowUpForProspect(prospectId, prospectName)
+    .then(() => undefined)
+    .catch((error) => {
+      console.error('action_items.auto_followup_failed', error);
+    });
   touchpointWritesInFlight.add(task);
   void task.finally(() => touchpointWritesInFlight.delete(task));
 }
@@ -846,6 +848,74 @@ export async function createOutreachMessage(
   }
 }
 
+/**
+ * Idempotent persistence boundary for AI-generated drafts; the browser keeps a
+ * generation id across transport retries, so the graph can return the original
+ * draft instead of creating a duplicate.
+ */
+export async function createGeneratedOutreachMessage(
+  data: CreateOutreachInput & { generationId: string; generationType: 'initial' | 'follow_up' },
+  attemptId: string,
+): Promise<{ message: OutreachMessage; created: boolean }> {
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `
+      MATCH (l:Prospect {id: $prospectId})
+      MERGE (m:OutreachMessage {prospectId: $prospectId, generationId: $generationId})
+      ON CREATE SET
+        m.id = randomUUID(),
+        m.medium = $medium,
+        m.subject = $subject,
+        m.content = $content,
+        m.targetContent = $targetContent,
+        m.landingPageUrl = $landingPageUrl,
+        m.landingPageSlug = $landingPageSlug,
+        m.reportId = $reportId,
+        m.linkedContentId = $linkedContentId,
+        m.linkedContentUrl = $linkedContentUrl,
+        m.status = $status,
+        m.generationType = $generationType,
+        m.promptKey = $promptKey,
+        m.promptVersion = $promptVersion,
+        m.promptContentHash = $promptContentHash,
+        m.createdByAttemptId = $attemptId,
+        m.createdAt = localdatetime(),
+        m.updatedAt = localdatetime(),
+        m.sentAt = null
+      MERGE (l)-[:HAS_OUTREACH]->(m)
+      RETURN m, m.createdByAttemptId = $attemptId AS created
+      `,
+      {
+        prospectId: data.prospectId,
+        generationId: data.generationId,
+        generationType: data.generationType,
+        promptKey: data.promptKey ?? null,
+        promptVersion: data.promptVersion ?? null,
+        promptContentHash: data.promptContentHash ?? null,
+        attemptId,
+        medium: data.medium,
+        subject: data.subject ?? null,
+        content: data.content,
+        targetContent: data.targetContent ?? null,
+        landingPageUrl: data.landingPageUrl ?? null,
+        landingPageSlug: data.landingPageSlug ?? null,
+        reportId: data.reportId ?? null,
+        linkedContentId: data.linkedContentId ?? null,
+        linkedContentUrl: data.linkedContentUrl ?? null,
+        status: data.status ?? 'draft',
+      },
+    );
+    if (result.records.length === 0) throw new Error(`Prospect not found: ${data.prospectId}`);
+    return {
+      message: mapOutreachFromNeo4j(result.records[0].get('m').properties),
+      created: Boolean(result.records[0].get('created')),
+    };
+  } finally {
+    await session.close();
+  }
+}
+
 export async function getProspectOutreach(
   prospectId: string
 ): Promise<OutreachMessage[]> {
@@ -1090,6 +1160,15 @@ function mapOutreachFromNeo4j(message: Record<string, unknown>): OutreachMessage
     createdAt: message.createdAt?.toString() ?? new Date().toISOString(),
     updatedAt: message.updatedAt?.toString() ?? new Date().toISOString(),
     sentAt: message.sentAt?.toString(),
+    generationId: (message.generationId as string | null) ?? undefined,
+    generationType: (message.generationType as OutreachMessage['generationType'] | null) ?? undefined,
+    promptKey: (message.promptKey as string | null) ?? undefined,
+    promptVersion: message.promptVersion == null
+      ? undefined
+      : typeof (message.promptVersion as { toNumber?: () => number }).toNumber === 'function'
+        ? (message.promptVersion as { toNumber: () => number }).toNumber()
+        : Number(message.promptVersion),
+    promptContentHash: (message.promptContentHash as string | null) ?? undefined,
   };
 }
 

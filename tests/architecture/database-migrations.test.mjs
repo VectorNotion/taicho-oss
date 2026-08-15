@@ -92,6 +92,7 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0021_action_items_followup_unique",
       "0022_grant_renamed_outreach_tables",
       "0023_restore_jobs_runtime_grant",
+      "0024_restore_jobs_admin_grant",
     ],
   );
 });
@@ -139,6 +140,20 @@ test("the tenant-scoped jobs runtime can manage durable job lifecycle rows", asy
 
   const migrator = await readFile("packages/database/migrate.ts", "utf8");
   assert.match(migrator, /\["public\.jobs", \["SELECT", "INSERT", "UPDATE", "DELETE"\]\]/);
+});
+
+test("the jobs control plane has bounded discovery and cleanup privileges", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0024_restore_jobs_admin_grant.sql",
+    "utf8",
+  );
+  assert.match(migration, /GRANT SELECT, DELETE ON TABLE "jobs" TO jobs_admin/i);
+  assert.doesNotMatch(migration, /GRANT[^;]*(?:INSERT|UPDATE|TRUNCATE)/i);
+  assert.doesNotMatch(migration, /SUPERUSER/i);
+
+  const migrator = await readFile("packages/database/migrate.ts", "utf8");
+  assert.match(migrator, /configuredDatabaseRole\("JOBS_ADMIN_DATABASE_URL"\)/);
+  assert.match(migrator, /role must have BYPASSRLS/);
 });
 
 test("capability control-plane grants are migration-managed and column-restricted", async () => {

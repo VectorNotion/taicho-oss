@@ -8,13 +8,18 @@
  * Timing dimensions never pass through this module.
  */
 import { z } from 'zod';
+import { traceable } from '@content-automation/observability';
 import { effectiveConfidence } from '../domain/scoring';
 import type {
   DimensionDefinition,
   DimensionMatch,
   ObservationRecord,
 } from '../domain/qualification';
-import { defaultCompleteJson, type DimensionResearchDeps } from './dimension-research';
+import {
+  DEFAULT_RESEARCH_MODEL,
+  defaultCompleteJson,
+  type DimensionResearchDeps,
+} from './dimension-research';
 
 export const matchEvaluationSchema = z.object({
   matches: z.array(
@@ -74,12 +79,32 @@ export async function evaluateFitMatches(
 
   const completeJson = deps.completeJson ?? defaultCompleteJson;
 
-  const raw = await completeJson({
+  const system =
+    'You compare research observations against ideal values. Semantic evaluation only; policy, recency and confidence are handled deterministically elsewhere. Return only JSON.';
+  const prompt = buildEvaluationPrompt(evaluable, observations);
+  const model = process.env.OUTREACH_RESEARCH_MODEL?.trim() || DEFAULT_RESEARCH_MODEL;
+  const tracedCompletion = traceable(completeJson, {
+    name: 'research.match_evaluation',
+    kind: 'generation',
+    attributes: {
+      provider: 'openrouter',
+      'llm.provider': 'openrouter',
+      'llm.model_name': model,
+      'taicho.provider.model': model,
+      'taicho.research.dimension_count': evaluable.length,
+    },
+    processInputs: ([input]) => ({
+      model,
+      system: input.system,
+      prompt: input.prompt,
+      schema: input.schemaName,
+    }),
+  });
+  const raw = await tracedCompletion({
     schemaName: 'match_evaluation',
     schema: matchEvaluationSchema,
-    system:
-      'You compare research observations against ideal values. Semantic evaluation only; policy, recency and confidence are handled deterministically elsewhere. Return only JSON.',
-    prompt: buildEvaluationPrompt(evaluable, observations),
+    system,
+    prompt,
   });
   const parsed = matchEvaluationSchema.parse(raw);
   const evaluated = new Map(parsed.matches.map((m) => [m.dimensionKey, m]));

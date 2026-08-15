@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { dedicatedDatabaseRolesRequired } from "@content-automation/database";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -35,9 +36,9 @@ function runtimeDatabaseConfig(organizationId: string) {
   if (process.env.CASCADE_DATABASE_URL) {
     return { connectionString: process.env.CASCADE_DATABASE_URL, options };
   }
-  if (process.env.NODE_ENV === "production") {
+  if (dedicatedDatabaseRolesRequired()) {
     throw new Error(
-      "CASCADE_DATABASE_URL is required in production and must use a non-superuser, non-BYPASSRLS role.",
+      "CASCADE_DATABASE_URL is required in production or strict database-role mode and must use a non-superuser, non-BYPASSRLS role.",
     );
   }
   return { ...baseConfig(), options };
@@ -59,8 +60,8 @@ export function getCascadeAdminPool(): Pool {
   if (!globalThis.__cascadeAdminPool) {
     const options = `-csearch_path=${schemaName()}`;
     const connectionString = process.env.CASCADE_ADMIN_DATABASE_URL;
-    if (!connectionString && process.env.NODE_ENV === "production") {
-      throw new Error("CASCADE_ADMIN_DATABASE_URL is required in production.");
+    if (!connectionString && dedicatedDatabaseRolesRequired()) {
+      throw new Error("CASCADE_ADMIN_DATABASE_URL is required in production or strict database-role mode.");
     }
     globalThis.__cascadeAdminPool = new Pool({
       ...(connectionString ? { connectionString } : baseConfig()),

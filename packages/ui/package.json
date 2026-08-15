@@ -13,6 +13,7 @@
     "./components/ui/button": "./components/ui/button.tsx",
     "./components/ui/card": "./components/ui/card.tsx",
     "./components/ui/input": "./components/ui/input.tsx",
+    "./components/ui/revealable-secret-input": "./components/ui/revealable-secret-input.tsx",
     "./components/ui/label": "./components/ui/label.tsx",
     "./components/ui/select": "./components/ui/select.tsx",
     "./components/ui/skeleton": "./components/ui/skeleton.tsx",

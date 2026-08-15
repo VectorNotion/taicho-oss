@@ -9,7 +9,28 @@ import type {
   SpanExporter,
   TimedEvent,
 } from "@opentelemetry/sdk-trace-base";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { externalIdentityRef } from "./context";
+import { serializeWorkflowContent } from "./workflow";
+
+const WORKFLOW_CONTENT_ATTRIBUTE_KEYS = new Set([
+  "taicho.content.input",
+  "taicho.content.output",
+  "taicho.content.error",
+  "input.value",
+  "output.value",
+]);
+const WORKFLOW_CONTENT_METADATA_KEY = /^taicho\.content\.(input|output|error)\.(bytes|sha256|truncated)$/;
+const SAFE_AI_METADATA_KEYS = new Set([
+  "llm.provider",
+  "llm.model_name",
+  "llm.token_count.prompt",
+  "llm.token_count.completion",
+  "llm.token_count.completion_details.reasoning",
+  "llm.token_count.prompt_details.cache_input",
+  "llm.token_count.total",
+  "llm.cost.total",
+]);
 
 const SAFE_ATTRIBUTE_KEYS = new Set([
   "http.method",
@@ -38,6 +59,9 @@ const SAFE_ATTRIBUTE_KEYS = new Set([
   "messaging.destination.name",
   "messaging.batch.message_count",
   "error.type",
+  "input.mime_type",
+  "output.mime_type",
+  "openinference.span.kind",
   "exception.type",
   "capability_id",
   "http_method",
@@ -108,11 +132,22 @@ const SAFE_ATTRIBUTE_KEYS = new Set([
 const SAFE_ATTRIBUTE_PREFIXES = [
   "taicho.",
   "ai.",
+  "llm.",
+  "openinference.",
+  "retrieval.",
+  "tool.",
   "cascade.",
   "publishing.",
   "job.",
   "test.",
 ] as const;
+const SAFE_RESOURCE_KEYS = new Set([
+  "service.name",
+  "service.namespace",
+  "service.version",
+  "deployment.environment.name",
+  "openinference.project.name",
+]);
 const CORRELATION_ID_KEYS = new Set([
   "taicho.execution.id",
   "taicho.request.id",
@@ -133,9 +168,19 @@ const SENSITIVE_ATTRIBUTE_KEY = /(^|[._-])(authorization|cookie|credential|email
 const SENSITIVE_VALUE = /(bearer\s+[a-z0-9._~+/-]+=*|api[_-]?key\s*[:=]|password\s*[:=]|secret\s*[:=])/i;
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 
-function safeValue(value: unknown): AttributeValue | undefined {
+function safeValue(key: string, value: unknown): AttributeValue | undefined {
   if (typeof value === "boolean" || typeof value === "number") return value;
   if (typeof value === "string") {
+    if (WORKFLOW_CONTENT_ATTRIBUTE_KEYS.has(key)) {
+      try {
+        return serializeWorkflowContent(JSON.parse(value)).value;
+      } catch {
+        return value
+          .replaceAll(EMAIL, "[REDACTED]")
+          .replace(SENSITIVE_VALUE, "[REDACTED]")
+          .slice(0, 64 * 1024);
+      }
+    }
     if (SENSITIVE_VALUE.test(value)) return "[REDACTED]";
     return value.replaceAll(EMAIL, "[REDACTED]").slice(0, 512);
   }
@@ -149,6 +194,8 @@ function safeValue(value: unknown): AttributeValue | undefined {
 }
 
 function permittedAttribute(key: string): boolean {
+  if (WORKFLOW_CONTENT_ATTRIBUTE_KEYS.has(key) || WORKFLOW_CONTENT_METADATA_KEY.test(key)) return true;
+  if (SAFE_AI_METADATA_KEYS.has(key)) return true;
   if (SAFE_ATTRIBUTE_KEYS.has(key)) return true;
   if (SENSITIVE_ATTRIBUTE_KEY.test(key)) return false;
   return SAFE_ATTRIBUTE_PREFIXES.some((prefix) => key.startsWith(prefix));
@@ -158,7 +205,7 @@ export function safeOtelAttributes(input: Attributes): Attributes {
   const output: Attributes = {};
   for (const [key, value] of Object.entries(input)) {
     if (!permittedAttribute(key)) continue;
-    const safe = safeValue(value);
+    const safe = safeValue(key, value);
     if (safe === undefined) continue;
     output[key] = typeof safe === "string"
       && (key.endsWith("_id") || key.endsWith(".id"))
@@ -212,6 +259,9 @@ function safeLink(link: Link): Link {
 
 export function privacySafeReadableSpan(span: ReadableSpan): ReadableSpan {
   const status: SpanStatus = { code: span.status.code };
+  const resourceAttributes = Object.fromEntries(
+    Object.entries(span.resource?.attributes ?? {}).filter(([key]) => SAFE_RESOURCE_KEYS.has(key)),
+  );
   return {
     name: spanName(span),
     kind: span.kind,
@@ -225,7 +275,7 @@ export function privacySafeReadableSpan(span: ReadableSpan): ReadableSpan {
     events: span.events.map(safeEvent),
     duration: span.duration,
     ended: span.ended,
-    resource: span.resource,
+    resource: resourceFromAttributes(resourceAttributes),
     instrumentationScope: span.instrumentationScope,
     droppedAttributesCount: span.droppedAttributesCount,
     droppedEventsCount: span.droppedEventsCount,
@@ -245,6 +295,39 @@ export class PrivacySafeSpanExporter implements SpanExporter {
     resultCallback: Parameters<SpanExporter["export"]>[1],
   ): void {
     this.delegate.export(spans.map(privacySafeReadableSpan), resultCallback);
+  }
+
+  forceFlush(): Promise<void> {
+    return this.delegate.forceFlush?.() ?? Promise.resolve();
+  }
+
+  shutdown(): Promise<void> {
+    return this.delegate.shutdown();
+  }
+}
+
+/**
+ * Keeps the default OTLP trace stream focused on deliberate workflow spans.
+ * Infrastructure spans remain available only through an explicit debug opt-in.
+ */
+export class WorkflowFocusedSpanExporter implements SpanExporter {
+  constructor(
+    private readonly delegate: SpanExporter,
+    private readonly includeInfrastructure = false,
+  ) {}
+
+  export(
+    spans: ReadableSpan[],
+    resultCallback: Parameters<SpanExporter["export"]>[1],
+  ): void {
+    const selected = this.includeInfrastructure
+      ? spans
+      : spans.filter((span) => span.attributes["taicho.trace.category"] === "workflow");
+    if (selected.length === 0) {
+      resultCallback({ code: 0 });
+      return;
+    }
+    this.delegate.export(selected, resultCallback);
   }
 
   forceFlush(): Promise<void> {

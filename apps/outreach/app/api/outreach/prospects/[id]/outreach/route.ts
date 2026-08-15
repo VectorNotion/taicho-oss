@@ -56,7 +56,7 @@ export async function POST(
    try {
     const { id } = await params;
     const body = await request.json();
-    const { medium, content, subject, targetContent, generate } = body;
+    const { medium, content, subject, targetContent, generate, generationId } = body;
 
     // Validate medium
     const validMediums = ['inmail', 'inmail_traditional', 'email', 'content_comment'];
@@ -65,6 +65,9 @@ export async function POST(
         { error: `Invalid medium. Must be one of: ${validMediums.join(', ')}` },
         { status: 400, headers: corsHeaders }
       );
+    }
+    if (generationId !== undefined && !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(generationId)) {
+      return NextResponse.json({ error: 'A valid generation id is required.' }, { status: 400, headers: corsHeaders });
     }
 
     // Verify prospect exists
@@ -80,6 +83,7 @@ export async function POST(
         prospectId: id,
         medium: medium as OutreachMedium,
         targetContent,
+        generationId,
         signal: AbortSignal.any([request.signal, AbortSignal.timeout(OUTREACH_TIMEOUT_MS)]),
       });
 

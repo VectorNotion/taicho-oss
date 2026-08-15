@@ -27,9 +27,13 @@ export async function POST(
     const body = await request.json() as {
       medium?: string;
       targetContent?: string;
+      generationId?: string;
     };
     if (!body.medium || !VALID_MEDIA.has(body.medium as OutreachMedium)) {
       return Response.json({ error: 'A valid outreach medium is required.' }, { status: 400 });
+    }
+    if (body.generationId !== undefined && !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(body.generationId)) {
+      return Response.json({ error: 'A valid generation id is required.' }, { status: 400 });
     }
 
     const medium = body.medium as OutreachMedium;
@@ -59,6 +63,7 @@ export async function POST(
             prospectId: id,
             medium,
             targetContent: body.targetContent,
+            generationId: body.generationId,
           }, {
             onProgress: writeProgress,
             onPartial: (partial) => writer.write({

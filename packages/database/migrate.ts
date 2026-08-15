@@ -204,6 +204,33 @@ async function verifyDatabaseGrants(db: ReturnType<typeof databaseFor>) {
     }
   }
 
+  const jobsAdmin = configuredDatabaseRole("JOBS_ADMIN_DATABASE_URL");
+  if (jobsAdmin) {
+    const roleAttributes = await db.execute<{
+      bypassRls: boolean;
+      superuser: boolean;
+    }>(sql`
+      SELECT rolbypassrls AS "bypassRls", rolsuper AS superuser
+      FROM pg_roles
+      WHERE rolname = ${jobsAdmin.role}
+    `);
+    const attributes = roleAttributes.rows[0];
+    if (!attributes?.bypassRls) {
+      missing.push(`${jobsAdmin.environmentName} role must have BYPASSRLS`);
+    }
+    if (attributes?.superuser) {
+      missing.push(`${jobsAdmin.environmentName} role must not be SUPERUSER`);
+    }
+    for (const privilege of ["SELECT", "DELETE"] as const) {
+      const tableGrant = await db.execute<{ allowed: boolean }>(sql`
+        SELECT has_table_privilege(${jobsAdmin.role}, 'public.jobs', ${privilege}) AS allowed
+      `);
+      if (!tableGrant.rows[0]?.allowed) {
+        missing.push(`${jobsAdmin.environmentName} lacks ${privilege} on public.jobs`);
+      }
+    }
+  }
+
   const capabilityAdmin = configuredDatabaseRole(
     "CAPABILITY_ADMIN_DATABASE_URL",
     "MCP_ADMIN_DATABASE_URL",

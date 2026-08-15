@@ -20,7 +20,7 @@ import {
   closeExecutionLedger,
   ensureExecutionLedger,
 } from "./ledger";
-import { PrivacySafeSpanExporter } from "./otel-privacy";
+import { PrivacySafeSpanExporter, WorkflowFocusedSpanExporter } from "./otel-privacy";
 
 type ObservabilityState = {
   start?: Promise<void>;
@@ -49,6 +49,10 @@ function enabled(): boolean {
 function cloudExportConfigured(): boolean {
   return enabled()
     || Boolean(process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY);
+}
+
+function infrastructureTracesEnabled(): boolean {
+  return process.env.OBSERVABILITY_INCLUDE_INFRASTRUCTURE_SPANS === "true";
 }
 
 const ATTRIBUTION_HEADERS = [
@@ -114,48 +118,62 @@ export async function initializeObservability(options: NodeObservabilityOptions)
   state.start = (async () => {
     const [
       { NodeSDK },
-      { getNodeAutoInstrumentations },
       { OTLPTraceExporter },
       { OTLPMetricExporter },
       { PeriodicExportingMetricReader },
       { resourceFromAttributes },
     ] = await Promise.all([
       import("@opentelemetry/sdk-node"),
-      import("@opentelemetry/auto-instrumentations-node"),
-      import("@opentelemetry/exporter-trace-otlp-http"),
+      import("@opentelemetry/exporter-trace-otlp-proto"),
       import("@opentelemetry/exporter-metrics-otlp-http"),
       import("@opentelemetry/sdk-metrics"),
       import("@opentelemetry/resources"),
     ]);
 
+    const includeInfrastructure = infrastructureTracesEnabled();
+    const instrumentations = [];
+    if (includeInfrastructure) {
+      const { getNodeAutoInstrumentations } = await import("@opentelemetry/auto-instrumentations-node");
+      instrumentations.push(getNodeAutoInstrumentations({
+        "@opentelemetry/instrumentation-fs": { enabled: false },
+        "@opentelemetry/instrumentation-http": {
+          requestHook: (span, request) => {
+            const execution = activateIncomingHttpAttribution(request);
+            if (execution) span.setAttributes(executionAttributes(execution));
+          },
+        },
+      }));
+    }
+
+    const metricReader = process.env.OBSERVABILITY_WORKFLOW_ONLY === "true"
+      ? undefined
+      : new PeriodicExportingMetricReader({
+        exporter: new OTLPMetricExporter(),
+        exportIntervalMillis: Number(process.env.OTEL_METRIC_EXPORT_INTERVAL ?? 60_000),
+      });
     const sdk = new NodeSDK({
+      // Process/host detectors expose command arguments, source code, usernames,
+      // host identifiers and executable paths that do not belong in AI traces.
+      autoDetectResources: false,
       resource: resourceFromAttributes({
         "service.name": options.serviceName,
         "service.version": options.serviceVersion ?? process.env.DD_VERSION ?? "development",
         "deployment.environment.name": process.env.DD_ENV ?? process.env.NODE_ENV ?? "development",
+        "openinference.project.name": process.env.OTEL_PROJECT_NAME ?? options.serviceName,
       }),
-      traceExporter: new PrivacySafeSpanExporter(new OTLPTraceExporter()),
-      metricReader: new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter(),
-        exportIntervalMillis: Number(process.env.OTEL_METRIC_EXPORT_INTERVAL ?? 60_000),
-      }),
-      instrumentations: [
-        getNodeAutoInstrumentations({
-          "@opentelemetry/instrumentation-fs": { enabled: false },
-          "@opentelemetry/instrumentation-http": {
-            requestHook: (span, request) => {
-              const execution = activateIncomingHttpAttribution(request);
-              if (execution) span.setAttributes(executionAttributes(execution));
-            },
-          },
-        }),
-      ],
+      traceExporter: new WorkflowFocusedSpanExporter(
+        new PrivacySafeSpanExporter(new OTLPTraceExporter()),
+        includeInfrastructure,
+      ),
+      ...(metricReader ? { metricReader } : {}),
+      instrumentations,
     });
     await sdk.start();
     state.sdk = sdk;
     log.info("observability.export.started", {
       service_name: options.serviceName,
       environment: process.env.DD_ENV ?? process.env.NODE_ENV ?? "development",
+      trace_mode: includeInfrastructure ? "workflow+infrastructure" : "workflow",
     });
   })();
 

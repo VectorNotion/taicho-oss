@@ -70,4 +70,6 @@ next-env.d.ts
 artifacts/
 !apps/unified/app/api/intelligence/v1/artifacts/
 !apps/unified/app/api/intelligence/v1/artifacts/**
+# Local recordings and other runtime exports
+.data/
 .firecrawl/

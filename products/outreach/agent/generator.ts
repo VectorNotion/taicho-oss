@@ -7,9 +7,10 @@
  * - Projects from Neo4j (via tools)
  * - Never fabricates clients, projects, or experiences.
  */
+import { randomUUID } from 'node:crypto';
 import { createOutreachAgent, OUTREACH_GENERATION_MAX_STEPS } from './mastra-agent';
 import { createLogger, currentExecutionContext, observeOperation } from '@content-automation/observability';
-import { emitProductEventFromContext } from '@content-automation/platform/events/emit';
+import { recordProductEventFromContext } from '@content-automation/platform/events/emit';
 import { getSettings } from '@content-automation/platform/settings/repository';
 import {
   getProspectById,
@@ -17,9 +18,12 @@ import {
   getProspectNotes,
   getProspectActivities,
   getProspectOutreach,
-  createOutreachMessage,
+  createGeneratedOutreachMessage,
+  deleteOutreachMessage,
 } from '../data/prospect-repository';
+import { deleteActionItem, ensureGeneratedFollowUp } from '../data/action-item-repository';
 import { getProspectIntelligenceWorkspace } from '../data/prospect-intelligence-repository';
+import { getActiveOutreachPromptVersion } from '../data/outreach-prompt-repository';
 import type {
   Prospect,
   ProspectActivity,
@@ -30,6 +34,11 @@ import type {
 } from '../domain/types';
 import type { ProspectIntelligenceWorkspace } from '../domain/prospect-intelligence';
 import { formatOutreachContent } from '../domain/outreach-format';
+import {
+  DEFAULT_OUTREACH_PROMPT_CONTENT,
+  renderOutreachPromptTemplate,
+  type OutreachPromptContent,
+} from '../domain/outreach-prompts';
 import { z } from 'zod';
 
 const log = createLogger('outreach-generator');
@@ -50,6 +59,10 @@ export interface GenerateOutreachInput {
   medium: OutreachMedium;
   targetContent?: string; // For content_comment
   signal?: AbortSignal;
+  /** Stable across a transport retry; a completed click gets a new id. */
+  generationId?: string;
+  generationType?: 'initial' | 'follow_up';
+  promptVersion?: { key: string; version: number; contentHash: string };
 }
 
 export interface GenerateOutreachResult {
@@ -171,6 +184,7 @@ export function buildOutreachPrompt(
   medium: OutreachMedium,
   targetContent?: string,
   context: OutreachPromptContext = {},
+  promptContent: OutreachPromptContent = DEFAULT_OUTREACH_PROMPT_CONTENT,
 ): string {
   const firstName = prospect.name.trim().split(/\s+/)[0] || prospect.name;
   const prospectContext = `
@@ -196,106 +210,42 @@ ${research.talkingPoints.map((tp) => `- ${tp}`).join('\n')}
 `
     : '';
 
-  let mediumInstructions = '';
-
-  switch (medium) {
-    case 'inmail':
-      mediumInstructions = `
-## Task: Write an InMail
-
-**FIRST:** Use \`list-projects\` to find one verified proof point relevant to their problem.
-
-**Your InMail must follow this order:**
-0. Start with "Hi ${firstName}," on its own line, followed by a blank line
-1. Their industry or operating pain and its consequence
-2. The practical path to solve it, with at most one directly relevant, impersonally written proof clause
-3. One concrete thing you will do next and one easy action for them; this is the only place first-person language is allowed
-
-Keep the message about the recipient. Do not introduce yourself or summarize your background.
-Write each numbered move as its own short paragraph of one or two sentences. Separate every paragraph with a blank line. Never return one wall of text.
-
-**Do NOT:**
-- Invent client stories or projects
-- Claim you "were just working with [similar role]" unless true
-- Fabricate conversations or outcomes
-`;
-      break;
-
-    case 'inmail_traditional':
-      mediumInstructions = `
-## Task: Write a Traditional InMail
-
-A lighter touch using the same customer-first structure.
-
-**Your message should:**
-- Start with "Hi ${firstName}," on its own line, followed by a blank line
-- Start with their industry or operating pain
-- Give a useful path forward, with at most one verified proof clause
-- End with one clear, low-friction next step
-- Never introduce or profile the sender
-- Use short paragraphs of one or two sentences, separated by blank lines
-`;
-      break;
-
-    case 'email':
-      mediumInstructions = `
-## Task: Write a Cold Email
-
-**FIRST:** Use \`list-projects\` to find one verified proof point relevant to their problem.
-
-**Your email should:**
-- Subject: 3-6 words about their problem or desired outcome, honest and not clickbait
-- Start with "Hi ${firstName}," on its own line, followed by a blank line
-- Open with their industry or operating pain, never with the sender
-- Explain the practical path, using at most one compact verified proof clause
-- End with one concrete offer and one easy action for them
-- Stay under 120 words total
-- Do not use first-person language before the final concrete offer
-- Put pain, path, and next step in separate short paragraphs of one or two sentences each, with a blank line between them
-`;
-      break;
-
-    case 'content_comment':
-      mediumInstructions = `
-## Task: Write a Comment on Their Content
-
-**Their content:**
-"""
-${targetContent || 'No target content provided'}
-"""
-
-This is the one case where you CAN reference their specific content (since you're commenting on it).
-
-**Your comment should:**
-- Engage with a specific point they made
-- Add a useful implication or practical path for their audience
-- Avoid turning the comment into a sender credential or capabilities pitch
-- 2-4 sentences max
-`;
-      break;
-  }
-
-  return `${prospectContext}
-${resonanceContext}
-${mediumInstructions}
-
-## Non-negotiable structure
-1. THEIR PAIN: a grounded industry/operating problem and consequence.
-2. THE PATH: what needs to happen to solve it; at most one short, directly relevant proof clause written impersonally, never a sender biography or credential.
-3. NEXT STEP: one concrete thing the sender will do and one low-friction action for the recipient. This is the only place first-person language is allowed, and only as a concrete offer (for example, "I can send..." or "I can map...").
-
-For email and InMail, write "Hi ${firstName}," as the first line, then a blank line. Keep every body paragraph to one or two sentences and separate paragraphs with a blank line. Content comments are the only medium that should not use this greeting format.
-
-Generate the outreach now. The recipient must remain the subject of the message. Never open with the sender, never include an introduction, and never fabricate proof. Do not write "I built", "I recently", "I've", "I'd love", "we built", "we delivered", "my", or "our" anywhere in the message. If a project is merely adjacent rather than directly relevant, omit it.
-
-Output ONLY a JSON object with: subject (if applicable), content, reportUrl/reportSlug/reportId (if report created).`;
+  return renderOutreachPromptTemplate(promptContent.mediumTemplates[medium], {
+    first_name: firstName,
+    prospect_context: prospectContext,
+    resonance_context: resonanceContext,
+    target_content: targetContent || 'No target content provided',
+  });
 }
 
-async function saveGeneratedOutreach(
+export interface SaveGeneratedOutreachDeps {
+  createMessage: typeof createGeneratedOutreachMessage;
+  ensureFollowUp: typeof ensureGeneratedFollowUp;
+  recordEvent: typeof recordProductEventFromContext;
+  deleteMessage: typeof deleteOutreachMessage;
+  deleteAction: typeof deleteActionItem;
+  attemptId: () => string;
+}
+
+const defaultSaveDeps: SaveGeneratedOutreachDeps = {
+  createMessage: createGeneratedOutreachMessage,
+  ensureFollowUp: ensureGeneratedFollowUp,
+  recordEvent: recordProductEventFromContext,
+  deleteMessage: deleteOutreachMessage,
+  deleteAction: deleteActionItem,
+  attemptId: randomUUID,
+};
+
+export async function saveGeneratedOutreach(
   input: GenerateOutreachInput,
   parsed: OutreachOutput,
+  prospectName: string,
+  deps: Partial<SaveGeneratedOutreachDeps> = {},
 ): Promise<OutreachMessage> {
-  const message = await createOutreachMessage({
+  const d = { ...defaultSaveDeps, ...deps };
+  const generationId = input.generationId ?? randomUUID();
+  const generationType = input.generationType ?? 'initial';
+  const saved = await d.createMessage({
     prospectId: input.prospectId,
     medium: input.medium,
     subject: parsed.subject ?? undefined,
@@ -305,21 +255,57 @@ async function saveGeneratedOutreach(
     landingPageSlug: parsed.reportSlug ?? undefined,
     reportId: parsed.reportId ?? undefined,
     status: 'draft',
-  });
+    generationId,
+    generationType,
+    promptKey: input.promptVersion?.key,
+    promptVersion: input.promptVersion?.version,
+    promptContentHash: input.promptVersion?.contentHash,
+  }, d.attemptId());
+  let nextAction: Awaited<ReturnType<typeof ensureGeneratedFollowUp>> | null = null;
+
+  try {
+    nextAction = await d.ensureFollowUp({
+      prospectId: input.prospectId,
+      prospectName,
+      messageId: saved.message.id,
+      medium: input.medium,
+      generationType,
+    });
+
+    if (saved.created) {
+      await d.recordEvent({
+        name: 'outreach.generated',
+        refs: { prospectId: input.prospectId },
+        payload: {
+          messageId: saved.message.id,
+          medium: input.medium,
+          generationId,
+          generationType,
+          cadenceKey: nextAction.payload?.cadenceKey,
+          cadenceVersion: nextAction.payload?.cadenceVersion,
+          promptKey: input.promptVersion?.key,
+          promptVersion: input.promptVersion?.version,
+          promptContentHash: input.promptVersion?.contentHash,
+        },
+      });
+    }
+  } catch (error) {
+    if (saved.created) {
+      if (nextAction?.payload?.triggerMessageId === saved.message.id) {
+        await d.deleteAction(nextAction.id).catch(() => undefined);
+      }
+      await d.deleteMessage(saved.message.id).catch(() => undefined);
+    }
+    throw error;
+  }
 
   log.info('outreach.message.saved', {
     prospect_id: input.prospectId,
-    message_id: message.id,
+    message_id: saved.message.id,
     medium: input.medium,
+    follow_up_id: nextAction.id,
   });
-
-  emitProductEventFromContext({
-    name: 'outreach.generated',
-    refs: { prospectId: input.prospectId },
-    payload: { messageId: message.id, medium: input.medium },
-  });
-
-  return message;
+  return { ...saved.message, nextAction };
 }
 
 /**
@@ -347,13 +333,14 @@ export async function generateOutreach(
       })
     : Promise.resolve(null);
 
-  const [research, settings, notes, activities, priorMessages, intelligence] = await Promise.all([
+  const [research, settings, notes, activities, priorMessages, intelligence, promptVersion] = await Promise.all([
     getProspectResearch(prospectId),
     getSettings(),
     getProspectNotes(prospectId),
     getProspectActivities(prospectId),
     getProspectOutreach(prospectId),
     intelligencePromise,
+    getActiveOutreachPromptVersion(),
   ]);
 
   // Build prompt with storytelling approach
@@ -362,14 +349,14 @@ export async function generateOutreach(
     activities,
     priorMessages,
     intelligence,
-  });
+  }, promptVersion.content);
 
   // Create agent with user's identity/voice/mission
   const agent = createOutreachAgent({
     identity: settings.identity,
     voice: settings.voice,
     mission: settings.mission,
-  });
+  }, promptVersion.content.systemInstructions);
 
   // Use structured output (replaces regex-JSON parsing). Keep the same
   // graceful error return shape on failure.
@@ -398,7 +385,16 @@ export async function generateOutreach(
     };
   }
 
-  const message = await saveGeneratedOutreach(input, parsed);
+  const generationType = input.generationType ?? (priorMessages.length > 0 ? 'follow_up' : 'initial');
+  const message = await saveGeneratedOutreach({
+    ...input,
+    generationType,
+    promptVersion: {
+      key: promptVersion.key,
+      version: promptVersion.version,
+      contentHash: promptVersion.contentHash,
+    },
+  }, parsed, prospect.name);
 
   return { success: true, message };
 }
@@ -431,25 +427,26 @@ export async function streamOutreach(
         return null;
       })
     : Promise.resolve(null);
-  const [research, settings, notes, activities, priorMessages, intelligence] = await Promise.all([
+  const [research, settings, notes, activities, priorMessages, intelligence, promptVersion] = await Promise.all([
     getProspectResearch(prospectId),
     getSettings(),
     getProspectNotes(prospectId),
     getProspectActivities(prospectId),
     getProspectOutreach(prospectId),
     intelligencePromise,
+    getActiveOutreachPromptVersion(),
   ]);
   const prompt = buildOutreachPrompt(prospect, research, medium, targetContent, {
     notes,
     activities,
     priorMessages,
     intelligence,
-  });
+  }, promptVersion.content);
   const agent = createOutreachAgent({
     identity: settings.identity,
     voice: settings.voice,
     mission: settings.mission,
-  });
+  }, promptVersion.content.systemInstructions);
 
   callbacks.onProgress?.({
     id: 'context',
@@ -509,14 +506,23 @@ export async function streamOutreach(
   });
   callbacks.onProgress?.({
     id: 'save',
-    label: '3. Save the draft for review',
+    label: '3. Save the draft and schedule its next follow-up',
     state: 'running',
   });
 
-  const message = await saveGeneratedOutreach(input, parsed);
+  const generationType = input.generationType ?? (priorMessages.length > 0 ? 'follow_up' : 'initial');
+  const message = await saveGeneratedOutreach({
+    ...input,
+    generationType,
+    promptVersion: {
+      key: promptVersion.key,
+      version: promptVersion.version,
+      contentHash: promptVersion.contentHash,
+    },
+  }, parsed, prospect.name);
   callbacks.onProgress?.({
     id: 'save',
-    label: '3. Saved to outreach drafts',
+    label: '3. Draft saved and next follow-up scheduled',
     state: 'complete',
   });
   return message;

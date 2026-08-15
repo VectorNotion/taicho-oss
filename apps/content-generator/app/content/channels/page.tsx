@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RevealableSecretInput } from "@/components/ui/revealable-secret-input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/PageHeader";
@@ -307,9 +308,9 @@ export default function ChannelsPage() {
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="cms-api-key">API key</Label>
-                      <Input
+                      <RevealableSecretInput
                         id="cms-api-key"
-                        type="password"
+                        secretLabel="API key"
                         value={cmsApiKey}
                         onChange={(e) => setCmsApiKey(e.target.value)}
                       />
@@ -370,9 +371,9 @@ export default function ChannelsPage() {
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="webhook-secret">Signing secret</Label>
-                      <Input
+                      <RevealableSecretInput
                         id="webhook-secret"
-                        type="password"
+                        secretLabel="signing secret"
                         value={webhookSecret}
                         onChange={(e) => setWebhookSecret(e.target.value)}
                       />

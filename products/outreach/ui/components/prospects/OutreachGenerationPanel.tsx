@@ -34,7 +34,7 @@ export interface OutreachGenerationStep {
 const STAGES = [
   { id: "context", label: "Understand their pain" },
   { id: "draft", label: "Shape the path and next step" },
-  { id: "save", label: "Save the draft" },
+  { id: "save", label: "Save and schedule follow-up" },
 ] as const;
 
 const MEDIUM = {
@@ -116,7 +116,7 @@ export function OutreachGenerationPanel({
             </div>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
               {isComplete
-                ? `Saved ${prospectName}'s customer-first message to outreach drafts.`
+                ? `Saved ${prospectName}'s customer-first message and scheduled the next follow-up.`
                 : `Building the message around ${prospectName}'s problem, the path to solve it, and one clear next step.`}
             </p>
           </div>

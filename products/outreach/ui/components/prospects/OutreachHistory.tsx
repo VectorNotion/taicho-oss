@@ -220,6 +220,7 @@ export function OutreachHistory({
               meta={[
                 mediumConfig.label,
                 formatDate(message.createdAt),
+                message.promptVersion ? `Prompt v${message.promptVersion}` : null,
                 message.targetContent
                   ? `Commenting on: ${message.targetContent}`
                   : null,

@@ -173,6 +173,13 @@ export interface OutreachMessage {
   createdAt: string;
   updatedAt: string;
   sentAt?: string;
+  /** Present on a just-generated response so the UI can show the durable next step immediately. */
+  nextAction?: import("./action-items").ActionItem;
+  generationId?: string;
+  generationType?: import("./action-items").FollowUpGenerationType;
+  promptKey?: string;
+  promptVersion?: number;
+  promptContentHash?: string;
 }
 
 export interface OutreachMessageWithProspect {
@@ -192,6 +199,11 @@ export interface CreateOutreachInput {
   linkedContentId?: string;
   linkedContentUrl?: string;
   status?: OutreachStatus;
+  generationId?: string;
+  generationType?: import("./action-items").FollowUpGenerationType;
+  promptKey?: string;
+  promptVersion?: number;
+  promptContentHash?: string;
 }
 
 export interface UpdateOutreachInput {

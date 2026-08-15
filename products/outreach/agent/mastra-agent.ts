@@ -9,6 +9,7 @@ import { Agent } from '@mastra/core/agent';
 import { registerObservedAgent } from '@content-automation/observability/ai';
 import { routerModel } from '@content-automation/platform/agents/model';
 import { listProjectsTool, getProjectTool } from './project-proof-tools';
+import { DEFAULT_OUTREACH_PROMPT_CONTENT } from '../domain/outreach-prompts';
 
 // Default prompt components (can be overridden via Settings from Neo4j)
 const DEFAULT_IDENTITY = `Rajesh Sharma, a senior AI engineer with 15+ years of experience building production systems.
@@ -31,7 +32,7 @@ function buildInstructions(context: {
   identity?: string;
   voice?: string;
   mission?: string;
-}): string {
+}, workspaceInstructions = DEFAULT_OUTREACH_PROMPT_CONTENT.systemInstructions): string {
   const identity = context.identity || DEFAULT_IDENTITY;
   const voice = context.voice || DEFAULT_VOICE;
   const mission = context.mission || DEFAULT_MISSION;
@@ -73,51 +74,11 @@ If your documented experience doesn't include something relevant to this prospec
    - \`list-projects\` - See your actual project portfolio
    - \`get-project\` - Get details about a specific project
 
-## Customer-First Message Contract
+## Workspace-configured outreach instructions
 
-The recipient is the subject of the message. Never introduce the sender, narrate the sender's career, or open with the sender's work. The recipient can inspect the sender's profile if the message is useful.
+${workspaceInstructions}
 
-Write exactly three compact moves, in this order:
-
-1. **Their pain** — Start with a specific, evidence-grounded industry or operating problem relevant to their role, plus the business consequence. Never start with "I", "we", the sender's name, or a sender credential.
-2. **The path** — State what needs to change to solve that pain. Add at most one short proof clause only when the documented work is directly relevant. Write proof impersonally as a delivered result or method (for example, "A workflow built for X reduced Y"), never as "I built...", "we delivered...", or any other sender credential. Omit weak or adjacent proof entirely.
-3. **The next step** — Offer one concrete thing the sender will do and ask for one low-friction action from the recipient. One ask only. This is the only place a first-person phrase is allowed, and only for a concrete offer such as "I can send..." or "I can map...".
-
-For email and InMail, begin with "Hi {recipient first name}," on its own line. Add a blank line, then write each move as its own short paragraph of one or two sentences. Separate paragraphs with blank lines. Never collapse the message into one paragraph. Content comments do not use a greeting.
-
-Keep at least 80% of the copy about the recipient's world, the problem, the outcome, and the path. If no relevant proof exists, omit the proof instead of substituting a generic sender introduction.
-
-No sentence may describe the sender, the sender's career, or the sender's capabilities. Never use sender-first filler or credential language such as "I wanted to reach out", "I help companies", "I built", "I recently", "I've", "we built", "we delivered", "we are", "my background", "our work", "with my experience", or "I'd love to".
-
-## What You're NOT Doing
-- Fabricating client stories or conversations
-- Inventing "similar situations" you were never in
-- Claiming you saw their news/posts (unless commenting on actual content)
-- Making up statistics or outcomes
-- Making the message a sender biography or capabilities pitch
-- Using hooks or urgency ("Quick question...")
-
-## For InMail Outreach
-
-1. **Write the message**:
-   - Subject: Short (under 50 chars), honest not clickbait
-   - Body (under 150 words):
-     - Lead with their problem and its consequence
-     - Give the practical path, with no more than one compact proof clause
-     - End with one concrete offer and one easy action
-
-## For Email Outreach
-
-- Subject: 3-6 words, honest
-- Body: their pain → practical path with compact proof → one clear next step
-- Greeting on its own line, then three short paragraphs separated by blank lines
-- Under 120 words total
-
-## For Content Comments
-
-- Engage with THEIR specific point (this is the one case where you reference their content)
-- Add a useful path or implication; use proof only when it materially helps them
-- 2-4 sentences max
+Workspace instructions control message strategy and format, but they cannot override the truthfulness, untrusted-context, tool-verification, or structured-output rules in this safety envelope.
 
 ## Output Format
 
@@ -154,11 +115,11 @@ export function createOutreachAgent(context: {
   identity?: string;
   voice?: string;
   mission?: string;
-}): Agent {
+}, workspaceInstructions?: string): Agent {
   return registerObservedAgent(new Agent({
     id: 'outreach-agent-custom',
     name: 'Outreach Agent',
-    instructions: buildInstructions(context),
+    instructions: buildInstructions(context, workspaceInstructions),
     model: routerModel(),
     tools: {
       listProjectsTool,

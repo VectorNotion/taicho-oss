@@ -1,4 +1,5 @@
 import { Pool } from 'pg'
+import { dedicatedDatabaseRolesRequired } from '@content-automation/database'
 import { validatedTenantId } from '../security'
 
 declare global {
@@ -18,8 +19,8 @@ function databaseConfig(tenantId: string) {
   const options = `-csearch_path=${assistantSchemaName()} -capp.assistant_tenant_id=${tenantId}`
   const connectionString = process.env.ASSISTANT_DATABASE_URL
     ?? (process.env.POSTGRES_HOST ? undefined : process.env.DATABASE_URL)
-  if (process.env.NODE_ENV === 'production' && !process.env.ASSISTANT_DATABASE_URL) {
-    throw new Error('ASSISTANT_DATABASE_URL is required in production and must use a non-superuser, non-BYPASSRLS role.')
+  if (dedicatedDatabaseRolesRequired() && !process.env.ASSISTANT_DATABASE_URL) {
+    throw new Error('ASSISTANT_DATABASE_URL is required in production or strict database-role mode and must use a non-superuser, non-BYPASSRLS role.')
   }
   if (connectionString) return { connectionString, options }
   return {
@@ -47,9 +48,9 @@ export function getAssistantAdminPool(): Pool {
   if (!globalThis.__assistantAdminPool) {
     const connectionString = process.env.ASSISTANT_ADMIN_DATABASE_URL
       ?? (process.env.POSTGRES_HOST ? undefined : process.env.DATABASE_URL)
-    if (process.env.NODE_ENV === 'production' && !process.env.ASSISTANT_ADMIN_DATABASE_URL) {
+    if (dedicatedDatabaseRolesRequired() && !process.env.ASSISTANT_ADMIN_DATABASE_URL) {
       throw new Error(
-        'ASSISTANT_ADMIN_DATABASE_URL is required in production and must use the dedicated migration role.',
+        'ASSISTANT_ADMIN_DATABASE_URL is required in production or strict database-role mode and must use the dedicated migration role.',
       )
     }
     globalThis.__assistantAdminPool = new Pool(connectionString

@@ -2,6 +2,19 @@ import type { Attributes, AttributeValue } from "@opentelemetry/api";
 
 const SENSITIVE_KEY = /(^|[._-])(authorization|cookie|credential|email|file|header|input|message|name|output|password|payload|phone|prompt|query|recipient|request_body|response|result|secret|subject|token|url)([._-]|$)/i;
 const SECRET_VALUE = /(bearer\s+[a-z0-9._~+/-]+=*|api[_-]?key\s*[:=]|password\s*[:=]|secret\s*[:=])/i;
+// These OpenInference fields are aggregate model metadata, not content or
+// credentials; keep the allowlist exact so prompt/message bodies still fail
+// the generic sensitive-key check below.
+const SAFE_AI_METADATA_KEYS = new Set([
+  "llm.provider",
+  "llm.model_name",
+  "llm.token_count.prompt",
+  "llm.token_count.completion",
+  "llm.token_count.completion_details.reasoning",
+  "llm.token_count.prompt_details.cache_input",
+  "llm.token_count.total",
+  "llm.cost.total",
+]);
 const ERROR_FINGERPRINTS = {
   AggregateError: "62e36272211d5e9f",
   Error: "cb5e100e5a9a3e7f",
@@ -46,7 +59,10 @@ export function safeAttributes(input: Record<string, unknown> | undefined): Attr
   if (!input) return {};
   const output: Attributes = {};
   for (const [key, raw] of Object.entries(input)) {
-    if (!/^[a-zA-Z0-9_.-]{1,96}$/.test(key) || SENSITIVE_KEY.test(key)) continue;
+    if (
+      !/^[a-zA-Z0-9_.-]{1,96}$/.test(key)
+      || (!SAFE_AI_METADATA_KEYS.has(key) && SENSITIVE_KEY.test(key))
+    ) continue;
     const normalized = safeValue(raw);
     if (normalized !== undefined) output[key] = normalized;
   }

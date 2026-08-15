@@ -1,5 +1,14 @@
 import type { PoolConfig } from "pg";
 
+/**
+ * Production and strict local development must never silently fall back from a
+ * tenant-scoped database role to the generic application connection.
+ */
+export function dedicatedDatabaseRolesRequired(): boolean {
+  return process.env.NODE_ENV === "production"
+    || process.env.DATABASE_ROLE_MODE?.trim().toLowerCase() === "strict";
+}
+
 export function adminPoolConfig(): PoolConfig {
   const connectionString =
     process.env.DRIZZLE_DATABASE_URL ??

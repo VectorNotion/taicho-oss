@@ -7,7 +7,13 @@
  *
  * Fit gates. Timing ranks.
  */
-import { createLogger, observeOperation } from '@content-automation/observability';
+import {
+  createLogger,
+  observeOperation,
+  observeWorkflow,
+  observeWorkflowStep,
+  traceable,
+} from '@content-automation/observability';
 import { emitProductEventFromContext } from '@content-automation/platform/events/emit';
 import {
   getProspectById as getProspectByIdDefault,
@@ -29,6 +35,7 @@ import {
   type QualificationThresholds,
 } from '../domain/qualification';
 import type { Prospect } from '../domain/types';
+import { summarizeDatabaseRead } from './research-tracing';
 
 const log = createLogger('prospect-qualification');
 
@@ -60,6 +67,32 @@ const defaultDeps: QualifyProspectDeps = {
   thresholds: DEFAULT_THRESHOLDS,
 };
 
+const loadQualificationContext = traceable(
+  async (prospectId: string, deps: QualifyProspectDeps) => {
+    const prospect = await deps.getProspectById(prospectId);
+    if (!prospect) throw new Error(`Prospect not found: ${prospectId}`);
+    const account = await deps.resolveAccountForProspect(prospect);
+    const accountScore = account ? await deps.getAccountScore(account.id) : null;
+    const prospectScore = await deps.getProspectScore(prospectId);
+    const loaded = { prospect, account, accountScore, prospectScore };
+    return {
+      ...loaded,
+      database: summarizeDatabaseRead('load_qualification_context', loaded, account ? 4 : 3, {
+        prospects: 1,
+        accounts: account ? 1 : 0,
+        accountScores: accountScore ? 1 : 0,
+        prospectScores: prospectScore ? 1 : 0,
+      }),
+    };
+  },
+  {
+    name: 'research.qualification.load_context',
+    kind: 'data',
+    attributes: { 'taicho.data.system': 'falkordb', 'taicho.data.operation': 'load_qualification_context' },
+    processInputs: ([prospectId]) => ({ prospectId }),
+  },
+);
+
 /**
  * Decide a prospect's qualification from the already-computed entity scores.
  * @param prospectId - the prospect to qualify
@@ -70,66 +103,86 @@ export async function runQualifyProspect(
   deps: Partial<QualifyProspectDeps> = {},
 ): Promise<QualifyProspectResult> {
   const d: QualifyProspectDeps = { ...defaultDeps, ...deps };
-  return observeOperation('outreach.prospect.qualify', { runId: prospectId, attributes: { prospect_id: prospectId } }, async () => {
-    const prospect = await d.getProspectById(prospectId);
-    if (!prospect) throw new Error(`Prospect not found: ${prospectId}`);
+  return observeOperation('outreach.prospect.qualify', { runId: prospectId, attributes: { prospect_id: prospectId } }, () =>
+    observeWorkflow('research.qualification', {
+      kind: 'workflow',
+      input: { prospectId },
+      attributes: { 'taicho.research.entity_kind': 'prospect' },
+    }, async (workflow) => {
+      const { prospect, account, accountScore, prospectScore } = await loadQualificationContext(prospectId, d);
+      const now = d.now();
 
-    const now = d.now();
-    const account = await d.resolveAccountForProspect(prospect);
-    const accountScore = account ? await d.getAccountScore(account.id) : null;
-    const prospectScore = await d.getProspectScore(prospectId);
-
-    const icpScore = accountScore?.icpScore ?? 0;
-    const timingScore = accountScore?.timingScore ?? 0;
-    const personaScore = prospectScore?.personaScore ?? 0;
-    const hardExcluded = Boolean(accountScore?.hardExcluded) || Boolean(prospectScore?.hardExcluded);
-
-    let status: ProspectQualificationResult['status'];
-    let reviewReason: string | undefined;
-
-    if (!account) {
-      // No company → account fit is unknowable; a human decides (spec §3).
-      status = 'REVIEW';
-      reviewReason = 'prospect has no company; account fit is unknown';
-    } else {
-      const baseline = decideStatus({ icpScore, personaScore, hardExcluded, thresholds: d.thresholds });
-      const confident = decideStatus({
-        icpScore: accountScore?.icpScoreConfident ?? 0,
-        personaScore: prospectScore?.personaScoreConfident ?? 0,
-        hardExcluded,
+      const icpScore = accountScore?.icpScore ?? 0;
+      const timingScore = accountScore?.timingScore ?? 0;
+      const personaScore = prospectScore?.personaScore ?? 0;
+      const hardExcluded = Boolean(accountScore?.hardExcluded) || Boolean(prospectScore?.hardExcluded);
+      workflow.setInput({
+        prospect: { id: prospect.id, name: prospect.name, title: prospect.title, company: prospect.company },
+        account: account ? { id: account.id, name: account.name } : null,
+        scores: {
+          icp: icpScore,
+          icpConfident: accountScore?.icpScoreConfident ?? 0,
+          persona: personaScore,
+          personaConfident: prospectScore?.personaScoreConfident ?? 0,
+          timing: timingScore,
+          hardExcluded,
+        },
         thresholds: d.thresholds,
       });
-      if (!hardExcluded && confident !== baseline) {
-        // The decision flips when low-confidence findings are excluded (spec §8).
+
+      let status: ProspectQualificationResult['status'];
+      let reviewReason: string | undefined;
+
+      if (!account) {
+        // No company → account fit is unknowable; a human decides (spec §3).
         status = 'REVIEW';
-        reviewReason = `decision depends on low-confidence findings: ${baseline} → ${confident} when excluded`;
+        reviewReason = 'prospect has no company; account fit is unknown';
       } else {
-        status = baseline;
+        const baseline = decideStatus({ icpScore, personaScore, hardExcluded, thresholds: d.thresholds });
+        const confident = decideStatus({
+          icpScore: accountScore?.icpScoreConfident ?? 0,
+          personaScore: prospectScore?.personaScoreConfident ?? 0,
+          hardExcluded,
+          thresholds: d.thresholds,
+        });
+        if (!hardExcluded && confident !== baseline) {
+          // The decision flips when low-confidence findings are excluded (spec §8).
+          status = 'REVIEW';
+          reviewReason = `decision depends on low-confidence findings: ${baseline} → ${confident} when excluded`;
+        } else {
+          status = baseline;
+        }
       }
-    }
 
-    const qualification: ProspectQualificationResult = {
-      status,
-      icpScore,
-      personaScore,
-      timingScore,
-      icpMatches: [],
-      personaMatches: [],
-      timingBreakdown: accountScore?.timingBreakdown ?? [],
-      reviewReason,
-      computedAt: now.toISOString(),
-    };
+      const qualification: ProspectQualificationResult = {
+        status,
+        icpScore,
+        personaScore,
+        timingScore,
+        icpMatches: [],
+        personaMatches: [],
+        timingBreakdown: accountScore?.timingBreakdown ?? [],
+        reviewReason,
+        computedAt: now.toISOString(),
+      };
 
-    await d.saveProspectQualification(prospectId, qualification);
-    await d.updateProspectPriorityByScore(prospectId, Math.round(icpScore));
+      await observeWorkflowStep('research.qualification.persist', {
+        kind: 'persistence',
+        input: { prospectId, qualification, priorityScore: Math.round(icpScore) },
+      }, async () => {
+        await d.saveProspectQualification(prospectId, qualification);
+        await d.updateProspectPriorityByScore(prospectId, Math.round(icpScore));
+        return { qualificationWritten: true, priorityWritten: true };
+      });
 
-    emitProductEventFromContext({
-      name: 'prospect.qualified',
-      refs: { prospectId },
-      payload: { status, icpScore, personaScore, timingScore },
-    });
+      emitProductEventFromContext({
+        name: 'prospect.qualified',
+        refs: { prospectId },
+        payload: { status, icpScore, personaScore, timingScore },
+      });
 
-    log.info('outreach.qualification.completed', { prospect_id: prospectId, status, icp_score: icpScore, persona_score: personaScore, timing_score: timingScore });
-    return { status: 'success', qualification };
-  });
+      log.info('outreach.qualification.completed', { prospect_id: prospectId, status, icp_score: icpScore, persona_score: personaScore, timing_score: timingScore });
+      return { status: 'success', qualification };
+    }),
+  );
 }

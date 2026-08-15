@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, useCallback, useRef, use } from "react";
 import { toast } from "sonner";
 import { ArrowLeft, GitBranch, Loader2, UserX } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,17 +32,14 @@ import {
   NextActionCard,
   ProspectNotes,
   ProspectIntelligenceTabs,
-  CompanySummaryBar,
+  ProspectDossierCard,
   ProspectResearchInsights,
   OutreachGenerationPanel,
-  type CompanySummary,
   type OutreachDraftPartial,
-  type PersonaInsights,
   type ProspectNavigation,
   type Activity,
 } from "@/components/prospects";
 import type { ActionItem } from "@/products/outreach/domain/action-items";
-import { QualificationCard } from "@/components/prospects/QualificationCard";
 import { useActionStream } from "@/hooks/use-action-stream";
 import {
   Select,
@@ -51,12 +48,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ProspectQualificationResult } from "@/products/outreach/domain/qualification";
+import type { ProspectDossier } from "@/products/outreach/domain/prospect-dossier";
 import type {
   Prospect,
   ProspectNote,
   ProspectStatus,
-  LegacyQualification,
   OutreachMessage,
   OutreachMedium,
   ProspectActivity,
@@ -69,12 +65,6 @@ type ConfirmDelete =
   | { type: "message"; id: string };
 
 type NurtureFunnel = { id: string; name: string };
-
-/** GET /qualify payload: new dimension-based result plus the legacy flat score. */
-type QualificationPayload = {
-  prospect: ProspectQualificationResult | null;
-  legacy: LegacyQualification | null;
-};
 
 export default function ProspectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: routeProspectId } = use(params);
@@ -89,18 +79,15 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   const [outreachMessages, setOutreachMessages] = useState<OutreachMessage[]>([]);
   const [outreachLoading, setOutreachLoading] = useState(true);
   const [outreachMedium, setOutreachMedium] = useState<OutreachMedium | null>(null);
+  const generationAttemptRef = useRef<{ key: string; id: string } | null>(null);
   const [showOutreachCompletion, setShowOutreachCompletion] = useState(false);
   const [contentCommentDialogOpen, setContentCommentDialogOpen] = useState(false);
   const [targetContent, setTargetContent] = useState("");
   const [addActivityDialogOpen, setAddActivityDialogOpen] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [persona, setPersona] = useState<PersonaInsights | null>(null);
-  const [personaLoading, setPersonaLoading] = useState(true);
-  const [qualification, setQualification] = useState<QualificationPayload | null>(null);
-  const [qualificationLoading, setQualificationLoading] = useState(true);
-  const [account, setAccount] = useState<CompanySummary | null>(null);
-  const [accountLoading, setAccountLoading] = useState(true);
+  const [dossier, setDossier] = useState<ProspectDossier | null>(null);
+  const [dossierLoading, setDossierLoading] = useState(true);
   const [notes, setNotes] = useState<ProspectNote[]>([]);
   const [notesLoading, setNotesLoading] = useState(true);
   const [activities, setActivities] = useState<ProspectActivity[]>([]);
@@ -118,55 +105,31 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   const qualifyStream = useActionStream<{ score?: number; notes?: string }, { score?: number }>({
     api: `/api/outreach/prospects/${prospectId}/qualify/stream`,
   });
-  const research = useDimensionResearch(`/api/outreach/prospects/${prospectId}/research/stream`);
+  const personResearch = useDimensionResearch(
+    `/api/outreach/prospects/${prospectId}/research/person/stream`,
+    { primaryScope: "person" },
+  );
+  const accountResearch = useDimensionResearch(
+    `/api/outreach/prospects/${prospectId}/research/account/stream`,
+    { primaryScope: "account" },
+  );
   const outreachGeneration = useActionStream<OutreachDraftPartial, OutreachMessage>({
     api: `/api/outreach/prospects/${prospectId}/outreach/stream`,
   });
   const isGeneratingOutreach = outreachGeneration.isStreaming;
 
-  const fetchPersona = useCallback(async () => {
+  const fetchDossier = useCallback(async (options?: { silent?: boolean }) => {
     if (!prospectId) return;
-    setPersonaLoading(true);
+    if (!options?.silent) setDossierLoading(true);
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/persona`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Failed to fetch persona");
-      setPersona(await response.json());
+      const response = await fetch(`/api/outreach/prospects/${prospectId}/dossier`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to fetch dossier");
+      setDossier(await response.json());
     } catch (error) {
-      console.error("Error fetching persona:", error);
-      toast.error("Could not load persona fit — refresh to try again");
+      console.error("Error fetching dossier:", error);
+      toast.error("Could not load the sales-intelligence dossier — refresh to try again");
     } finally {
-      setPersonaLoading(false);
-    }
-  }, [prospectId]);
-
-  const fetchAccount = useCallback(async () => {
-    if (!prospectId) return;
-    setAccountLoading(true);
-    try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/account`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Failed to fetch account");
-      const data = await response.json();
-      setAccount(data.account ?? null);
-    } catch (error) {
-      console.error("Error fetching account:", error);
-      setAccount(null);
-    } finally {
-      setAccountLoading(false);
-    }
-  }, [prospectId]);
-
-  const fetchQualification = useCallback(async (options?: { silent?: boolean }) => {
-    if (!prospectId) return;
-    if (!options?.silent) setQualificationLoading(true);
-    try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/qualify`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Failed to fetch qualification");
-      setQualification(await response.json());
-    } catch (error) {
-      console.error("Error fetching qualification:", error);
-      toast.error("Could not load qualification — refresh to try again");
-    } finally {
-      if (!options?.silent) setQualificationLoading(false);
+      if (!options?.silent) setDossierLoading(false);
     }
   }, [prospectId]);
 
@@ -253,33 +216,29 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     if (!qualifyStream.final || !prospectId) return;
-    void fetchQualification({ silent: true });
-  }, [qualifyStream.final, fetchQualification, prospectId]);
+    void fetchDossier({ silent: true });
+  }, [qualifyStream.final, fetchDossier, prospectId]);
   useEffect(() => { if (qualifyStream.error) toast.error(qualifyStream.error); }, [qualifyStream.error]);
 
-  // Fetch persona (prospect fit) detail
+  // One endpoint provides the account, person, and qualification snapshot so
+  // scores from different refreshes are never stitched together in the UI.
   useEffect(() => {
-    void fetchPersona();
-  }, [fetchPersona]);
+    void fetchDossier();
+  }, [fetchDossier]);
 
-  // Fetch the prospect's company as an account summary (fit / timing / target).
   useEffect(() => {
-    void fetchAccount();
-  }, [fetchAccount]);
+    if (!personResearch.final || !prospectId) return;
+    toast.success("Person research complete");
+    void fetchDossier({ silent: true });
+  }, [personResearch.final, fetchDossier, prospectId]);
+  useEffect(() => { if (personResearch.error) toast.error(personResearch.error); }, [personResearch.error]);
 
-  // Research persists persona, optional account, and final qualification before
-  // the stream completes. Refresh all three together so every insight and score
-  // switches to the same research snapshot.
   useEffect(() => {
-    if (!research.final || !prospectId) return;
-    toast.success("Research complete");
-    void Promise.all([
-      fetchPersona(),
-      fetchAccount(),
-      fetchQualification({ silent: true }),
-    ]);
-  }, [research.final, fetchPersona, fetchAccount, fetchQualification, prospectId]);
-  useEffect(() => { if (research.error) toast.error(research.error); }, [research.error]);
+    if (!accountResearch.final || !prospectId) return;
+    toast.success("Account research complete");
+    void fetchDossier({ silent: true });
+  }, [accountResearch.final, fetchDossier, prospectId]);
+  useEffect(() => { if (accountResearch.error) toast.error(accountResearch.error); }, [accountResearch.error]);
 
   // The AI SDK stream saves the completed artifact before emitting `final`.
   // Move that durable message into the visible draft history immediately; the
@@ -287,6 +246,7 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   useEffect(() => {
     const message = outreachGeneration.final;
     if (!message) return;
+    generationAttemptRef.current = null;
     setShowOutreachCompletion(true);
     setOutreachMessages((current) => [
       message,
@@ -294,6 +254,13 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     ]);
     setContentCommentDialogOpen(false);
     setTargetContent("");
+    if (message.nextAction) {
+      setActionItems((current) => [
+        message.nextAction!,
+        ...current.filter((item) => item.source !== "auto_followup" && item.id !== message.nextAction!.id),
+      ]);
+      setActionItemsLoading(false);
+    }
     toast.success("Customer-first outreach draft ready");
     const completionTimer = window.setTimeout(() => setShowOutreachCompletion(false), 1_800);
     return () => window.clearTimeout(completionTimer);
@@ -301,11 +268,6 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
   useEffect(() => {
     if (outreachGeneration.error) toast.error(outreachGeneration.error);
   }, [outreachGeneration.error]);
-
-  // Fetch qualification.
-  useEffect(() => {
-    void fetchQualification();
-  }, [fetchQualification]);
 
   // Fetch notes
   useEffect(() => {
@@ -581,8 +543,14 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     setShowOutreachCompletion(false);
     setOutreachMedium(medium);
     if (medium === "content_comment") setContentCommentDialogOpen(false);
+    const generationKey = `${medium}:${targetContentValue ?? ""}`;
+    const generationId = generationAttemptRef.current?.key === generationKey
+      ? generationAttemptRef.current.id
+      : crypto.randomUUID();
+    generationAttemptRef.current = { key: generationKey, id: generationId };
     outreachGeneration.start({
       medium,
+      generationId,
       ...(targetContentValue ? { targetContent: targetContentValue } : {}),
     });
   };
@@ -788,8 +756,45 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     );
   }
 
-  const includeCompanyResearch = Boolean(account || prospect.company || research.accountDimensions.length > 0);
-  const showResearchProgress = research.isStreaming || Boolean(research.error);
+  const personaInsights = dossier ? {
+    personaScore: dossier.person.personaScore,
+    dimensions: dossier.person.findings.map((finding) => ({
+      dimensionKey: finding.dimensionKey,
+      observedValue: finding.observedValue,
+      evidence: finding.evidence,
+      confidence: finding.confidence,
+      matchScore: finding.match?.matchScore,
+      effectiveMatch: finding.match?.effectiveMatch,
+      classification: finding.match?.classification,
+      hardExclusion: finding.match?.hardExclusion,
+    })),
+  } : null;
+  const accountInsights = dossier?.account ? {
+    id: dossier.account.id,
+    name: dossier.account.name,
+    prospectCount: dossier.account.prospectCount,
+    qualifiedCount: dossier.account.qualifiedCount,
+    icpScore: dossier.account.icpScore,
+    timingScore: dossier.account.timingScore,
+    isTarget: dossier.account.isTarget,
+    hardExcluded: dossier.account.hardExcluded,
+    computedAt: dossier.account.computedAt ?? undefined,
+    icpObservations: dossier.account.fitFindings.map((finding) => ({
+      dimensionKey: finding.dimensionKey,
+      observedValue: finding.observedValue,
+      evidence: finding.evidence,
+      effectiveMatch: finding.match?.effectiveMatch,
+      hardExclusion: finding.match?.hardExclusion,
+    })),
+    timingSignals: dossier.account.timingFindings.map((finding) => ({
+      dimensionKey: finding.dimensionKey,
+      signals: finding.signals,
+      dimensionValue: finding.dimensionValue ?? undefined,
+      signalCount: finding.signalCount,
+    })),
+  } : null;
+  const showPersonResearchProgress = personResearch.isStreaming || Boolean(personResearch.error);
+  const showAccountResearchProgress = accountResearch.isStreaming || Boolean(accountResearch.error);
 
   return (
     <div className="w-full min-w-0 space-y-8">
@@ -822,10 +827,15 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
         />
       </div>
 
-      <CompanySummaryBar
-        account={account}
-        companyName={prospect.company || undefined}
-        isLoading={accountLoading}
+      <ProspectDossierCard
+        dossier={dossier}
+        isLoading={dossierLoading}
+        isResearchingAccount={accountResearch.isStreaming}
+        isResearchingPerson={personResearch.isStreaming}
+        isRequalifying={qualifyStream.isStreaming}
+        onResearchAccount={() => accountResearch.start()}
+        onResearchPerson={() => personResearch.start()}
+        onRequalify={() => qualifyStream.start()}
       />
 
       <ProspectIntelligenceTabs
@@ -848,56 +858,50 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
         overview={(
           <div className="space-y-4">
             <ProspectResearchInsights
-              account={account}
-              accountLoading={accountLoading}
+              account={accountInsights}
+              accountLoading={dossierLoading}
               companyName={prospect.company || undefined}
-              isResearching={research.isStreaming}
-              onResearch={() => research.start()}
-              persona={persona}
-              personaLoading={personaLoading}
+              persona={personaInsights}
+              personaLoading={dossierLoading}
             />
 
-            {showResearchProgress ? (
+            {showPersonResearchProgress ? (
               <ResearchProgressPanel
-                error={research.error}
+                error={personResearch.error}
                 groups={[
                   {
                     id: "person",
                     entityName: prospect.name,
                     kind: "person",
                     label: "Person research",
-                    dimensions: research.dimensions,
+                    dimensions: personResearch.dimensions,
                     pendingLabel: "Loading the persona criteria for this person.",
                   },
-                  ...(includeCompanyResearch
-                    ? [{
-                        id: "account",
-                        entityName: account?.name ?? prospect.company ?? "Company",
-                        kind: "account" as const,
-                        label: "Company research",
-                        dimensions: research.accountDimensions,
-                        pendingLabel: "Queued after the person's persona fit has been evaluated.",
-                      }]
-                    : []),
                 ]}
-                isComplete={research.isComplete}
-                isStreaming={research.isStreaming}
+                isComplete={personResearch.isComplete}
+                isStreaming={personResearch.isStreaming}
+              />
+            ) : null}
+
+            {showAccountResearchProgress ? (
+              <ResearchProgressPanel
+                error={accountResearch.error}
+                groups={[{
+                  id: "account",
+                  entityName: dossier?.account?.name ?? prospect.company ?? "Company",
+                  kind: "account",
+                  label: "Account research",
+                  dimensions: accountResearch.dimensions,
+                  pendingLabel: "Loading the account fit and timing criteria.",
+                }]}
+                isComplete={accountResearch.isComplete}
+                isStreaming={accountResearch.isStreaming}
               />
             ) : null}
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className="space-y-4">
                 <QuickInfo prospect={prospect} />
-                <QualificationCard
-                  qualification={qualification?.prospect ?? null}
-                  legacy={qualification?.legacy ?? null}
-                  isLoading={qualificationLoading}
-                  onRequalify={() => qualifyStream.start()}
-                  live={{
-                    reasoning: qualifyStream.reasoning,
-                    isStreaming: qualifyStream.isStreaming,
-                  }}
-                />
               </div>
 
               <div className="space-y-4 lg:col-span-2">

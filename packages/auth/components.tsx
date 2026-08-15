@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { ArrowRight, Layers, LogOut, Workflow } from "lucide-react";
+import { RevealableSecretInput } from "@content-automation/ui/components/ui/revealable-secret-input";
 import { authClient } from "./client";
 import { safeReturnTo } from "./redirects";
 import type { SignupPolicy } from "./signup-policy";
@@ -34,6 +35,7 @@ export function SignInScreen({
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [passwordResetKey, setPasswordResetKey] = useState(0);
   const providers = configuredProviders();
   const returnTo = typeof window === "undefined"
     ? "/"
@@ -67,6 +69,7 @@ export function SignInScreen({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Authentication failed");
     } finally {
+      setPasswordResetKey((current) => current + 1);
       setPending(false);
     }
   }
@@ -99,7 +102,7 @@ export function SignInScreen({
           </div>
           {mode === "sign-up" && <label>Name<input autoComplete="name" onChange={(event) => setName(event.target.value)} required value={name} /></label>}
           <label>Email<input autoComplete="email" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} /></label>
-          <label>Password<input autoComplete={mode === "sign-in" ? "current-password" : "new-password"} minLength={mode === "sign-in" ? 8 : 12} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} /></label>
+          <label>Password<RevealableSecretInput autoComplete={mode === "sign-in" ? "current-password" : "new-password"} minLength={mode === "sign-in" ? 8 : 12} onChange={(event) => setPassword(event.target.value)} required resetKey={`${mode}:${passwordResetKey}`} value={password} wrapperClassName="auth-secret-input" /></label>
           {error && <p className="auth-error" role="alert">{error}</p>}
           <button className="auth-submit" disabled={pending} type="submit">
             {pending ? "Please wait..." : mode === "sign-in" ? "Sign in" : "Create account"}<ArrowRight size={17} />

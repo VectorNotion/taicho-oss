@@ -20,6 +20,7 @@ export { NextActionCard } from "./NextActionCard";
 export { ProspectNotes } from "./ProspectNotes";
 export { ProspectIntelligenceTabs } from "./ProspectIntelligenceTabs";
 export { CompanySummaryBar, type CompanySummary } from "./CompanySummaryBar";
+export { ProspectDossierCard } from "./ProspectDossierCard";
 export {
   ProspectResearchInsights,
   type PersonaInsights,
