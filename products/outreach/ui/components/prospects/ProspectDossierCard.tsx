@@ -7,9 +7,7 @@ import {
   CalendarClock,
   CheckCircle2,
   RefreshCw,
-  Search,
   Target,
-  User,
 } from "lucide-react";
 import { ListCard } from "@/components/ListCard";
 import { Badge } from "@/components/ui/badge";
@@ -71,44 +69,19 @@ function DossierSkeleton() {
 export function ProspectDossierCard({
   dossier,
   isLoading,
-  isResearchingPerson,
-  isResearchingAccount,
   isRequalifying,
-  onResearchPerson,
-  onResearchAccount,
   onRequalify,
 }: {
   dossier: ProspectDossier | null;
   isLoading: boolean;
-  isResearchingPerson: boolean;
-  isResearchingAccount: boolean;
   isRequalifying: boolean;
-  onResearchPerson: () => void;
-  onResearchAccount: () => void;
   onRequalify: () => void;
 }) {
-  const accountResearchAvailable = dossier?.accountResolution.state !== "unavailable";
   const actions = (
-    <div className="flex flex-wrap gap-2">
-      <Button disabled={isResearchingPerson} onClick={onResearchPerson} size="sm" variant="secondary">
-        {isResearchingPerson ? <RefreshCw className="size-4 animate-spin" /> : <User className="size-4" />}
-        Research person
-      </Button>
-      <Button
-        disabled={!accountResearchAvailable || isResearchingAccount}
-        onClick={onResearchAccount}
-        size="sm"
-        title={accountResearchAvailable ? undefined : "Add a company before researching the account"}
-        variant="secondary"
-      >
-        {isResearchingAccount ? <RefreshCw className="size-4 animate-spin" /> : <Building2 className="size-4" />}
-        {dossier?.accountResolution.state === "available" ? "Resolve & research account" : "Research account"}
-      </Button>
-      <Button disabled={isRequalifying} onClick={onRequalify} size="sm" variant="outline">
-        {isRequalifying ? <RefreshCw className="size-4 animate-spin" /> : <Target className="size-4" />}
-        Re-score
-      </Button>
-    </div>
+    <Button disabled={isRequalifying} onClick={onRequalify} size="sm" variant="outline">
+      {isRequalifying ? <RefreshCw className="size-4 animate-spin" /> : <Target className="size-4" />}
+      Re-score
+    </Button>
   );
 
   return (

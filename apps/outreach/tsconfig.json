@@ -12,6 +12,7 @@
       "@/components/ListRow": ["./packages/ui/components/ListRow.tsx"],
       "@/components/ListSurface": ["./packages/ui/components/ListSurface.tsx"],
       "@/components/StatRow": ["./packages/ui/components/StatRow.tsx"],
+      "@/components/LiveDot": ["./packages/ui/components/LiveDot.tsx"],
       "@/components/genui": ["./packages/ui/components/genui/index.ts"],
       "@/components/prospects": ["./products/outreach/ui/components/prospects/index.ts"],
       "@/components/prospects/*": ["./products/outreach/ui/components/prospects/*"],

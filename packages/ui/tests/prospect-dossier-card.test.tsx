@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProspectDossierCard } from "../../../products/outreach/ui/components/prospects/ProspectDossierCard";
 import type { ProspectDossier } from "../../../products/outreach/domain/prospect-dossier";
@@ -57,18 +57,12 @@ function dossier(): ProspectDossier {
 }
 
 describe("prospect dossier card", () => {
-  it("shows the person, account, and timing decision together with independent actions", () => {
-    const researchPerson = vi.fn();
-    const researchAccount = vi.fn();
+  it("shows the person, account, and timing decision without duplicating research actions", () => {
     render(
       <ProspectDossierCard
         dossier={dossier()}
         isLoading={false}
-        isResearchingAccount={false}
-        isResearchingPerson={false}
         isRequalifying={false}
-        onResearchAccount={researchAccount}
-        onResearchPerson={researchPerson}
         onRequalify={vi.fn()}
       />,
     );
@@ -78,43 +72,8 @@ describe("prospect dossier card", () => {
     expect(screen.getByText("Is now a good time?")).toBeVisible();
     expect(screen.getByText("Person: Fresh")).toBeVisible();
     expect(screen.getByText("Account: Fresh")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Research person" }));
-    fireEvent.click(screen.getByRole("button", { name: "Research account" }));
-    expect(researchPerson).toHaveBeenCalledOnce();
-    expect(researchAccount).toHaveBeenCalledOnce();
-  });
-
-  it("offers explicit account resolution and disables it when no company exists", () => {
-    const available = dossier();
-    available.account = null;
-    available.accountResolution = { state: "available", companyName: "Analytical Engines" };
-    const { rerender } = render(
-      <ProspectDossierCard
-        dossier={available}
-        isLoading={false}
-        isResearchingAccount={false}
-        isResearchingPerson={false}
-        isRequalifying={false}
-        onResearchAccount={vi.fn()}
-        onResearchPerson={vi.fn()}
-        onRequalify={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Resolve & research account" })).toBeEnabled();
-
-    available.accountResolution = { state: "unavailable", companyName: null };
-    rerender(
-      <ProspectDossierCard
-        dossier={available}
-        isLoading={false}
-        isResearchingAccount={false}
-        isResearchingPerson={false}
-        isRequalifying={false}
-        onResearchAccount={vi.fn()}
-        onResearchPerson={vi.fn()}
-        onRequalify={vi.fn()}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Research account" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Research person" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Research account" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Re-score" })).toBeVisible();
   });
 });

@@ -1,13 +1,17 @@
 "use client";
 
 import {
+  AlertCircle,
   AlertTriangle,
   Building2,
+  CheckCircle2,
   ExternalLink,
   Loader2,
   Search,
+  Sparkles,
   User,
 } from "lucide-react";
+import { LiveDot } from "@/components/LiveDot";
 import { ListCard } from "@/components/ListCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SegmentMeter } from "@/components/genui";
 import { icpBand, personaBand, timingBand, type ScoreBand } from "@/lib/score-bands";
 import type { CompanySummary } from "./CompanySummaryBar";
+import type { DimensionLane } from "../research/useDimensionResearch";
 
 export interface PersonaInsightDimension {
   dimensionKey: string;
@@ -118,44 +123,124 @@ function SectionSkeleton() {
   );
 }
 
+function ResearchLoader({
+  dimensions,
+  label,
+}: {
+  dimensions: DimensionLane[];
+  label: "person" | "account";
+}) {
+  const scored = dimensions.filter((dimension) => dimension.phase === "matched").length;
+
+  return (
+    <div aria-busy="true" aria-live="polite" className="space-y-4" role="status">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-primary/5 px-3 py-2.5 text-sm">
+        <LiveDot className="font-medium text-primary" label={`Researching ${label}`} />
+        {dimensions.length > 0 ? (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {scored}/{dimensions.length} criteria scored
+          </span>
+        ) : null}
+      </div>
+
+      {dimensions.length === 0 ? (
+        <div className="space-y-3" aria-label={`Preparing ${label} research criteria`}>
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-4/5" />
+        </div>
+      ) : (
+        <ul className="divide-y">
+          {dimensions.map((dimension) => {
+            const state = dimension.phase === "matched"
+              ? "Scored"
+              : dimension.phase === "found"
+                ? "Scoring evidence"
+                : "Searching sources";
+            const Icon = dimension.phase === "matched"
+              ? CheckCircle2
+              : dimension.phase === "found"
+                ? Sparkles
+                : Search;
+            return (
+              <li className="flex items-center gap-3 py-3 first:pt-0 last:pb-0" key={dimension.dimensionKey}>
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                  <Icon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium capitalize">
+                    {formatDimensionKey(dimension.name || dimension.dimensionKey)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{state}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ResearchError({ message }: { message: string }) {
+  return (
+    <div className="mb-4 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
+      <AlertCircle className="mt-0.5 size-4 shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
 export function ProspectResearchInsights({
   persona,
   personaLoading,
   account,
   accountLoading,
   companyName,
-  isResearching = false,
-  onResearch,
+  personResearchDimensions = [],
+  accountResearchDimensions = [],
+  isResearchingPerson = false,
+  isResearchingAccount = false,
+  personResearchError,
+  accountResearchError,
+  accountResearchAvailable = true,
+  accountNeedsResolution = false,
+  onResearchPerson,
+  onResearchAccount,
 }: {
   persona: PersonaInsights | null;
   personaLoading: boolean;
   account: CompanySummary | null;
   accountLoading: boolean;
   companyName?: string;
-  isResearching?: boolean;
-  onResearch?: () => void;
+  personResearchDimensions?: DimensionLane[];
+  accountResearchDimensions?: DimensionLane[];
+  isResearchingPerson?: boolean;
+  isResearchingAccount?: boolean;
+  personResearchError?: string | null;
+  accountResearchError?: string | null;
+  accountResearchAvailable?: boolean;
+  accountNeedsResolution?: boolean;
+  onResearchPerson: () => void;
+  onResearchAccount: () => void;
 }) {
-  const hasResearch = Boolean(persona?.dimensions.length)
-    || account?.icpScore != null
-    || account?.timingScore != null;
+  const hasPersonResearch = Boolean(persona?.dimensions.length);
+  const hasAccountResearch = Boolean(account?.icpScore != null)
+    || account?.timingScore != null
+    || Boolean(account?.icpObservations?.length)
+    || Boolean(account?.timingSignals?.length);
   const personaExcluded = Boolean(persona?.dimensions.some((dimension) => dimension.hardExclusion));
   const icpObservations = account?.icpObservations ?? [];
   const timingSignals = account?.timingSignals ?? [];
 
   return (
     <ListCard
-      actions={onResearch ? (
-        <Button disabled={isResearching} onClick={onResearch} size="sm" variant="secondary">
-          {isResearching ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-          {isResearching ? "Researching…" : hasResearch ? "Re-research" : "Research"}
-        </Button>
-      ) : undefined}
       description="What research found about this person and their company, with evidence behind each score."
       title="Research insights"
     >
       <div className="grid gap-4 p-6 lg:grid-cols-2">
         <section className="rounded-xl border p-4" aria-labelledby="person-insights-title">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
                 <User className="size-4" />
@@ -165,37 +250,55 @@ export function ProspectResearchInsights({
                 <h3 className="text-sm font-semibold" id="person-insights-title">Persona insights</h3>
               </div>
             </div>
-            <ScoreBadge
-              band={personaBand(persona?.personaScore ?? null, personaExcluded)}
-              label="Persona"
-              score={persona?.personaScore ?? null}
-            />
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <ScoreBadge
+                band={personaBand(persona?.personaScore ?? null, personaExcluded)}
+                label="Persona"
+                score={persona?.personaScore ?? null}
+              />
+              <Button
+                disabled={personaLoading || isResearchingPerson}
+                onClick={onResearchPerson}
+                size="sm"
+                variant="secondary"
+              >
+                {isResearchingPerson ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                {isResearchingPerson ? "Researching…" : hasPersonResearch ? "Re-research person" : "Research person"}
+              </Button>
+            </div>
           </div>
 
-          {personaLoading ? (
+          {isResearchingPerson ? (
+            <ResearchLoader dimensions={personResearchDimensions} label="person" />
+          ) : personaLoading ? (
             <SectionSkeleton />
-          ) : persona && persona.dimensions.length > 0 ? (
-            <div className="space-y-3">
-              {persona.dimensions.map((dimension) => (
-                <FitInsight
-                  dimensionKey={dimension.dimensionKey}
-                  effectiveMatch={dimension.effectiveMatch}
-                  evidence={dimension.evidence}
-                  hardExclusion={dimension.hardExclusion}
-                  key={dimension.dimensionKey}
-                  observedValue={dimension.observedValue}
-                />
-              ))}
-            </div>
           ) : (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No person research yet.
-            </p>
+            <>
+              {personResearchError ? <ResearchError message={personResearchError} /> : null}
+              {persona && persona.dimensions.length > 0 ? (
+                <div className="space-y-3">
+                  {persona.dimensions.map((dimension) => (
+                    <FitInsight
+                      dimensionKey={dimension.dimensionKey}
+                      effectiveMatch={dimension.effectiveMatch}
+                      evidence={dimension.evidence}
+                      hardExclusion={dimension.hardExclusion}
+                      key={dimension.dimensionKey}
+                      observedValue={dimension.observedValue}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  No person research yet.
+                </p>
+              )}
+            </>
           )}
         </section>
 
         <section className="rounded-xl border p-4" aria-labelledby="company-insights-title">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
                 <Building2 className="size-4" />
@@ -207,7 +310,7 @@ export function ProspectResearchInsights({
                 </h3>
               </div>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <ScoreBadge
                 band={icpBand(account?.icpScore ?? null, Boolean(account?.hardExcluded))}
                 label="ICP"
@@ -218,56 +321,79 @@ export function ProspectResearchInsights({
                 label="Timing"
                 score={account?.timingScore ?? null}
               />
+              <Button
+                disabled={accountLoading || !accountResearchAvailable || isResearchingAccount}
+                onClick={onResearchAccount}
+                size="sm"
+                title={accountResearchAvailable ? undefined : "Add a company before researching the account"}
+                variant="secondary"
+              >
+                {isResearchingAccount ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                {isResearchingAccount
+                  ? "Researching…"
+                  : accountNeedsResolution
+                    ? "Resolve & research account"
+                    : hasAccountResearch
+                      ? "Re-research account"
+                      : "Research account"}
+              </Button>
             </div>
           </div>
 
-          {accountLoading ? (
+          {isResearchingAccount ? (
+            <ResearchLoader dimensions={accountResearchDimensions} label="account" />
+          ) : accountLoading ? (
             <SectionSkeleton />
-          ) : account && (icpObservations.length > 0 || timingSignals.length > 0) ? (
-            <div className="space-y-4">
-              {icpObservations.length > 0 ? (
-                <div className="space-y-3">
-                  <p className="text-xs font-medium text-muted-foreground">ICP findings</p>
-                  {icpObservations.map((observation) => (
-                    <FitInsight
-                      dimensionKey={observation.dimensionKey}
-                      effectiveMatch={observation.effectiveMatch}
-                      evidence={observation.evidence}
-                      hardExclusion={observation.hardExclusion}
-                      key={observation.dimensionKey}
-                      observedValue={observation.observedValue}
-                    />
-                  ))}
-                </div>
-              ) : null}
+          ) : (
+            <>
+              {accountResearchError ? <ResearchError message={accountResearchError} /> : null}
+              {account && (icpObservations.length > 0 || timingSignals.length > 0) ? (
+                <div className="space-y-4">
+                  {icpObservations.length > 0 ? (
+                    <div className="space-y-3">
+                      <p className="text-xs font-medium text-muted-foreground">ICP findings</p>
+                      {icpObservations.map((observation) => (
+                        <FitInsight
+                          dimensionKey={observation.dimensionKey}
+                          effectiveMatch={observation.effectiveMatch}
+                          evidence={observation.evidence}
+                          hardExclusion={observation.hardExclusion}
+                          key={observation.dimensionKey}
+                          observedValue={observation.observedValue}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
 
-              {timingSignals.length > 0 ? (
-                <div className="space-y-3 border-t pt-4">
-                  <p className="text-xs font-medium text-muted-foreground">Buying signals</p>
-                  {timingSignals.map((entry) => (
-                    <div className="space-y-2" key={entry.dimensionKey}>
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-medium capitalize">{formatDimensionKey(entry.dimensionKey)}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {entry.signalCount} {entry.signalCount === 1 ? "signal" : "signals"}
-                        </span>
-                      </div>
-                      {entry.signals.slice(0, 3).map((signal, index) => (
-                        <div className="flex items-baseline justify-between gap-3 text-sm" key={`${signal.signal}-${index}`}>
-                          <span className="text-muted-foreground">{signal.signal}</span>
-                          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{signal.date}</span>
+                  {timingSignals.length > 0 ? (
+                    <div className="space-y-3 border-t pt-4">
+                      <p className="text-xs font-medium text-muted-foreground">Buying signals</p>
+                      {timingSignals.map((entry) => (
+                        <div className="space-y-2" key={entry.dimensionKey}>
+                          <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="font-medium capitalize">{formatDimensionKey(entry.dimensionKey)}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {entry.signalCount} {entry.signalCount === 1 ? "signal" : "signals"}
+                            </span>
+                          </div>
+                          {entry.signals.slice(0, 3).map((signal, index) => (
+                            <div className="flex items-baseline justify-between gap-3 text-sm" key={`${signal.signal}-${index}`}>
+                              <span className="text-muted-foreground">{signal.signal}</span>
+                              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{signal.date}</span>
+                            </div>
+                          ))}
+                          <EvidenceLinks urls={entry.signals.flatMap((signal) => signal.evidence)} />
                         </div>
                       ))}
-                      <EvidenceLinks urls={entry.signals.flatMap((signal) => signal.evidence)} />
                     </div>
-                  ))}
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-          ) : (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              {companyName ? "No company research yet." : "Add a company to include ICP and timing insight."}
-            </p>
+              ) : (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  {companyName ? "No company research yet." : "Add a company to include ICP and timing insight."}
+                </p>
+              )}
+            </>
           )}
         </section>
       </div>

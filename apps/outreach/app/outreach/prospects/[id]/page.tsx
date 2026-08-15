@@ -20,7 +20,6 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
-import { ResearchProgressPanel } from "@/products/outreach/ui/components/research/ResearchProgressPanel";
 
 import {
   ProspectHero,
@@ -793,9 +792,6 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
       signalCount: finding.signalCount,
     })),
   } : null;
-  const showPersonResearchProgress = personResearch.isStreaming || Boolean(personResearch.error);
-  const showAccountResearchProgress = accountResearch.isStreaming || Boolean(accountResearch.error);
-
   return (
     <div className="w-full min-w-0 space-y-8">
       {/* Keep collection navigation separate from prospect-to-prospect navigation. */}
@@ -830,11 +826,7 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
       <ProspectDossierCard
         dossier={dossier}
         isLoading={dossierLoading}
-        isResearchingAccount={accountResearch.isStreaming}
-        isResearchingPerson={personResearch.isStreaming}
         isRequalifying={qualifyStream.isStreaming}
-        onResearchAccount={() => accountResearch.start()}
-        onResearchPerson={() => personResearch.start()}
         onRequalify={() => qualifyStream.start()}
       />
 
@@ -860,44 +852,20 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
             <ProspectResearchInsights
               account={accountInsights}
               accountLoading={dossierLoading}
+              accountNeedsResolution={dossier?.accountResolution.state === "available"}
+              accountResearchAvailable={Boolean(prospect.company?.trim())}
+              accountResearchDimensions={accountResearch.dimensions}
+              accountResearchError={accountResearch.error}
               companyName={prospect.company || undefined}
+              isResearchingAccount={accountResearch.isStreaming}
+              isResearchingPerson={personResearch.isStreaming}
+              onResearchAccount={() => accountResearch.start()}
+              onResearchPerson={() => personResearch.start()}
               persona={personaInsights}
               personaLoading={dossierLoading}
+              personResearchDimensions={personResearch.dimensions}
+              personResearchError={personResearch.error}
             />
-
-            {showPersonResearchProgress ? (
-              <ResearchProgressPanel
-                error={personResearch.error}
-                groups={[
-                  {
-                    id: "person",
-                    entityName: prospect.name,
-                    kind: "person",
-                    label: "Person research",
-                    dimensions: personResearch.dimensions,
-                    pendingLabel: "Loading the persona criteria for this person.",
-                  },
-                ]}
-                isComplete={personResearch.isComplete}
-                isStreaming={personResearch.isStreaming}
-              />
-            ) : null}
-
-            {showAccountResearchProgress ? (
-              <ResearchProgressPanel
-                error={accountResearch.error}
-                groups={[{
-                  id: "account",
-                  entityName: dossier?.account?.name ?? prospect.company ?? "Company",
-                  kind: "account",
-                  label: "Account research",
-                  dimensions: accountResearch.dimensions,
-                  pendingLabel: "Loading the account fit and timing criteria.",
-                }]}
-                isComplete={accountResearch.isComplete}
-                isStreaming={accountResearch.isStreaming}
-              />
-            ) : null}
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className="space-y-4">

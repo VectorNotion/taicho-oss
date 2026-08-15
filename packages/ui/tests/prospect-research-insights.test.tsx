@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProspectResearchInsights } from "../../../products/outreach/ui/components/prospects/ProspectResearchInsights";
 
@@ -6,6 +6,8 @@ afterEach(cleanup);
 
 describe("prospect research insights", () => {
   it("places person and company evidence in one research view", () => {
+    const researchPerson = vi.fn();
+    const researchAccount = vi.fn();
     render(
       <ProspectResearchInsights
         account={{
@@ -35,8 +37,8 @@ describe("prospect research insights", () => {
           ],
         }}
         accountLoading={false}
-        isResearching={false}
-        onResearch={vi.fn()}
+        onResearchAccount={researchAccount}
+        onResearchPerson={researchPerson}
         persona={{
           personaScore: 91,
           dimensions: [
@@ -60,5 +62,57 @@ describe("prospect research insights", () => {
     expect(screen.getByText("Owns the buying decision.")).toBeVisible();
     expect(screen.getByText("A growing mid-market company.")).toBeVisible();
     expect(screen.getByText("Hiring revenue operations")).toBeVisible();
+
+    const personBox = screen.getByRole("region", { name: "Persona insights" });
+    const accountBox = screen.getByRole("region", { name: "Analytical Engines" });
+    fireEvent.click(within(personBox).getByRole("button", { name: "Re-research person" }));
+    fireEvent.click(within(accountBox).getByRole("button", { name: "Re-research account" }));
+    expect(researchPerson).toHaveBeenCalledOnce();
+    expect(researchAccount).toHaveBeenCalledOnce();
+  });
+
+  it("renders each active research loader inside its corresponding box", () => {
+    render(
+      <ProspectResearchInsights
+        account={null}
+        accountLoading={false}
+        accountResearchDimensions={[
+          {
+            dimensionKey: "company_size",
+            name: "Company size",
+            type: "fit",
+            phase: "found",
+            scope: "account",
+          },
+        ]}
+        companyName="Analytical Engines"
+        isResearchingAccount
+        isResearchingPerson
+        onResearchAccount={vi.fn()}
+        onResearchPerson={vi.fn()}
+        persona={null}
+        personaLoading={false}
+        personResearchDimensions={[
+          {
+            dimensionKey: "decision_authority",
+            name: "Decision authority",
+            type: "fit",
+            phase: "searching",
+            scope: "person",
+          },
+        ]}
+      />,
+    );
+
+    const personBox = screen.getByRole("region", { name: "Persona insights" });
+    const accountBox = screen.getByRole("region", { name: "Analytical Engines" });
+    expect(within(personBox).getByText("Researching person")).toBeVisible();
+    expect(within(personBox).getByText("Decision authority")).toBeVisible();
+    expect(within(personBox).getByText("Searching sources")).toBeVisible();
+    expect(within(accountBox).getByText("Researching account")).toBeVisible();
+    expect(within(accountBox).getByText("Company size")).toBeVisible();
+    expect(within(accountBox).getByText("Scoring evidence")).toBeVisible();
+    expect(within(personBox).getByRole("button", { name: "Researching…" })).toBeDisabled();
+    expect(within(accountBox).getByRole("button", { name: "Researching…" })).toBeDisabled();
   });
 });
