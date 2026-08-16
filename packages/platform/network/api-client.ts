@@ -9,6 +9,14 @@
  * This module is client-safe: fetch + web APIs only.
  */
 
+/**
+ * Client-generated correlation id, sent on every call so the server trace
+ * (and its support code) ties back to the exact browser interaction. Mirrors
+ * REQUEST_ID_HEADER in @content-automation/observability/headers — duplicated
+ * here as a literal to keep this module free of server imports.
+ */
+const REQUEST_ID_HEADER = "x-vector-notion-request-id";
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -49,7 +57,9 @@ export async function apiGet<T>(path: string, query?: Record<string, string | nu
   for (const [name, value] of Object.entries(query ?? {})) {
     if (value !== undefined) url.searchParams.set(name, String(value));
   }
-  const envelope = await unwrap<T>(await fetch(url, { headers: { Accept: "application/json" } }));
+  const envelope = await unwrap<T>(await fetch(url, {
+    headers: { Accept: "application/json", [REQUEST_ID_HEADER]: crypto.randomUUID() },
+  }));
   return envelope.data;
 }
 
@@ -66,6 +76,7 @@ export async function apiMutate<T>(
       "Content-Type": "application/json",
       Accept: "application/json",
       "Idempotency-Key": options?.idempotencyKey ?? crypto.randomUUID(),
+      [REQUEST_ID_HEADER]: crypto.randomUUID(),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -97,6 +108,7 @@ export function apiStream<C, T>(
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         "Idempotency-Key": crypto.randomUUID(),
+        [REQUEST_ID_HEADER]: crypto.randomUUID(),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,

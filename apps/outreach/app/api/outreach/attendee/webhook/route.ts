@@ -1,4 +1,4 @@
-import { createLogger } from '@content-automation/observability';
+import { createLogger, observeOperation } from '@content-automation/observability';
 import { readBoundedRequestText, RequestBodyTooLargeError } from '@content-automation/platform/network/request-body';
 import {
   attendeeConfig,
@@ -19,6 +19,15 @@ const MAX_WEBHOOK_BYTES = 1024 * 1024;
 const log = createLogger('outreach.attendee-webhook');
 
 export async function POST(request: NextRequest) {
+  // Root span for the inbound event: signature checks and all downstream
+  // work parent under it, so third-party deliveries are traceable end to end.
+  return observeOperation('webhook.attendee.receive', {
+    headers: request.headers,
+    actorType: 'system',
+  }, () => handleWebhook(request));
+}
+
+async function handleWebhook(request: NextRequest) {
   let rawBody: string;
   try {
     rawBody = await readBoundedRequestText(request, MAX_WEBHOOK_BYTES);

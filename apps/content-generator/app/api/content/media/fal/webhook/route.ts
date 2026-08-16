@@ -1,3 +1,4 @@
+import { observeOperation } from "@content-automation/observability";
 import { verifyFalWebhook, type FalWebhookPayload } from "@content-automation/content-generator/media/fal-provider";
 import { receiveFalWebhook } from "@content-automation/content-generator/media/service";
 import { readBoundedRequestText, RequestBodyTooLargeError } from "@content-automation/platform/network/request-body";
@@ -7,6 +8,15 @@ export const runtime = "nodejs";
 const MAX_WEBHOOK_BYTES = 2 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
+  // Root span for the inbound event: signature checks and all downstream
+  // work parent under it, so third-party deliveries are traceable end to end.
+  return observeOperation("webhook.fal.receive", {
+    headers: request.headers,
+    actorType: "system",
+  }, () => handleWebhook(request));
+}
+
+async function handleWebhook(request: NextRequest) {
   let rawBody: string;
   try {
     rawBody = await readBoundedRequestText(request, MAX_WEBHOOK_BYTES);

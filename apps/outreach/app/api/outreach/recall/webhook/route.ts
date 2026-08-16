@@ -1,4 +1,4 @@
-import { createLogger } from '@content-automation/observability';
+import { createLogger, observeOperation } from '@content-automation/observability';
 import { readBoundedRequestText, RequestBodyTooLargeError } from '@content-automation/platform/network/request-body';
 import { setProspectMeetingStatus } from '@/products/outreach/data/prospect-intelligence-repository';
 import {
@@ -28,6 +28,15 @@ function recallHeader(request: NextRequest, current: string, legacy: string): st
 }
 
 export async function POST(request: NextRequest) {
+  // Root span for the inbound event: signature checks and all downstream
+  // work parent under it, so third-party deliveries are traceable end to end.
+  return observeOperation('webhook.recall.receive', {
+    headers: request.headers,
+    actorType: 'system',
+  }, () => handleWebhook(request));
+}
+
+async function handleWebhook(request: NextRequest) {
   let rawBody: string;
   try {
     rawBody = await readBoundedRequestText(request, MAX_WEBHOOK_BYTES);
