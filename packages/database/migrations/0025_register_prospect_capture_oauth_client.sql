@@ -1,0 +1,62 @@
+-- Prospect Capture is one first-party public OAuth client shared by the three
+-- signed extension release channels. It is deliberately not owned by a user or
+-- organization: every authorization grant remains bound to the consenting user
+-- and the organization selected during Taicho OAuth.
+INSERT INTO "oauthClient" (
+	"id",
+	"clientId",
+	"clientSecret",
+	"disabled",
+	"skipConsent",
+	"scopes",
+	"userId",
+	"name",
+	"redirectUris",
+	"tokenEndpointAuthMethod",
+	"grantTypes",
+	"responseTypes",
+	"public",
+	"type",
+	"requirePKCE",
+	"referenceId",
+	"metadata",
+	"createdAt",
+	"updatedAt"
+) VALUES (
+	'taicho-prospect-capture-extension-v1',
+	'LDQTrw-9KBAkjLBhAxH-cSJZyIgHE2TL',
+	NULL,
+	false,
+	false,
+	'["openid","profile","email","offline_access","vn:outreach:read","vn:outreach:write"]'::jsonb,
+	NULL,
+	'Prospect Capture - Sales Navigator',
+	'["https://biijbjemfgoodinaodjlonacamecpfim.chromiumapp.org/oauth2","https://leflfdnnnfflenkjacggcmdadmhldblg.chromiumapp.org/oauth2","https://gjfikdnnlpjbpkjemljkbdnblpbpdikc.chromiumapp.org/oauth2"]'::jsonb,
+	'none',
+	'["authorization_code","refresh_token"]'::jsonb,
+	'["code"]'::jsonb,
+	true,
+	'web',
+	true,
+	NULL,
+	'{"first_party":true,"allowed_resources":["api"]}'::jsonb,
+	now(),
+	now()
+)
+ON CONFLICT ("clientId") DO UPDATE SET
+	"clientSecret" = NULL,
+	"disabled" = EXCLUDED."disabled",
+	"skipConsent" = EXCLUDED."skipConsent",
+	"scopes" = EXCLUDED."scopes",
+	"userId" = NULL,
+	"name" = EXCLUDED."name",
+	"redirectUris" = EXCLUDED."redirectUris",
+	"tokenEndpointAuthMethod" = EXCLUDED."tokenEndpointAuthMethod",
+	"grantTypes" = EXCLUDED."grantTypes",
+	"responseTypes" = EXCLUDED."responseTypes",
+	"public" = EXCLUDED."public",
+	"type" = EXCLUDED."type",
+	"requirePKCE" = EXCLUDED."requirePKCE",
+	"referenceId" = NULL,
+	"metadata" = EXCLUDED."metadata",
+	"updatedAt" = now();

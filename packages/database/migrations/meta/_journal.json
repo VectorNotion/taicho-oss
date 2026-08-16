@@ -176,6 +176,13 @@
       "when": 1786925200000,
       "tag": "0024_restore_jobs_admin_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786925300000,
+      "tag": "0025_register_prospect_capture_oauth_client",
+      "breakpoints": true
     }
   ]
 }
