@@ -52,7 +52,9 @@ describe("research progress panel", () => {
     expect(screen.getByRole("progressbar", { name: "Overall research progress" })).toHaveAttribute("aria-valuenow");
     expect(screen.getByText("1/2 scored")).toBeVisible();
     expect(screen.getByText("Evidence ready for scoring")).toBeVisible();
-    expect(screen.getByText("Queued after person research.")).toBeVisible();
+    // The queued group renders collapsed with its state badge; the
+    // pendingLabel copy only appears once expanded.
+    expect(screen.getByText("Queued")).toBeVisible();
     expect(screen.getByText("90% match")).toBeVisible();
     expect(screen.getByText("Person research started in the background")).toBeVisible();
   });

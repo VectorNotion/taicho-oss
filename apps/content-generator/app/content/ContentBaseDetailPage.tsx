@@ -22,6 +22,7 @@ import {
   Loader2,
 } from "lucide-react";
 
+import { apiGet } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -102,12 +103,8 @@ export default function ContentBaseDetailPage({
 
   const fetchIdea = async () => {
     try {
-      const res = await fetch(`/api/content/ideas/${id}`);
-      if (res.ok) {
-        setIdea(await res.json());
-      } else {
-        toast.error("Could not load the Content Base. Refresh to try again.");
-      }
+      const data = await apiGet<{ idea: ContentIdea }>(`/content/ideas/${id}`);
+      setIdea(data.idea);
     } catch (error) {
       console.error("Error fetching Content Base:", error);
       toast.error("Could not load the Content Base. Refresh to try again.");
@@ -118,10 +115,8 @@ export default function ContentBaseDetailPage({
 
   const fetchDrafts = async () => {
     try {
-      const res = await fetch(`/api/content/drafts?ideaId=${id}`);
-      if (res.ok) {
-        setDrafts(await res.json());
-      }
+      const data = await apiGet<{ items: ContentDraft[] }>(`/content/drafts`, { ideaId: id, limit: 100 });
+      setDrafts(data.items);
     } catch (error) {
       console.error("Error fetching drafts:", error);
     }

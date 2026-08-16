@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Braces, CheckCircle2, Eye, History, Loader2, Save, Send } from "lucide-react";
 import { toast } from "sonner";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,11 +40,7 @@ export function OutreachPromptSettings() {
   const [targetContent, setTargetContent] = useState("A post about scaling operations without adding headcount.");
 
   useEffect(() => {
-    void fetch("/api/outreach/settings/prompts", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Could not load outreach prompts.");
-        return response.json() as Promise<ApiPayload>;
-      })
+    void apiGet<ApiPayload>("/outreach/settings/prompts")
       .then((next) => {
         setPayload(next);
         setContent(next.workspace.draft?.content ?? next.workspace.active.content);
@@ -72,13 +69,11 @@ export function OutreachPromptSettings() {
     if (!content || !payload?.canEdit) return;
     setBusy(method === "PUT" ? "save" : "publish");
     try {
-      const response = await fetch("/api/outreach/settings/prompts", {
+      const { data: result } = await apiMutate<ApiPayload>(
         method,
-        headers: { "Content-Type": "application/json" },
-        ...(method === "PUT" ? { body: JSON.stringify(content) } : {}),
-      });
-      const result = await response.json() as ApiPayload & { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "Could not update outreach prompts.");
+        "/outreach/settings/prompts",
+        method === "PUT" ? content : {},
+      );
       setPayload(result);
       setContent(result.workspace.draft?.content ?? result.workspace.active.content);
       toast.success(method === "PUT" ? "Prompt draft saved" : `Prompt version ${result.workspace.active.version} published`);

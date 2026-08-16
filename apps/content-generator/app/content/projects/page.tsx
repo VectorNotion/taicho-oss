@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Plus, Pencil, Trash2, FolderKanban, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/PageHeader";
@@ -43,12 +44,8 @@ export default function ProjectsPage() {
   const fetchProjects = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/content/projects');
-      if (!response.ok) {
-        throw new Error('Failed to fetch projects');
-      }
-      const data = await response.json();
-      setProjects(data);
+      const data = await apiGet<{ items: Project[] }>('/content/projects', { limit: 100 });
+      setProjects(data.items);
     } catch (error) {
       console.error('Error fetching projects:', error);
       toast.error("Could not load projects. Refresh to try again.");
@@ -72,11 +69,7 @@ export default function ProjectsPage() {
 
     setDeleting(true);
     try {
-      const response = await fetch(`/api/content/projects/${deleteTarget.id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('Failed to delete');
+      await apiMutate("DELETE", `/content/projects/${deleteTarget.id}`, { confirm: true });
 
       toast.success("Project deleted");
       setDeleteTarget(null);

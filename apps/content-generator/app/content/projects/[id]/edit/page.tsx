@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2, Plus, X } from "lucide-react";
 
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,10 +49,7 @@ export default function EditProjectPage({ params }: { params: Promise<{ id: stri
         const resolvedParams = await params;
         setProjectId(resolvedParams.id);
 
-        const response = await fetch(`/api/content/projects/${resolvedParams.id}`);
-        if (!response.ok) throw new Error('Failed to fetch project');
-
-        const project = await response.json();
+        const { project } = await apiGet<{ project: any }>(`/content/projects/${resolvedParams.id}`);
         setFormData({
           title: project.title,
           description: project.description,
@@ -94,13 +92,7 @@ export default function EditProjectPage({ params }: { params: Promise<{ id: stri
     setIsSubmitting(true);
 
     try {
-      const response = await fetch(`/api/content/projects/${projectId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) throw new Error('Failed to update project');
+      await apiMutate("PATCH", `/content/projects/${projectId}`, formData);
 
       toast.success("Project updated");
       router.push("/content/projects");

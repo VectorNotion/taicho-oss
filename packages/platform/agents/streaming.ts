@@ -115,21 +115,41 @@ export function streamingStructuredGenerate(
   )();
 }
 
-export async function actionStreamResponse(opts: {
+export type ActionStreamPart = {
+  type: `data-${string}`;
+  id?: string;
+  data: unknown;
+  transient?: boolean;
+};
+
+export type ActionStreamOptions = {
   action: BackgroundAction;
   entityId: string;
   entityType?: EntityType;
   run: (emit: StreamEmit) => Promise<Record<string, unknown>>;
   commercial?: JobCommercialContext;
   estimatedCredits?: number;
-}): Promise<Response> {
+};
+
+/**
+ * Generator form of the streamed action lifecycle, for stream capabilities
+ * (defineStreamCapability). Yields the same data-* parts the generative-UI
+ * protocol used, and RETURNS the final result instead of emitting data-final.
+ * Job creation, status transitions, credit settlement/release, and
+ * observability are identical to actionStreamResponse — which is now a thin
+ * adapter over this generator.
+ *
+ * Failures throw (after marking the job failed and releasing the
+ * reservation) so the capability layer audits them and the SSE projection
+ * emits its terminal error event.
+ */
+export async function* actionStreamParts(
+  opts: ActionStreamOptions,
+): AsyncGenerator<ActionStreamPart, { data: Record<string, unknown>; summary: string; entityIds?: string[] }> {
   let jobId: string;
   try {
     jobId = await createJob(opts.action, opts.entityId, opts.entityType, opts.commercial);
   } catch (error) {
-    // Reservation happens before durable job creation. If persistence fails,
-    // no provider work can have occurred, so release the hold before returning
-    // the infrastructure error to the route.
     if (opts.commercial) {
       const message = error instanceof Error ? error.message : String(error);
       try {
@@ -146,60 +166,105 @@ export async function actionStreamResponse(opts: {
   const parent = currentExecutionContext();
   const organizationId = opts.commercial?.organizationId ?? parent?.organizationId;
   if (!organizationId) throw new Error('A job organization is required.');
+
+  const queue: ActionStreamPart[] = [];
+  const waker: { resolve: (() => void) | null } = { resolve: null };
+  let finished = false;
+  let outcome: Record<string, unknown> | undefined;
+  let failure: unknown;
+  const emit: StreamEmit = (part) => {
+    queue.push(part as ActionStreamPart);
+    waker.resolve?.();
+  };
+
+  const work = (async () => {
+    emit({ type: 'data-job', id: 'job', data: { jobId } });
+    try {
+      outcome = await observeOperation(
+        'platform.job.stream',
+        {
+          executionId: jobId,
+          requestId: parent?.requestId,
+          parentExecutionId: parent?.executionId,
+          organizationId,
+          actorId: opts.commercial?.initiatingUserId ?? parent?.actorId,
+          actorType: opts.commercial?.initiatingUserId ? 'user' : (parent?.actorType ?? 'system'),
+          jobId,
+          attributes: {
+            'job.id': jobId,
+            'job.action': opts.action,
+            'job.entity_type': opts.entityType ?? 'unknown',
+          },
+          workflow: {
+            name: `product.${opts.action}`,
+            input: {
+              action: opts.action,
+              entityId: opts.entityId,
+              entityType: opts.entityType ?? null,
+              estimatedCredits: opts.estimatedCredits ?? null,
+            },
+          },
+        },
+        async () => {
+          await updateJobStatus(organizationId, jobId, 'processing');
+          const result = await opts.run(emit);
+          await updateJobStatus(organizationId, jobId, 'completed', { result });
+          if (opts.commercial) await settleReservation({
+            reservationId: opts.commercial.creditReservationId,
+            actualCredits: opts.estimatedCredits ?? 1,
+            idempotencyKey: `job:${jobId}:settlement`,
+            usageKind: 'agent_action',
+            metadata: { action: opts.action, streaming: true },
+          });
+          return result;
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await updateJobStatus(organizationId, jobId, 'failed', { error: message });
+      if (opts.commercial) await releaseReservation(opts.commercial.creditReservationId, message);
+      log.error('job.stream.failed', error, { job_id: jobId, action: opts.action });
+      failure = error;
+    } finally {
+      finished = true;
+      waker.resolve?.();
+    }
+  })();
+
+  while (true) {
+    while (queue.length > 0) yield queue.shift()!;
+    if (finished) break;
+    await new Promise<void>((resolve) => {
+      waker.resolve = resolve;
+    });
+    waker.resolve = null;
+  }
+  await work;
+  while (queue.length > 0) yield queue.shift()!;
+  if (failure) throw failure;
+  return { data: outcome ?? {}, summary: `Completed ${opts.action}.`, entityIds: [opts.entityId] };
+}
+
+export async function actionStreamResponse(opts: ActionStreamOptions): Promise<Response> {
+  // Legacy generative-UI transport: adapt the generator lifecycle onto the AI
+  // SDK UIMessage stream. Job/credit/observability behavior lives in
+  // actionStreamParts; this only changes the wire format (data-final and
+  // data-action-error parts instead of return/throw).
+  const parts = actionStreamParts(opts);
   const stream = createUIMessageStream({
     execute: async ({ writer }) => {
-      const emit: StreamEmit = (part) => writer.write(part as never);
-      // Surface the durable job id before any model work begins. Long-running
-      // composite experiences (content variations -> resonance) can retain
-      // this handle for recovery instead of treating the HTTP stream itself
-      // as the only record that the work exists.
-      emit({ type: 'data-job', id: 'job', data: { jobId } });
       try {
-        await observeOperation(
-          'platform.job.stream',
-          {
-            executionId: jobId,
-            requestId: parent?.requestId,
-            parentExecutionId: parent?.executionId,
-            organizationId: opts.commercial?.organizationId ?? parent?.organizationId,
-            actorId: opts.commercial?.initiatingUserId ?? parent?.actorId,
-            actorType: opts.commercial?.initiatingUserId ? 'user' : (parent?.actorType ?? 'system'),
-            jobId,
-            attributes: {
-              'job.id': jobId,
-              'job.action': opts.action,
-              'job.entity_type': opts.entityType ?? 'unknown',
-            },
-            workflow: {
-              name: `product.${opts.action}`,
-              input: {
-                action: opts.action,
-                entityId: opts.entityId,
-                entityType: opts.entityType ?? null,
-                estimatedCredits: opts.estimatedCredits ?? null,
-              },
-            },
-          },
-          async () => {
-            await updateJobStatus(organizationId, jobId, 'processing');
-            const result = await opts.run(emit);
-            emit({ type: 'data-final', id: 'final', data: result });
-            await updateJobStatus(organizationId, jobId, 'completed', { result });
-            if (opts.commercial) await settleReservation({
-              reservationId: opts.commercial.creditReservationId,
-              actualCredits: opts.estimatedCredits ?? 1,
-              idempotencyKey: `job:${jobId}:settlement`,
-              usageKind: 'agent_action', metadata: { action: opts.action, streaming: true },
-            });
-            return result;
-          },
-        );
+        while (true) {
+          const step = await parts.next();
+          if (step.done) {
+            writer.write({ type: 'data-final', id: 'final', data: step.value.data } as never);
+            return;
+          }
+          writer.write(step.value as never);
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        emit({ type: 'data-action-error', id: 'error', data: { message } });
-        await updateJobStatus(organizationId, jobId, 'failed', { error: message });
-        if (opts.commercial) await releaseReservation(opts.commercial.creditReservationId, message);
-        log.error('job.stream.failed', error, { job_id: jobId, action: opts.action });
+        writer.write({ type: 'data-action-error', id: 'error', data: { message } } as never);
       }
     },
   });

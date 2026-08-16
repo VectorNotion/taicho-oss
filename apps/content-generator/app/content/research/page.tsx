@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { Badge } from "@/components/ui/badge";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -130,10 +131,8 @@ export default function ResearchPage() {
   const fetchSources = async () => {
     setSourcesLoading(true);
     try {
-      const response = await fetch("/api/content/research/sources");
-      if (!response.ok) throw new Error("Failed to fetch sources");
-      const data = await response.json();
-      setSources(data);
+      const data = await apiGet<{ items: ResearchSource[] }>("/content/research/sources", { limit: 100 });
+      setSources(data.items);
     } catch (error) {
       console.error("Error fetching sources:", error);
       toast.error("Could not load sources. Refresh to try again.");
@@ -146,10 +145,8 @@ export default function ResearchPage() {
   const fetchItems = async () => {
     setItemsLoading(true);
     try {
-      const response = await fetch("/api/content/research/items");
-      if (!response.ok) throw new Error("Failed to fetch items");
-      const data = await response.json();
-      setItems(data);
+      const data = await apiGet<{ items: ResearchItem[] }>("/content/research/items", { limit: 100 });
+      setItems(data.items);
     } catch (error) {
       console.error("Error fetching items:", error);
       toast.error("Could not load research items. Refresh to try again.");
@@ -169,18 +166,12 @@ export default function ResearchPage() {
 
     setAddSourceLoading(true);
     try {
-      const response = await fetch("/api/content/research/sources", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newSourceName,
-          type: newSourceType,
-          url: newSourceUrl,
-          enabled: true,
-        }),
+      await apiMutate("POST", "/content/research/sources", {
+        name: newSourceName,
+        type: newSourceType,
+        url: newSourceUrl,
+        enabled: true,
       });
-
-      if (!response.ok) throw new Error("Failed to add source");
 
       toast.success("Source added");
       setAddSourceOpen(false);
@@ -199,13 +190,7 @@ export default function ResearchPage() {
   // Toggle source enabled
   const handleToggleSource = async (source: ResearchSource) => {
     try {
-      const response = await fetch(`/api/content/research/sources/${source.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !source.enabled }),
-      });
-
-      if (!response.ok) throw new Error("Failed to update source");
+      await apiMutate("PATCH", `/content/research/sources/${source.id}`, { enabled: !source.enabled });
       toast.success(source.enabled ? "Source disabled" : "Source enabled");
       fetchSources();
     } catch (error) {
@@ -219,11 +204,7 @@ export default function ResearchPage() {
     if (!deleteSourceTarget) return;
 
     try {
-      const response = await fetch(`/api/content/research/sources/${deleteSourceTarget.id}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) throw new Error("Failed to delete source");
+      await apiMutate("DELETE", `/content/research/sources/${deleteSourceTarget.id}`, { confirm: true });
       toast.success("Source removed");
       setDeleteSourceTarget(null);
       fetchSources();
@@ -239,13 +220,7 @@ export default function ResearchPage() {
     status: ResearchItemStatus
   ) => {
     try {
-      const response = await fetch(`/api/content/research/items/${item.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-
-      if (!response.ok) throw new Error("Failed to update item");
+      await apiMutate("PATCH", `/content/research/items/${item.id}`, { status });
       toast.success("Item updated");
       fetchItems();
     } catch (error) {
@@ -259,11 +234,7 @@ export default function ResearchPage() {
     if (!deleteItemTarget) return;
 
     try {
-      const response = await fetch(`/api/content/research/items/${deleteItemTarget.id}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) throw new Error("Failed to delete item");
+      await apiMutate("DELETE", `/content/research/items/${deleteItemTarget.id}`, { confirm: true });
       toast.success("Item deleted");
       setDeleteItemTarget(null);
       fetchItems();

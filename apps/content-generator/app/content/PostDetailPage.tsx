@@ -31,6 +31,7 @@ import {
   Ban,
 } from "lucide-react";
 
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -256,17 +257,12 @@ export default function PostDetailPage({
 
   const fetchDraft = async () => {
     try {
-      const res = await fetch(`/api/content/drafts/${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setDraft(data);
-        setPublishedUrl(data.publishedUrl || "");
-        setPerformanceLevel(data.performanceLevel || "");
-        setPerformanceInsights(data.performanceInsights || "");
-        setReminderWhen(reminderInputValue(data.scheduledFor));
-      } else {
-        toast.error("Could not load the Post. Refresh to try again.");
-      }
+      const { draft: data } = await apiGet<{ draft: ContentDraft }>(`/content/drafts/${id}`);
+      setDraft(data);
+      setPublishedUrl(data.publishedUrl || "");
+      setPerformanceLevel(data.performanceLevel || "");
+      setPerformanceInsights(data.performanceInsights || "");
+      setReminderWhen(reminderInputValue(data.scheduledFor));
     } catch (error) {
       console.error("Error fetching Post:", error);
       toast.error("Could not load the Post. Refresh to try again.");
@@ -277,9 +273,7 @@ export default function PostDetailPage({
 
   const fetchPosts = async (silent = false) => {
     try {
-      const res = await fetch(`/api/content/drafts/${id}/posts`);
-      if (!res.ok) throw new Error("Failed to fetch posts");
-      const data = await res.json();
+      const data = await apiGet<{ posts?: PublishingPost[] }>(`/publishing/drafts/${id}/posts`);
       setPosts(data.posts ?? []);
     } catch (error) {
       console.error("Error fetching posts:", error);
@@ -292,9 +286,7 @@ export default function PostDetailPage({
   const fetchChannels = async () => {
     setChannelsLoading(true);
     try {
-      const res = await fetch("/api/content/channels");
-      if (!res.ok) throw new Error("Failed to fetch channels");
-      const data = await res.json();
+      const data = await apiGet<{ channels?: ChannelSummary[] }>("/publishing");
       setChannels(data.channels ?? []);
     } catch (error) {
       console.error("Error fetching channels:", error);
@@ -306,9 +298,7 @@ export default function PostDetailPage({
 
   const fetchCreativeMedia = async (silent = false) => {
     try {
-      const res = await fetch(`/api/content/drafts/${id}/media`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load creative assets");
+      const data = await apiGet<{ templates?: CreativeTemplateOption[]; runs?: CreativeRun[]; assets?: CreativeAsset[] }>(`/content/drafts/${id}/media`);
       const templates = (data.templates ?? []) as CreativeTemplateOption[];
       setMediaTemplates(templates);
       setMediaRuns(data.runs ?? []);
@@ -371,13 +361,7 @@ export default function PostDetailPage({
   const startCreativeMedia = async (input: Record<string, unknown>) => {
     setMediaGenerating(true);
     try {
-      const res = await fetch(`/api/content/drafts/${id}/media`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to start generation");
+      await apiMutate("POST", `/content/drafts/${id}/media`, input);
       toast.success("Creative generation started");
       await fetchCreativeMedia(true);
     } catch (error) {
@@ -403,9 +387,7 @@ export default function PostDetailPage({
   const handleCancelCreativeRun = async (runId: string) => {
     setMediaCancellingId(runId);
     try {
-      const res = await fetch(`/api/content/media/jobs/${runId}/cancel`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to cancel generation");
+      await apiMutate("POST", `/content/media/runs/${runId}/cancel`, { confirm: true });
       toast.success("Generation cancelled");
       await fetchCreativeMedia(true);
     } catch (error) {
@@ -418,9 +400,7 @@ export default function PostDetailPage({
   const handleSelectCreativeAsset = async (asset: CreativeAsset) => {
     setMediaSelectingId(asset.id);
     try {
-      const res = await fetch(`/api/content/drafts/${id}/media/${asset.id}/select`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to select asset");
+      await apiMutate("POST", `/content/drafts/${id}/media/${asset.id}/select`);
       toast.success("Asset selected for publishing");
       await fetchCreativeMedia(true);
     } catch (error) {
@@ -435,16 +415,11 @@ export default function PostDetailPage({
     if (!channel) return;
     setPublishing(true);
     try {
-      const res = await fetch(`/api/content/drafts/${id}/publish`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          destination: channel.destination,
-          channelId: channel.id,
-          when: scheduleWhen ? new Date(scheduleWhen).toISOString() : undefined,
-        }),
+      await apiMutate("POST", `/publishing/drafts/${id}/publish`, {
+        destination: channel.destination,
+        channelId: channel.id,
+        when: scheduleWhen ? new Date(scheduleWhen).toISOString() : undefined,
       });
-      if (!res.ok) throw new Error("Failed to schedule the post");
       toast.success(scheduleWhen ? "Post scheduled" : "Post queued for publishing");
       setPublishDialogOpen(false);
       setSelectedChannelId("");
@@ -461,12 +436,7 @@ export default function PostDetailPage({
   const handleRetryPost = async (postId: string) => {
     setRetryingPostId(postId);
     try {
-      const res = await fetch(`/api/content/drafts/${id}/posts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ postId }),
-      });
-      if (!res.ok) throw new Error("Failed to retry the post");
+      await apiMutate("POST", `/publishing/posts/${postId}/retry`);
       toast.success("Retry scheduled");
       fetchPosts(true);
     } catch (error) {
@@ -485,18 +455,9 @@ export default function PostDetailPage({
         body.publishedUrl = publishedUrl;
       }
 
-      const res = await fetch(`/api/content/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (res.ok) {
-        toast.success(status === "ready" ? "Post marked as ready" : "Post marked as published");
-        fetchDraft();
-      } else {
-        toast.error("Could not update the Post. Try again.");
-      }
+      await apiMutate("PATCH", `/content/drafts/${id}`, body);
+      toast.success(status === "ready" ? "Post marked as ready" : "Post marked as published");
+      fetchDraft();
     } catch (error) {
       console.error("Error updating Post:", error);
       toast.error("Could not update the Post. Try again.");
@@ -539,15 +500,12 @@ export default function PostDetailPage({
 
     setUpdating(true);
     try {
-      const res = await fetch(`/api/content/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      try {
+        await apiMutate("PATCH", `/content/drafts/${id}`, {
           performanceLevel: performanceLevel || undefined,
           performanceInsights: performanceInsights || undefined,
-        }),
-      });
-      if (!res.ok) {
+        });
+      } catch {
         toast.error("Could not save the annotation. Try again.");
         return;
       }
@@ -616,16 +574,11 @@ export default function PostDetailPage({
     }
     setReminderUpdating(true);
     try {
-      const res = await fetch(`/api/content/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scheduledFor: clear
-            ? null
-            : new Date(reminderWhen).toISOString(),
-        }),
+      await apiMutate("PATCH", `/content/drafts/${id}`, {
+        scheduledFor: clear
+          ? null
+          : new Date(reminderWhen).toISOString(),
       });
-      if (!res.ok) throw new Error("Failed to update posting reminder");
       toast.success(clear ? "Posting reminder cleared" : "Posting reminder saved");
       if (clear) setReminderWhen("");
       await fetchDraft();

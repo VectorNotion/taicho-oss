@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2, Pencil, Plus, Power, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
+import { apiMutate } from "@content-automation/platform/network/api-client";
 import { PageHeader } from "@/components/PageHeader";
 import { ListRow, ListRows } from "@/components/ListRow";
 import { ListSurface } from "@/components/ListSurface";
@@ -127,13 +128,10 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
     setSaving(true);
     try {
       const current = editing === "new" ? null : editing;
-      const response = await fetch(current ? `/api/outreach/personas/${current.id}` : "/api/outreach/personas", {
-        method: current ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) throw new Error("Failed to save persona");
-      const saved: Persona = await response.json();
+      const { data: result } = current
+        ? await apiMutate<{ persona: Persona }>("PATCH", `/outreach/personas/${current.id}`, data)
+        : await apiMutate<{ persona: Persona }>("POST", "/outreach/personas", data);
+      const saved = result.persona;
       setPersonas((items) => current ? items.map((item) => item.id === saved.id ? saved : item) : [saved, ...items]);
       toast.success(current ? "Persona updated" : "Persona created");
       cancelEdit();
@@ -148,13 +146,8 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
   async function togglePersona(persona: Persona) {
     setPendingToggle(persona.id);
     try {
-      const response = await fetch(`/api/outreach/personas/${persona.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive: !persona.isActive }),
-      });
-      if (!response.ok) throw new Error("Failed to update persona");
-      const updated: Persona = await response.json();
+      const { data: result } = await apiMutate<{ persona: Persona }>("PATCH", `/outreach/personas/${persona.id}`, { isActive: !persona.isActive });
+      const updated = result.persona;
       setPersonas((items) => items.map((item) => item.id === updated.id ? updated : item));
       toast.success(updated.isActive ? "Persona activated" : "Persona deactivated");
     } catch (error) {
@@ -169,8 +162,7 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const response = await fetch(`/api/outreach/personas/${deleteTarget.id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("Failed to delete persona");
+      await apiMutate("DELETE", `/outreach/personas/${deleteTarget.id}`, { confirm: true });
       setPersonas((items) => items.filter((item) => item.id !== deleteTarget.id));
       if (editing !== "new" && editing?.id === deleteTarget.id) cancelEdit();
       toast.success("Persona deleted");

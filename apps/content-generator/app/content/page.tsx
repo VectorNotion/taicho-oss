@@ -23,6 +23,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -94,23 +95,23 @@ export default function ContentPage() {
   const fetchData = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const [insightsRes, ideasRes, draftsRes] = await Promise.all([
-        fetch("/api/content/insights", { signal }),
-        fetch("/api/content/ideas", { signal }),
-        fetch("/api/content/drafts", { signal }),
+      const [insightsResult, ideasResult, draftsResult] = await Promise.allSettled([
+        apiGet<{ feed: ContentInsightFeed }>("/content/insights"),
+        apiGet<{ items: ContentIdea[] }>("/content/ideas", { limit: 100 }),
+        apiGet<{ items: ContentDraft[] }>("/content/drafts", { limit: 100 }),
       ]);
 
       if (signal?.aborted) return;
-      if (insightsRes.ok) {
-        setInsightFeed(await insightsRes.json());
+      if (insightsResult.status === "fulfilled") {
+        setInsightFeed(insightsResult.value.feed);
       }
-      if (ideasRes.ok) {
-        setIdeas(await ideasRes.json());
+      if (ideasResult.status === "fulfilled") {
+        setIdeas(ideasResult.value.items);
       }
-      if (draftsRes.ok) {
-        setDrafts(await draftsRes.json());
+      if (draftsResult.status === "fulfilled") {
+        setDrafts(draftsResult.value.items);
       }
-      if (!insightsRes.ok || !ideasRes.ok || !draftsRes.ok) {
+      if ([insightsResult, ideasResult, draftsResult].some((result) => result.status === "rejected")) {
         toast.error("Could not load some content. Refresh to try again.");
       }
     } catch {
@@ -130,15 +131,11 @@ export default function ContentPage() {
   const createIdeaFromInsight = async (insight: ContentInsight) => {
     setCreatingInsightId(insight.id);
     try {
-      const response = await fetch(
-        `/api/content/insights/${encodeURIComponent(insight.id)}/idea`,
-        { method: "POST" },
+      const { data } = await apiMutate<{ idea: ContentIdea }>(
+        "POST",
+        `/content/insights/${encodeURIComponent(insight.id)}/idea`,
       );
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body.error || "Could not create a content idea.");
-      }
-      const idea = body as ContentIdea;
+      const idea = data.idea;
       setIdeas((current) => [idea, ...current.filter((item) => item.id !== idea.id)]);
       toast.success("Content idea created from the calculated gap.");
       router.push(`/content/${idea.id}`);

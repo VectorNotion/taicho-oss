@@ -17,6 +17,7 @@ import { ListRow, ListRows } from "@/components/ListRow";
 import { PageHeader } from "@/components/PageHeader";
 import { EntityChipStream, ReasoningTicker, StreamSection } from "@/components/genui";
 import { useActionStream } from "@/hooks/use-action-stream";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, use } from "react";
@@ -43,11 +44,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   useEffect(() => {
     async function fetchProject() {
       try {
-        const response = await fetch(`/api/content/projects/${routeProjectId}`);
-        if (!response.ok) throw new Error('Failed to fetch project');
-
-        const data = await response.json();
-        setProject(data);
+        const data = await apiGet<{ project: any }>(`/content/projects/${routeProjectId}`);
+        setProject(data.project);
       } catch (error) {
         console.error('Error fetching project:', error);
         toast.error("Could not load the project. Refresh to try again.");
@@ -64,11 +62,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
       setEntitiesLoading(true);
       try {
-        const response = await fetch(`/api/content/projects/${projectId}/entities`);
-        if (!response.ok) throw new Error('Failed to fetch entities');
-
-        const data = await response.json();
-        setEntities(data);
+        const data = await apiGet<{ entities: ProjectEntity[] }>(`/content/projects/${projectId}/entities`);
+        setEntities(data.entities);
       } catch (error) {
         console.error('Error fetching entities:', error);
         toast.error("Could not load extracted entities. Refresh to try again.");
@@ -83,9 +78,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   useEffect(() => {
     if (!entitiesStream.final || !projectId) return;
-    void fetch(`/api/content/projects/${projectId}/entities`)
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Failed to fetch entities')))
-      .then(setEntities)
+    void apiGet<{ entities: ProjectEntity[] }>(`/content/projects/${projectId}/entities`)
+      .then((data) => setEntities(data.entities))
       .catch(() => toast.error("Extraction completed, but entities could not be refreshed."));
   }, [entitiesStream.final, projectId]);
   useEffect(() => { if (entitiesStream.error) toast.error(entitiesStream.error); }, [entitiesStream.error]);
@@ -95,11 +89,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/content/projects/${projectId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('Failed to delete');
+      await apiMutate("DELETE", `/content/projects/${projectId}`, { confirm: true });
 
       toast.success("Project deleted");
       router.push('/content/projects');

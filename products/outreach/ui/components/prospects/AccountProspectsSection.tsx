@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Loader2, Plus, Search, User } from "lucide-react";
 import { toast } from "sonner";
+import { apiMutate } from "@content-automation/platform/network/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -169,22 +170,14 @@ export function AccountProspectsSection({
     }
     setAdding(true);
     try {
-      const response = await fetch("/api/outreach/prospects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          title: form.title.trim() || undefined,
-          email: form.email.trim() || undefined,
-          linkedinUrl: form.linkedinUrl.trim() || undefined,
-          company: accountName,
-          source: "manual",
-        }),
+      await apiMutate("POST", "/outreach/prospects", {
+        name,
+        title: form.title.trim() || undefined,
+        email: form.email.trim() || undefined,
+        linkedinUrl: form.linkedinUrl.trim() || undefined,
+        company: accountName,
+        source: "manual",
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(result.error ?? "Prospect could not be added.");
-      }
       toast.success(`${name} added to ${accountName}`);
       setForm(EMPTY_FORM);
       setAddOpen(false);

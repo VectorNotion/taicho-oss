@@ -33,6 +33,7 @@
     "./metrics/ingest-verification": "./metrics/ingest-verification.ts",
     "./metrics/rollup": "./metrics/rollup.ts",
     "./metrics/snapshots": "./metrics/snapshots.ts",
+    "./network/api-client": "./network/api-client.ts",
     "./network/request-body": "./network/request-body.ts",
     "./network/safe-fetch": "./network/safe-fetch.ts",
     "./network/signed-webhook": "./network/signed-webhook.ts",

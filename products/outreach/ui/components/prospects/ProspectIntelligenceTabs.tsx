@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import {
   Bot,
   CalendarDays,
@@ -94,12 +95,6 @@ function statusVariant(status: ProspectMeeting["status"]): "default" | "secondar
   if (status === "failed") return "destructive";
   if (status === "in_meeting") return "secondary";
   return "outline";
-}
-
-async function responseData(response: Response) {
-  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "The request failed.");
-  return data;
 }
 
 function EmptyState({ icon: Icon, children }: { icon: typeof FileText; children: ReactNode }) {
@@ -476,9 +471,8 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
   }, [scrollToLocationSource]);
 
   const refresh = useCallback(async () => {
-    const response = await fetch(`/api/outreach/prospects/${prospectId}/intelligence`, { cache: "no-store" });
-    const data = await responseData(response) as unknown as ProspectIntelligenceWorkspace;
-    setWorkspace(data);
+    const data = await apiGet<{ workspace: ProspectIntelligenceWorkspace }>(`/outreach/prospects/${prospectId}/intelligence`);
+    setWorkspace(data.workspace);
   }, [prospectId]);
 
   useEffect(() => {
@@ -513,11 +507,7 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
     if (!meetingUrl.trim()) return;
     setStartingMeeting(true);
     try {
-      await responseData(await fetch(`/api/outreach/prospects/${prospectId}/meetings`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meetingUrl }),
-      }));
+      await apiMutate("POST", `/outreach/prospects/${prospectId}/meetings`, { meetingUrl });
       setMeetingUrl("");
       await refresh();
       toast.success("Taicho is joining the meeting");
@@ -532,11 +522,11 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
     if (!manualUpdate.trim()) return;
     setSavingUpdate(true);
     try {
-      const result = await responseData(await fetch(`/api/outreach/prospects/${prospectId}/evidence`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: manualUpdate }),
-      }));
+      const { data: result } = await apiMutate<{ evidence: unknown; insight: unknown; warning?: string }>(
+        "POST",
+        `/outreach/prospects/${prospectId}/evidence`,
+        { content: manualUpdate },
+      );
       setManualUpdate("");
       await refresh();
       if (typeof result.warning === "string") toast.warning(result.warning);
@@ -551,7 +541,7 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
   const regenerateInsights = async () => {
     setRefreshingInsights(true);
     try {
-      await responseData(await fetch(`/api/outreach/prospects/${prospectId}/insights`, { method: "POST" }));
+      await apiMutate("POST", `/outreach/prospects/${prospectId}/insights`, {});
       await refresh();
       toast.success("Insights refreshed from all current evidence");
     } catch (error) {
@@ -567,12 +557,11 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
     setSemanticQuery(query);
     setSearchingProspect(true);
     try {
-      const result = await responseData(await fetch(`/api/outreach/prospects/${prospectId}/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, limit: 6 }),
-      })) as unknown as ProspectSemanticSearchResponse;
-      setSemanticResults(result);
+      const data = await apiGet<{ result: ProspectSemanticSearchResponse }>(
+        `/outreach/prospects/${prospectId}/search`,
+        { query, limit: 6 },
+      );
+      setSemanticResults(data.result);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not search this prospect.");
     } finally {

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RevealableSecretInput } from "@/components/ui/revealable-secret-input";
@@ -97,9 +98,7 @@ export default function ChannelsPage() {
 
   const fetchChannels = async () => {
     try {
-      const response = await fetch("/api/content/channels");
-      if (!response.ok) throw new Error("Failed to fetch channels");
-      const data = await response.json();
+      const data = await apiGet<{ channels?: ChannelSummary[]; destinations?: DestinationInfo[] }>("/publishing");
       setChannels(data.channels ?? []);
       setDestinations(data.destinations ?? []);
     } catch (error) {
@@ -134,16 +133,11 @@ export default function ChannelsPage() {
     if (!cmsName || !cmsBaseUrl || !cmsApiKey) return;
     setCmsLoading(true);
     try {
-      const response = await fetch("/api/content/channels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          destination: "cms",
-          name: cmsName.trim(),
-          credentials: { base_url: cmsBaseUrl.trim(), api_key: cmsApiKey.trim() },
-        }),
+      await apiMutate("POST", "/publishing/channels", {
+        destination: "cms",
+        name: cmsName.trim(),
+        credentials: { base_url: cmsBaseUrl.trim(), api_key: cmsApiKey.trim() },
       });
-      if (!response.ok) throw new Error("Failed to add CMS channel");
       toast.success("CMS channel added");
       setCmsDialogOpen(false);
       setCmsName("");
@@ -162,17 +156,12 @@ export default function ChannelsPage() {
     if (!webhookName || !webhookUrl || !webhookSecret) return;
     setWebhookLoading(true);
     try {
-      const response = await fetch("/api/content/channels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          destination: "webhook",
-          name: webhookName.trim(),
-          // The webhook adapter reads credentials.url and credentials.secret.
-          credentials: { url: webhookUrl.trim(), secret: webhookSecret.trim() },
-        }),
+      await apiMutate("POST", "/publishing/channels", {
+        destination: "webhook",
+        name: webhookName.trim(),
+        // The webhook adapter reads credentials.url and credentials.secret.
+        credentials: { url: webhookUrl.trim(), secret: webhookSecret.trim() },
       });
-      if (!response.ok) throw new Error("Failed to add webhook channel");
       toast.success("Webhook channel added");
       setWebhookDialogOpen(false);
       setWebhookName("");
@@ -191,10 +180,7 @@ export default function ChannelsPage() {
     if (!disconnectTarget) return;
     setDisconnectLoading(true);
     try {
-      const response = await fetch(`/api/content/channels/${disconnectTarget.id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) throw new Error("Failed to disconnect channel");
+      await apiMutate("DELETE", `/publishing/channels/${disconnectTarget.id}`, { confirm: true });
       toast.success("Channel disconnected");
       setDisconnectTarget(null);
       fetchChannels();

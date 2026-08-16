@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiMutate } from "@content-automation/platform/network/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -106,16 +107,12 @@ export function DraftsWorkspace({
     const nextStatus: OutreachStatus =
       item.message.status === "draft" ? "sent" : "draft";
     try {
-      const response = await fetch(
-        `/api/outreach/prospects/${item.prospect.id}/outreach/${item.message.id}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: nextStatus }),
-        },
+      const { data } = await apiMutate<{ message: OutreachMessageWithProspect["message"] }>(
+        "PATCH",
+        `/outreach/messages/${item.message.id}`,
+        { status: nextStatus },
       );
-      if (!response.ok) throw new Error();
-      const updated = await response.json();
+      const updated = data.message;
       setMessages((current) =>
         current.map((entry) =>
           entry.message.id === updated.id
@@ -138,11 +135,7 @@ export function DraftsWorkspace({
   async function deleteMessage(item: OutreachMessageWithProspect) {
     setBusyId(item.message.id);
     try {
-      const response = await fetch(
-        `/api/outreach/prospects/${item.prospect.id}/outreach/${item.message.id}`,
-        { method: "DELETE" },
-      );
-      if (!response.ok) throw new Error();
+      await apiMutate("DELETE", `/outreach/messages/${item.message.id}`, { confirm: true });
       setMessages((current) =>
         current.filter((entry) => entry.message.id !== item.message.id),
       );

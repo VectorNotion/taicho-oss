@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Building2, ExternalLink, Search } from "lucide-react";
 import { toast } from "sonner";
+import { ApiError, apiGet } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -203,14 +204,13 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
       if (!options?.silent) setLoading(true);
       setNotFound(false);
       try {
-        const response = await fetch(`/api/outreach/accounts/${id}`);
-        if (response.status === 404) {
+        const { account: loaded } = await apiGet<{ account: AccountDetail }>(`/outreach/accounts/${id}`);
+        setAccount(loaded);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
           setNotFound(true);
           return;
         }
-        if (!response.ok) throw new Error("Failed to fetch account");
-        setAccount(await response.json());
-      } catch (error) {
         console.error("Error fetching account:", error);
         toast.error("Could not load this account — refresh to try again.");
       } finally {
@@ -229,14 +229,10 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     setNavigationLoading(true);
     setNavigationError(false);
     setNavigation(null);
-    void fetch(`/api/outreach/accounts/${id}/navigation`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then((response) => response.ok
-        ? response.json()
-        : Promise.reject(new Error("Failed to fetch account navigation")))
-      .then((data: DetailNavigationData) => setNavigation(data))
+    void apiGet<{ navigation: DetailNavigationData }>(`/outreach/accounts/${id}/navigation`)
+      .then(({ navigation: data }) => {
+        if (!controller.signal.aborted) setNavigation(data);
+      })
       .catch((error) => {
         if (!controller.signal.aborted) {
           console.error("Error fetching account navigation:", error);

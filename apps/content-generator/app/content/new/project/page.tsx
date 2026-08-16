@@ -7,6 +7,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, X, Upload, Loader2 } from "lucide-react";
 
+import { apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -81,42 +82,23 @@ export default function NewProjectPage() {
 
     try {
       // Step 1: Create project in Neo4j
-      const response = await fetch('/api/content/projects', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: formData.title,
-          description: formData.description,
-          tags: formData.tags,
-          demoUrl: formData.demoUrl,
-          githubUrl: formData.githubUrl,
-          liveUrl: formData.liveUrl,
-          docsUrl: formData.docsUrl,
-        }),
+      const { data: created } = await apiMutate<{ project: { id: string } }>('POST', '/content/projects', {
+        title: formData.title,
+        description: formData.description,
+        tags: formData.tags,
+        demoUrl: formData.demoUrl,
+        githubUrl: formData.githubUrl,
+        liveUrl: formData.liveUrl,
+        docsUrl: formData.docsUrl,
       });
+      const project = created.project;
 
-      if (!response.ok) {
-        throw new Error('Failed to create project');
-      }
-
-      const project = await response.json();
-
-      // Step 2: Run automatic entity extraction.
+      // Step 2: Queue automatic entity extraction as a durable operation.
       setIngestionStatus('ingesting');
       try {
-        const ingestionResponse = await fetch(`/api/content/projects/${project.id}/ingest`, {
-          method: 'POST',
-        });
-
-        if (!ingestionResponse.ok) {
-          throw new Error('Ingestion request failed');
-        }
-
-        await ingestionResponse.json();
+        await apiMutate('POST', '/content/operations/project-ingest', { projectId: project.id });
         setIngestionStatus('success');
-        toast.success("Project created and entity extraction completed.");
+        toast.success("Project created and entity extraction started.");
       } catch (ingestionError) {
         console.error('Failed to start extraction:', ingestionError);
         setIngestionStatus('error');

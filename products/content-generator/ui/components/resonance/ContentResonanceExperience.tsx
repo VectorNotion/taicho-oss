@@ -33,6 +33,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -515,9 +516,11 @@ export function ContentResonanceExperience({
     let active = true;
     const restore = async () => {
       try {
-        const response = await fetch(`/api/content/drafts/${draft.id}/resonance/latest`);
-        if (!active || startedRef.current || response.status === 204 || !response.ok) return;
-        const body = await response.json() as { result?: ContentResonanceExperimentResult };
+        const data = await apiGet<{ latest: { result?: ContentResonanceExperimentResult } | null }>(
+          `/content/drafts/${draft.id}/resonance/latest`,
+        );
+        if (!active || startedRef.current || !data.latest) return;
+        const body = data.latest;
         if (body.result?.kind !== "content_resonance_experiment") return;
         setRecoveredExperiment(body.result);
         setActiveRequest({
@@ -669,12 +672,7 @@ export function ContentResonanceExperience({
     if (!winner || winner.original) return;
     setApplying(true);
     try {
-      const response = await fetch(`/api/content/drafts/${draft.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: winner.title, content: winner.content }),
-      });
-      if (!response.ok) throw new Error("Could not update the draft.");
+      await apiMutate("PATCH", `/content/drafts/${draft.id}`, { title: winner.title, content: winner.content });
       toast.success("Winning variation applied");
       setConfirmApplyOpen(false);
       await onDraftUpdated?.();

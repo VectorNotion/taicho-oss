@@ -33,22 +33,22 @@ export function BrainView() {
   const loadedNeighborhoods = useRef(new Set<string>());
 
   useEffect(() => {
-    fetch('/api/brain/overview')
+    fetch('/api/v1/brain/overview')
       .then((r) => {
         if (!r.ok) throw new Error('Brain overview failed');
         return r.json();
       })
-      .then((g: BrainGraph) => {
-        setNodeCount(g.nodes.length);
-        canvas.current?.setGraph(g);
+      .then(({ data }: { data: { graph: BrainGraph } }) => {
+        setNodeCount(data.graph.nodes.length);
+        canvas.current?.setGraph(data.graph);
       })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, []);
 
   const refreshNeighborhood = useCallback(async (id: string) => {
-    const g: BrainGraph = await fetch(`/api/brain/neighborhood/${encodeURIComponent(id)}`).then((r) => r.json());
-    canvas.current?.mergeGraph(g, id);
+    const { data } = await fetch(`/api/v1/brain/nodes/${encodeURIComponent(id)}`).then((r) => r.json()) as { data: { graph: BrainGraph } };
+    canvas.current?.mergeGraph(data.graph, id);
     loadedNeighborhoods.current.add(id);
   }, []);
 

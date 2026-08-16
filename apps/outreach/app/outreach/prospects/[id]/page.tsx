@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
 
 import {
@@ -130,9 +131,8 @@ export function ProspectDetailPage({
     if (!prospectId) return;
     if (!options?.silent) setDossierLoading(true);
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/dossier`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Failed to fetch dossier");
-      setDossier(await response.json());
+      const { dossier: loaded } = await apiGet<{ dossier: ProspectDossier }>(`/outreach/prospects/${prospectId}/dossier`);
+      setDossier(loaded);
     } catch (error) {
       console.error("Error fetching dossier:", error);
       toast.error("Could not load the sales-intelligence dossier — refresh to try again");
@@ -148,11 +148,8 @@ export function ProspectDetailPage({
       setIsLoading(true);
       setProspect(null);
       try {
-        const response = await fetch(`/api/outreach/prospects/${routeProspectId}`);
-        if (!response.ok) throw new Error("Failed to fetch prospect");
-
-        const data = await response.json();
-        if (!cancelled) setProspect(data);
+        const data = await apiGet<{ prospect: Prospect }>(`/outreach/prospects/${routeProspectId}`);
+        if (!cancelled) setProspect(data.prospect);
       } catch (error) {
         if (cancelled) return;
         console.error("Error fetching prospect:", error);
@@ -166,29 +163,25 @@ export function ProspectDetailPage({
   }, [routeProspectId]);
 
   useEffect(() => {
-    void fetch("/api/outreach/catalog")
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((items: CatalogItem[]) => setCatalog(items))
+    void apiGet<{ items: CatalogItem[] }>("/outreach/catalog")
+      .then(({ items }) => setCatalog(items))
       .catch(() => undefined);
   }, []);
 
   useEffect(() => {
     function refreshAfterAssistant() {
       void Promise.all([
-        fetch(`/api/outreach/prospects/${prospectId}`, { cache: "no-store" }),
-        fetch(`/api/outreach/prospects/${prospectId}/outreach`, { cache: "no-store" }),
-        fetch(`/api/outreach/prospects/${prospectId}/notes`, { cache: "no-store" }),
-        fetch(`/api/outreach/prospects/${prospectId}/activities`, { cache: "no-store" }),
-        fetch(`/api/outreach/action-items?prospectId=${encodeURIComponent(prospectId)}`, { cache: "no-store" }),
-      ]).then(async ([prospectResponse, outreachResponse, notesResponse, activitiesResponse, actionsResponse]) => {
-        if (prospectResponse.ok) setProspect(await prospectResponse.json());
-        if (outreachResponse.ok) setOutreachMessages(await outreachResponse.json());
-        if (notesResponse.ok) setNotes(await notesResponse.json());
-        if (activitiesResponse.ok) setActivities(await activitiesResponse.json());
-        if (actionsResponse.ok) {
-          const data = await actionsResponse.json();
-          setActionItems(data.items as ActionItem[]);
-        }
+        apiGet<{ prospect: Prospect }>(`/outreach/prospects/${prospectId}`),
+        apiGet<{ messages: OutreachMessage[] }>(`/outreach/prospects/${prospectId}/messages`),
+        apiGet<{ notes: ProspectNote[] }>(`/outreach/prospects/${prospectId}/notes`),
+        apiGet<{ activities: ProspectActivity[] }>(`/outreach/prospects/${prospectId}/activities`),
+        apiGet<{ items: ActionItem[] }>("/outreach/action-items", { prospectId }),
+      ]).then(([prospectData, outreachData, notesData, activitiesData, actionsData]) => {
+        setProspect(prospectData.prospect);
+        setOutreachMessages(outreachData.messages);
+        setNotes(notesData.notes);
+        setActivities(activitiesData.activities);
+        setActionItems(actionsData.items);
       }).catch(() => undefined);
       void fetchDossier({ silent: true });
     }
@@ -199,14 +192,10 @@ export function ProspectDetailPage({
   async function handleCatalogChange(value: string) {
     setUpdatingCatalog(true);
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ catalogItemId: value === "none" ? null : value }),
+      const { data } = await apiMutate<{ prospect: Prospect }>("PATCH", `/outreach/prospects/${prospectId}`, {
+        catalogItemId: value === "none" ? null : value,
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error ?? "Catalog context could not be updated");
-      setProspect(result);
+      setProspect(data.prospect);
       await fetchDossier({ silent: true });
       toast.success(value === "none" ? "Catalog context cleared" : "Catalog context updated");
     } catch (error) {
@@ -221,14 +210,10 @@ export function ProspectDetailPage({
     setNavigationLoading(true);
     setNavigationError(false);
     setNavigation(null);
-    void fetch(`/api/outreach/prospects/${routeProspectId}/navigation`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then((response) => response.ok
-        ? response.json()
-        : Promise.reject(new Error("Failed to fetch navigation")))
-      .then((data: ProspectNavigation) => setNavigation(data))
+    void apiGet<{ navigation: ProspectNavigation }>(`/outreach/prospects/${routeProspectId}/navigation`)
+      .then(({ navigation: data }) => {
+        if (!controller.signal.aborted) setNavigation(data);
+      })
       .catch((error) => {
         if (!controller.signal.aborted) {
           console.error("Error fetching prospect navigation:", error);
@@ -258,11 +243,8 @@ export function ProspectDetailPage({
 
       setOutreachLoading(true);
       try {
-        const response = await fetch(`/api/outreach/prospects/${prospectId}/outreach`);
-        if (!response.ok) throw new Error("Failed to fetch outreach messages");
-
-        const data = await response.json();
-        setOutreachMessages(data);
+        const data = await apiGet<{ messages: OutreachMessage[] }>(`/outreach/prospects/${prospectId}/messages`);
+        setOutreachMessages(data.messages);
       } catch (error) {
         console.error("Error fetching outreach:", error);
         toast.error("Could not load outreach history — refresh to try again");
@@ -335,11 +317,8 @@ export function ProspectDetailPage({
 
       setNotesLoading(true);
       try {
-        const response = await fetch(`/api/outreach/prospects/${prospectId}/notes`);
-        if (!response.ok) throw new Error("Failed to fetch notes");
-
-        const data = await response.json();
-        setNotes(data);
+        const data = await apiGet<{ notes: ProspectNote[] }>(`/outreach/prospects/${prospectId}/notes`);
+        setNotes(data.notes);
       } catch (error) {
         console.error("Error fetching notes:", error);
         toast.error("Could not load notes — refresh to try again");
@@ -357,11 +336,8 @@ export function ProspectDetailPage({
 
       setActivitiesLoading(true);
       try {
-        const response = await fetch(`/api/outreach/prospects/${prospectId}/activities`);
-        if (!response.ok) throw new Error("Failed to fetch activities");
-
-        const data = await response.json();
-        setActivities(data);
+        const data = await apiGet<{ activities: ProspectActivity[] }>(`/outreach/prospects/${prospectId}/activities`);
+        setActivities(data.activities);
       } catch (error) {
         console.error("Error fetching activities:", error);
         toast.error("Could not load activities — refresh to try again");
@@ -373,18 +349,18 @@ export function ProspectDetailPage({
   }, [prospectId]);
 
   const refreshActivities = async () => {
-    const response = await fetch(`/api/outreach/prospects/${prospectId}/activities`);
-    if (response.ok) setActivities(await response.json());
+    try {
+      const data = await apiGet<{ activities: ProspectActivity[] }>(`/outreach/prospects/${prospectId}/activities`);
+      setActivities(data.activities);
+    } catch {
+      // Timeline refresh is best-effort; the mutation that triggered it already landed.
+    }
   };
 
   const refreshActionItems = async () => {
     try {
-      const response = await fetch(
-        `/api/outreach/action-items?prospectId=${encodeURIComponent(prospectId)}`,
-      );
-      if (!response.ok) throw new Error("Failed to load action items");
-      const data = await response.json();
-      setActionItems(data.items as ActionItem[]);
+      const data = await apiGet<{ items: ActionItem[] }>("/outreach/action-items", { prospectId });
+      setActionItems(data.items);
     } catch (error) {
       console.error("Error fetching action items:", error);
       toast.error("Could not load the next action — refresh to try again");
@@ -402,12 +378,7 @@ export function ProspectDetailPage({
 
   const handleCompleteActionItem = async (id: string) => {
     try {
-      const response = await fetch(`/api/outreach/action-items/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "complete" }),
-      });
-      if (!response.ok) throw new Error("Failed to complete action item");
+      await apiMutate("PATCH", `/outreach/action-items/${id}`, { action: "complete" });
       toast.success("Action completed");
       await Promise.all([refreshActionItems(), refreshActivities()]);
     } catch (error) {
@@ -418,10 +389,7 @@ export function ProspectDetailPage({
 
   const handleDeleteActionItem = async (id: string) => {
     try {
-      const response = await fetch(`/api/outreach/action-items/${id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) throw new Error("Failed to delete action item");
+      await apiMutate("DELETE", `/outreach/action-items/${id}`, { confirm: true });
       toast.success("Upcoming action removed");
       await refreshActionItems();
     } catch (error) {
@@ -432,12 +400,7 @@ export function ProspectDetailPage({
 
   const handleSnoozeActionItem = async (id: string, dueAt: string) => {
     try {
-      const response = await fetch(`/api/outreach/action-items/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dueAt }),
-      });
-      if (!response.ok) throw new Error("Failed to snooze action item");
+      await apiMutate("PATCH", `/outreach/action-items/${id}`, { dueAt });
       toast.success("Snoozed");
       await refreshActionItems();
     } catch (error) {
@@ -448,12 +411,7 @@ export function ProspectDetailPage({
 
   const handleEditActionItem = async (id: string, title: string, dueAt: string) => {
     try {
-      const response = await fetch(`/api/outreach/action-items/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, dueAt }),
-      });
-      if (!response.ok) throw new Error("Failed to update action item");
+      await apiMutate("PATCH", `/outreach/action-items/${id}`, { title, dueAt });
       toast.success("Next action updated");
       await refreshActionItems();
     } catch (error) {
@@ -464,12 +422,7 @@ export function ProspectDetailPage({
 
   const handleCreateActionItem = async (title: string, dueAt: string) => {
     try {
-      const response = await fetch(`/api/outreach/action-items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, dueAt, prospectId }),
-      });
-      if (!response.ok) throw new Error("Failed to create action item");
+      await apiMutate("POST", "/outreach/action-items", { title, dueAt, prospectId });
       toast.success("Next action set");
       await refreshActionItems();
     } catch (error) {
@@ -479,41 +432,24 @@ export function ProspectDetailPage({
   };
 
   const handleAddNote = async (content: string) => {
-    const response = await fetch(`/api/outreach/prospects/${prospectId}/notes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
-    });
-
-    if (!response.ok) throw new Error("Failed to add note");
-
-    const newNote = await response.json();
-    setNotes((prev) => [newNote, ...prev]);
+    const { data } = await apiMutate<{ note: ProspectNote }>("POST", `/outreach/prospects/${prospectId}/notes`, { content });
+    setNotes((prev) => [data.note, ...prev]);
   };
 
   const handleDeleteNote = async (noteId: string) => {
-    const response = await fetch(`/api/outreach/prospects/${prospectId}/notes/${noteId}`, {
-      method: "DELETE",
-    });
-
-    if (!response.ok) throw new Error("Failed to delete note");
-
+    await apiMutate("DELETE", `/outreach/notes/${noteId}`, { confirm: true });
     setNotes((prev) => prev.filter((n) => n.id !== noteId));
   };
 
   const handleAddActivity = async (data: Omit<Activity, "id" | "createdAt" | "prospectId">) => {
     setIsSubmittingActivity(true);
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/activities`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-
-      if (!response.ok) throw new Error("Failed to add activity");
-
-      const newActivity = await response.json();
-      setActivities((prev) => [newActivity, ...prev]);
+      const { data: created } = await apiMutate<{ activity: ProspectActivity }>(
+        "POST",
+        `/outreach/prospects/${prospectId}/activities`,
+        data,
+      );
+      setActivities((prev) => [created.activity, ...prev]);
       setAddActivityDialogOpen(false);
       setEditingActivity(null);
       toast.success("Activity added");
@@ -533,17 +469,13 @@ export function ProspectDetailPage({
 
     setIsSubmittingActivity(true);
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/activities/${editingActivity.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-
-      if (!response.ok) throw new Error("Failed to update activity");
-
-      const updatedActivity = await response.json();
+      const { data: updated } = await apiMutate<{ activity: ProspectActivity }>(
+        "PATCH",
+        `/outreach/activities/${editingActivity.id}`,
+        data,
+      );
       setActivities((prev) =>
-        prev.map((a) => (a.id === editingActivity.id ? updatedActivity : a))
+        prev.map((a) => (a.id === editingActivity.id ? updated.activity : a))
       );
       setAddActivityDialogOpen(false);
       setEditingActivity(null);
@@ -558,12 +490,7 @@ export function ProspectDetailPage({
 
   const handleDeleteActivity = async (activityId: string) => {
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/activities/${activityId}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) throw new Error("Failed to delete activity");
-
+      await apiMutate("DELETE", `/outreach/activities/${activityId}`, { confirm: true });
       setActivities((prev) => prev.filter((a) => a.id !== activityId));
       toast.success("Activity deleted");
     } catch (error) {
@@ -577,18 +504,9 @@ export function ProspectDetailPage({
 
     setUpdatingStatus(true);
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-
-      if (!response.ok) throw new Error("Failed to update status");
-
-      const updated = await response.json();
-      setProspect(updated);
-      const activityResponse = await fetch(`/api/outreach/prospects/${prospectId}/activities`);
-      if (activityResponse.ok) setActivities(await activityResponse.json());
+      const { data } = await apiMutate<{ prospect: Prospect }>("PATCH", `/outreach/prospects/${prospectId}`, { status: newStatus });
+      setProspect(data.prospect);
+      await refreshActivities();
       toast.success("Status updated");
     } catch (error) {
       console.error("Error updating status:", error);
@@ -617,24 +535,12 @@ export function ProspectDetailPage({
   const handleToggleMessageStatus = async (message: OutreachMessage) => {
     const newStatus = message.status === "draft" ? "sent" : "draft";
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/outreach/${message.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(body?.error || "Failed to update message status");
-      }
-
-      const updated = await response.json();
+      const { data } = await apiMutate<{ message: OutreachMessage }>("PATCH", `/outreach/messages/${message.id}`, { status: newStatus });
       setOutreachMessages((prev) =>
-        prev.map((m) => (m.id === message.id ? updated : m))
+        prev.map((m) => (m.id === message.id ? data.message : m))
       );
       if (newStatus === "sent") {
-        const activityResponse = await fetch(`/api/outreach/prospects/${prospectId}/activities`);
-        if (activityResponse.ok) setActivities(await activityResponse.json());
+        await refreshActivities();
         // Sending stamps lastContactedAt and may auto-create a follow-up
         // server-side (fire-and-forget); give the insert a beat.
         setTimeout(() => void refreshActionItems(), 600);
@@ -642,7 +548,7 @@ export function ProspectDetailPage({
       toast.success(newStatus === "sent" ? "Message marked as sent externally" : "Message moved back to drafts");
     } catch (error) {
       console.error("Error updating message status:", error);
-      toast.error(error instanceof Error
+      toast.error(error instanceof ApiError || error instanceof Error
         ? error.message
         : "Could not update the message status — try again");
     }
@@ -678,26 +584,23 @@ export function ProspectDetailPage({
       if (!response.ok) throw new Error(data.error ?? "Could not add this person");
 
       if (prospect.email !== enrollEmail.trim()) {
-        const updateResponse = await fetch(`/api/outreach/prospects/${prospect.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: enrollEmail.trim() }),
-        });
-        if (updateResponse.ok) setProspect(await updateResponse.json());
+        try {
+          const { data: updated } = await apiMutate<{ prospect: Prospect }>("PATCH", `/outreach/prospects/${prospect.id}`, { email: enrollEmail.trim() });
+          setProspect(updated.prospect);
+        } catch {
+          // Enrollment already succeeded; the email sync is best-effort.
+        }
       }
 
-      const activityResponse = await fetch(`/api/outreach/prospects/${prospect.id}/activities`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      try {
+        const { data: created } = await apiMutate<{ activity: ProspectActivity }>("POST", `/outreach/prospects/${prospect.id}/activities`, {
           type: "nurture_enrolled",
           title: `Added to ${funnel?.name ?? "funnel"}`,
           metadata: { funnelId: selectedFunnelId, funnelName: funnel?.name },
-        }),
-      });
-      if (activityResponse.ok) {
-        const activity = await activityResponse.json();
-        setActivities((current) => [activity, ...current]);
+        });
+        setActivities((current) => [created.activity, ...current]);
+      } catch {
+        // Timeline entry is best-effort; the funnel membership is recorded.
       }
 
       toast.success(`${prospect.name} added to ${funnel?.name ?? "funnel"}`);
@@ -711,12 +614,7 @@ export function ProspectDetailPage({
 
   const handleDeleteMessage = async (messageId: string) => {
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}/outreach/${messageId}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) throw new Error("Failed to delete message");
-
+      await apiMutate("DELETE", `/outreach/messages/${messageId}`, { confirm: true });
       setOutreachMessages((prev) => prev.filter((m) => m.id !== messageId));
       toast.success("Message deleted");
     } catch (error) {
@@ -730,12 +628,7 @@ export function ProspectDetailPage({
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/outreach/prospects/${prospectId}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) throw new Error("Failed to delete");
-
+      await apiMutate("DELETE", `/outreach/prospects/${prospectId}`, { confirm: true });
       toast.success("Person removed from Outreach");
       router.push("/outreach/prospects");
     } catch (error) {

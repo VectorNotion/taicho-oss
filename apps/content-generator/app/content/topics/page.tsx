@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { Badge } from "@/components/ui/badge";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -96,13 +97,11 @@ export default function TopicsPage() {
   const fetchTopics = async () => {
     setLoading(true);
     try {
-      const url = showDismissed
-        ? "/api/content/topics?includeDismissed=true"
-        : "/api/content/topics";
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Failed to fetch topics");
-      const data = await response.json();
-      setTopicsData(data);
+      const data = await apiGet<{ items: Topic[]; total: number; activeCount: number; dismissedCount: number }>(
+        "/content/topics",
+        { limit: 100, ...(showDismissed ? { includeDismissed: true } : {}) },
+      );
+      setTopicsData({ topics: data.items, total: data.total, activeCount: data.activeCount, dismissedCount: data.dismissedCount });
     } catch (error) {
       console.error("Error fetching topics:", error);
       toast.error("Could not load topics. Refresh to try again.");
@@ -132,23 +131,20 @@ export default function TopicsPage() {
     setAddError(null);
 
     try {
-      const response = await fetch("/api/content/topics", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      try {
+        await apiMutate("POST", "/content/topics", {
           name: toCanonicalName(newName),
           displayName: newDisplayName || toDisplayName(toCanonicalName(newName)),
           description: newDescription,
           source: "manual",
-        }),
-      });
-
-      if (response.status === 409) {
-        setAddError("A topic with this name already exists (including dismissed topics)");
-        return;
+        });
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          setAddError("A topic with this name already exists (including dismissed topics)");
+          return;
+        }
+        throw error;
       }
-
-      if (!response.ok) throw new Error("Failed to add topic");
 
       toast.success("Topic added");
       setAddDialogOpen(false);
@@ -178,16 +174,10 @@ export default function TopicsPage() {
 
     setEditLoading(true);
     try {
-      const response = await fetch(`/api/content/topics/${editTopic.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          displayName: editDisplayName,
-          description: editDescription,
-        }),
+      await apiMutate("PATCH", `/content/topics/${editTopic.id}`, {
+        displayName: editDisplayName,
+        description: editDescription,
       });
-
-      if (!response.ok) throw new Error("Failed to update topic");
 
       toast.success("Topic updated");
       setEditDialogOpen(false);
@@ -206,11 +196,7 @@ export default function TopicsPage() {
     if (!dismissTarget) return;
 
     try {
-      const response = await fetch(`/api/content/topics/${dismissTarget.id}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) throw new Error("Failed to dismiss topic");
+      await apiMutate("POST", `/content/topics/${dismissTarget.id}/dismiss`);
       toast.success("Topic dismissed. Restore it from dismissed topics.");
       setDismissTarget(null);
       fetchTopics();
@@ -223,11 +209,7 @@ export default function TopicsPage() {
   // Restore topic
   const handleRestoreTopic = async (topic: Topic) => {
     try {
-      const response = await fetch(`/api/content/topics/${topic.id}/restore`, {
-        method: "POST",
-      });
-
-      if (!response.ok) throw new Error("Failed to restore topic");
+      await apiMutate("POST", `/content/topics/${topic.id}/restore`);
       toast.success("Topic restored");
       fetchTopics();
     } catch (error) {
@@ -245,13 +227,9 @@ export default function TopicsPage() {
   const handleResetTopics = async () => {
     setResetLoading(true);
     try {
-      const response = await fetch("/api/content/topics/reset", {
-        method: "POST",
+      const { data } = await apiMutate<{ deletedCount: number }>("DELETE", "/content/topics", {
+        confirm: "DELETE ALL TOPICS",
       });
-
-      if (!response.ok) throw new Error("Failed to reset topics");
-
-      const data = await response.json();
       toast.success(`Deleted ${data.deletedCount} topics`);
       setResetDialogOpen(false);
       fetchTopics();

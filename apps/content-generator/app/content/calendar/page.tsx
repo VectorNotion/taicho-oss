@@ -18,6 +18,7 @@ import {
 import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, RotateCcw, XCircle } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ListRow, ListRows } from "@/components/ListRow";
@@ -92,9 +93,7 @@ export default function PublishingCalendarPage() {
 
   const load = useCallback(async (silent = false) => {
     try {
-      const res = await fetch("/api/content/publishing");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await apiGet<{ queue?: CalendarPost[]; history?: CalendarPost[] }>("/publishing");
       setQueue(data.queue ?? []);
       setHistory(data.history ?? []);
     } catch {
@@ -115,15 +114,11 @@ export default function PublishingCalendarPage() {
       setPendingAction(postId);
       setConfirmCancelId(null);
       try {
-        const res = await fetch("/api/content/publishing", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, postId }),
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error ?? `HTTP ${res.status}`);
-        }
+        await apiMutate(
+          "POST",
+          `/publishing/posts/${postId}/${action}`,
+          action === "cancel" ? { confirm: true } : undefined,
+        );
         toast.success(action === "cancel" ? "Post cancelled" : "Post requeued");
         await load(true);
       } catch (err) {

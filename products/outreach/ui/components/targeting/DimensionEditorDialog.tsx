@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -147,15 +148,8 @@ export function DimensionEditorDialog({
 
     setSaving(true);
     try {
-      const response = await fetch(
-        isEdit ? `/api/outreach/dimensions/${dimension!.id}` : "/api/outreach/dimensions",
-        {
-          method: isEdit ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-      );
-      if (!response.ok) throw new Error("Failed to save dimension");
+      if (isEdit) await apiMutate("PATCH", `/outreach/dimensions/${dimension!.id}`, body);
+      else await apiMutate("POST", "/outreach/dimensions", body);
       toast.success(isEdit ? "Dimension updated" : "Dimension added");
       onOpenChange(false);
       onSaved();

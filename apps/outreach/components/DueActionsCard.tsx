@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlarmClock, Check, CheckCircle2, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ListCard } from "@/components/ListCard";
@@ -40,10 +41,8 @@ export function DueActionsCard() {
 
   const refresh = useCallback(async () => {
     try {
-      const response = await fetch("/api/outreach/action-items?horizonDays=90");
-      if (!response.ok) throw new Error("Failed to load action items");
-      const data = await response.json();
-      setItems(data.items as DueItem[]);
+      const data = await apiGet<{ items: DueItem[] }>("/outreach/action-items", { horizonDays: 90 });
+      setItems(data.items);
       setFailed(false);
     } catch (error) {
       console.error("Error loading due actions:", error);
@@ -60,12 +59,7 @@ export function DueActionsCard() {
 
   const complete = async (id: string) => {
     try {
-      const response = await fetch(`/api/outreach/action-items/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "complete" }),
-      });
-      if (!response.ok) throw new Error("Failed to complete action item");
+      await apiMutate("PATCH", `/outreach/action-items/${id}`, { action: "complete" });
       toast.success("Action completed");
       await refresh();
     } catch (error) {
@@ -76,12 +70,7 @@ export function DueActionsCard() {
 
   const snooze = async (id: string) => {
     try {
-      const response = await fetch(`/api/outreach/action-items/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dueAt: snoozeDueAt(3) }),
-      });
-      if (!response.ok) throw new Error("Failed to snooze action item");
+      await apiMutate("PATCH", `/outreach/action-items/${id}`, { dueAt: snoozeDueAt(3) });
       toast.success("Snoozed 3 days");
       await refresh();
     } catch (error) {
@@ -92,12 +81,7 @@ export function DueActionsCard() {
 
   const dismiss = async (id: string) => {
     try {
-      const response = await fetch(`/api/outreach/action-items/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "dismiss" }),
-      });
-      if (!response.ok) throw new Error("Failed to dismiss action item");
+      await apiMutate("PATCH", `/outreach/action-items/${id}`, { action: "dismiss" });
       toast.success("Dismissed");
       await refresh();
     } catch (error) {

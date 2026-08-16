@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiMutate } from '@content-automation/platform/network/api-client';
 import type { BrainSearchResult } from '../types';
 import { TYPE_COLOR } from '../palette';
 
@@ -39,9 +40,9 @@ export function CommandBar({ onPick, onProspectAdded }: {
   useEffect(() => {
     if (isAdd || q.trim().length < 2) { setResults([]); return; }
     const t = setTimeout(() => {
-      fetch(`/api/brain/search?q=${encodeURIComponent(q)}`)
+      fetch(`/api/v1/brain/search?query=${encodeURIComponent(q)}`)
         .then((r) => r.json())
-        .then((d) => setResults(d.results ?? []))
+        .then((d) => setResults(d.data?.results ?? []))
         .catch(() => setResults([]));
     }, 180);
     return () => clearTimeout(t);
@@ -52,15 +53,17 @@ export function CommandBar({ onPick, onProspectAdded }: {
     if (!prospect) return;
     setBusy(true);
     try {
-      // Contract: apps/outreach/app/api/outreach/prospects/route.ts POST —
-      // requires name + source; returns the prospect object spread ({...prospect, existed}).
-      const res = await fetch('/api/outreach/prospects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...prospect, source: 'manual', triggerResearch: true }),
-      });
-      const data = await res.json();
-      if (data?.id) { onProspectAdded(String(data.id)); setOpenBar(false); setQ(''); }
+      // Contract: outreach.prospect.create capability (POST /api/v1/outreach/prospects) —
+      // requires name + source; returns { prospect, deduplicated }.
+      const { data } = await apiMutate<{ prospect: { id?: string } }>(
+        'POST',
+        '/outreach/prospects',
+        { ...prospect, source: 'manual', triggerResearch: true },
+      );
+      const created = data.prospect;
+      if (created?.id) { onProspectAdded(String(created.id)); setOpenBar(false); setQ(''); }
+    } catch {
+      // The add is best-effort from the command bar; the input stays for retry.
     } finally { setBusy(false); }
   }, [q, onProspectAdded]);
 

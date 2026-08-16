@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Building2 } from "lucide-react";
 import { toast } from "sonner";
+import { apiGet } from "@content-automation/platform/network/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ListRow, ListRows } from "@/components/ListRow";
@@ -56,17 +57,14 @@ type AccountListResponse = {
 
 async function fetchAccounts(
   filters: { search: string; segment: Segment; sort: Sort; page: number; pageSize: number },
-  signal?: AbortSignal,
 ): Promise<AccountListResponse> {
-  const params = new URLSearchParams();
-  if (filters.search) params.set("search", filters.search);
-  if (filters.segment !== "all") params.set("segment", filters.segment);
-  params.set("sort", filters.sort);
-  params.set("page", String(filters.page));
-  params.set("pageSize", String(filters.pageSize));
-  const response = await fetch(`/api/outreach/accounts?${params.toString()}`, { signal });
-  if (!response.ok) throw new Error("Failed to fetch accounts.");
-  return response.json();
+  return apiGet<AccountListResponse>("/outreach/accounts", {
+    search: filters.search || undefined,
+    segment: filters.segment === "all" ? undefined : filters.segment,
+    sort: filters.sort,
+    page: filters.page,
+    pageSize: filters.pageSize,
+  });
 }
 
 /**
@@ -125,7 +123,6 @@ export default function AccountsPage() {
     setLoadingMore(false);
     void fetchAccounts(
       { search: deferredSearchQuery, segment, sort, page: 1, pageSize },
-      controller.signal,
     )
       .then((data) => {
         if (cancelled) return;
@@ -158,7 +155,6 @@ export default function AccountsPage() {
     try {
       const data = await fetchAccounts(
         { search: deferredSearchQuery, segment, sort, page: nextPage, pageSize },
-        controller.signal,
       );
       if (controller.signal.aborted) return;
       setAccounts((current) => {

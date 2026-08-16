@@ -20,6 +20,7 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,10 +57,9 @@ import { DueBadge } from "@/products/outreach/ui/components/action-items/DueBadg
 import type { CatalogItem } from "@/products/outreach/domain/catalog";
 
 type ProspectListResponse = {
-  prospects: Prospect[];
+  items: Prospect[];
   total: number;
-  page: number;
-  pageSize: number;
+  pagination: { limit: number; hasMore: boolean; nextCursor: string | null };
   counts: {
     total: number;
     byStatus: Record<string, number>;
@@ -81,26 +81,21 @@ async function fetchProspectList(filters: {
   source: ProspectSource | "all";
   priority: ProspectPriority | "all";
   search: string;
-  page: number;
+  cursor?: string;
   pageSize: number;
   lifecycle: ProspectLifecycle | "all";
   catalogItemId: string | "all";
-}, signal?: AbortSignal): Promise<ProspectListResponse> {
-  const params = new URLSearchParams();
-  if (filters.status !== "all") params.set("status", filters.status);
-  if (filters.source !== "all") params.set("source", filters.source);
-  if (filters.priority !== "all") params.set("priority", filters.priority);
-  if (filters.search) params.set("search", filters.search);
-  if (filters.lifecycle !== "all") params.set("lifecycle", filters.lifecycle);
-  if (filters.catalogItemId !== "all") params.set("catalogItemId", filters.catalogItemId);
-  params.set("page", String(filters.page));
-  params.set("pageSize", String(filters.pageSize));
-  const response = await fetch(
-    `/api/outreach/prospects?${params.toString()}`,
-    { signal },
-  );
-  if (!response.ok) throw new Error("Failed to fetch the Outreach pipeline.");
-  return response.json();
+}): Promise<ProspectListResponse> {
+  return apiGet<ProspectListResponse>("/outreach/prospects", {
+    status: filters.status === "all" ? undefined : filters.status,
+    source: filters.source === "all" ? undefined : filters.source,
+    priority: filters.priority === "all" ? undefined : filters.priority,
+    search: filters.search || undefined,
+    lifecycle: filters.lifecycle === "all" ? undefined : filters.lifecycle,
+    catalogItemId: filters.catalogItemId === "all" ? undefined : filters.catalogItemId,
+    cursor: filters.cursor,
+    limit: filters.pageSize,
+  });
 }
 
 export default function PipelinePage() {
@@ -114,7 +109,7 @@ export default function PipelinePage() {
   const [priorityFilter, setPriorityFilter] = useState<ProspectPriority | "all">(
     "all",
   );
-  const [page, setPage] = useState(1);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [lifecycleCounts, setLifecycleCounts] = useState<Record<string, number>>({});
   const [lifecycleFilter, setLifecycleFilter] = useState<ProspectLifecycle | "all">("all");
@@ -122,20 +117,17 @@ export default function PipelinePage() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const loadMoreController = useRef<AbortController | null>(null);
+  const loadMoreGeneration = useRef(0);
   const pageSize = 50;
   useEffect(() => {
-    void fetch("/api/outreach/catalog")
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((items: CatalogItem[]) => setCatalog(items))
+    void apiGet<{ items: CatalogItem[] }>("/outreach/catalog")
+      .then(({ items }) => setCatalog(items))
       .catch(() => undefined);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    const controller = new AbortController();
-    loadMoreController.current?.abort();
-    loadMoreController.current = null;
+    loadMoreGeneration.current += 1;
     setLoading(true);
     setLoadingMore(false);
     void fetchProspectList({
@@ -143,20 +135,19 @@ export default function PipelinePage() {
       source: sourceFilter,
       priority: priorityFilter,
       search: deferredSearchQuery,
-      page: 1,
       pageSize,
       lifecycle: lifecycleFilter,
       catalogItemId: catalogFilter,
-    }, controller.signal)
+    })
       .then((data) => {
         if (cancelled) return;
-        setProspects(data.prospects);
-        setPage(1);
+        setProspects(data.items);
+        setNextCursor(data.pagination.nextCursor);
         setTotal(data.total);
         setLifecycleCounts(data.counts.byLifecycle);
       })
       .catch((error) => {
-        if (cancelled || controller.signal.aborted) return;
+        if (cancelled) return;
         console.error("Error fetching Outreach pipeline:", error);
         toast.error("Could not load the pipeline. Refresh to try again.");
       })
@@ -165,7 +156,6 @@ export default function PipelinePage() {
       });
     return () => {
       cancelled = true;
-      controller.abort();
     };
   }, [
     deferredSearchQuery,
@@ -177,11 +167,8 @@ export default function PipelinePage() {
   ]);
 
   const loadMore = useCallback(async () => {
-    if (loading || loadingMore || prospects.length >= total) return;
-    const nextPage = page + 1;
-    const controller = new AbortController();
-    loadMoreController.current?.abort();
-    loadMoreController.current = controller;
+    if (loading || loadingMore || !nextCursor) return;
+    const generation = loadMoreGeneration.current += 1;
     setLoadingMore(true);
     try {
       const data = await fetchProspectList({
@@ -189,57 +176,48 @@ export default function PipelinePage() {
         source: sourceFilter,
         priority: priorityFilter,
         search: deferredSearchQuery,
-        page: nextPage,
+        cursor: nextCursor,
         pageSize,
         lifecycle: lifecycleFilter,
         catalogItemId: catalogFilter,
-      }, controller.signal);
-      if (controller.signal.aborted) return;
+      });
+      if (loadMoreGeneration.current !== generation) return;
       setProspects((current) => {
         const existingIds = new Set(current.map((prospect) => prospect.id));
         return [
           ...current,
-          ...data.prospects.filter((prospect) => !existingIds.has(prospect.id)),
+          ...data.items.filter((prospect) => !existingIds.has(prospect.id)),
         ];
       });
-      setPage(nextPage);
+      setNextCursor(data.pagination.nextCursor);
       setTotal(data.total);
       setLifecycleCounts(data.counts.byLifecycle);
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (loadMoreGeneration.current !== generation) return;
       console.error("Error loading more Outreach people:", error);
       toast.error("Could not load more people. Try again.");
     } finally {
-      if (loadMoreController.current === controller) {
-        loadMoreController.current = null;
+      if (loadMoreGeneration.current === generation) {
         setLoadingMore(false);
       }
     }
   }, [
     deferredSearchQuery,
-    prospects.length,
     loading,
     loadingMore,
-    page,
+    nextCursor,
     priorityFilter,
     sourceFilter,
     statusFilter,
     lifecycleFilter,
     catalogFilter,
-    total,
   ]);
 
   async function removeFromOutreach() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const response = await fetch(`/api/outreach/prospects/${deleteTarget.id}`, {
-        method: "DELETE",
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(result.error ?? "Person could not be removed.");
-      }
+      await apiMutate("DELETE", `/outreach/prospects/${deleteTarget.id}`, { confirm: true });
       toast.success(`${deleteTarget.name} removed from Outreach`);
       setDeleteTarget(null);
       const refreshed = await fetchProspectList({
@@ -247,13 +225,12 @@ export default function PipelinePage() {
         source: sourceFilter,
         priority: priorityFilter,
         search: deferredSearchQuery,
-        page: 1,
         pageSize,
         lifecycle: lifecycleFilter,
         catalogItemId: catalogFilter,
       });
-      setProspects(refreshed.prospects);
-      setPage(1);
+      setProspects(refreshed.items);
+      setNextCursor(refreshed.pagination.nextCursor);
       setTotal(refreshed.total);
       setLifecycleCounts(refreshed.counts.byLifecycle);
     } catch (error) {
@@ -428,7 +405,7 @@ export default function PipelinePage() {
             </Select>
           </>
         }
-        hasMore={!loading && prospects.length < total}
+        hasMore={!loading && nextCursor !== null}
         isLoading={loading}
         isLoadingMore={loadingMore}
         onLoadMore={() => void loadMore()}

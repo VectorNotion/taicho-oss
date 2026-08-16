@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Archive, Boxes, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { PageHeader } from "@/components/PageHeader";
 import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
@@ -46,9 +47,8 @@ export function CatalogPageClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/outreach/catalog", { cache: "no-store" });
-      if (!response.ok) throw new Error();
-      setItems(await response.json());
+      const data = await apiGet<{ items: CatalogItem[] }>("/outreach/catalog");
+      setItems(data.items);
     } catch {
       toast.error("Could not load the Catalog");
     } finally {
@@ -72,12 +72,8 @@ export function CatalogPageClient() {
     if (!form.name.trim()) return toast.error("Enter a name");
     setSaving(true);
     try {
-      const response = await fetch(
-        editing ? `/api/outreach/catalog/${editing.id}` : "/api/outreach/catalog",
-        { method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) },
-      );
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error ?? "Catalog item could not be saved");
+      if (editing) await apiMutate("PATCH", `/outreach/catalog/${editing.id}`, form);
+      else await apiMutate("POST", "/outreach/catalog", form);
       toast.success(editing ? "Catalog item updated" : "Catalog item added");
       setOpen(false);
       await load();
@@ -92,9 +88,7 @@ export function CatalogPageClient() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const response = await fetch(`/api/outreach/catalog/${deleteTarget.id}`, { method: "DELETE" });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error ?? "Catalog item could not be deleted");
+      await apiMutate("DELETE", `/outreach/catalog/${deleteTarget.id}`, { confirm: true });
       toast.success("Catalog item deleted");
       setDeleteTarget(null);
       await load();

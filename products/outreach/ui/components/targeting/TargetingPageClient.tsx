@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Crosshair, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { PageHeader } from "@/components/PageHeader";
 import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
@@ -99,13 +100,11 @@ function LensPanel({ appliesTo, noun, catalogItemId }: { appliesTo: DimensionApp
   const load = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const response = await fetch(
-          `/api/outreach/dimensions?appliesTo=${appliesTo}${catalogItemId ? `&catalogItemId=${encodeURIComponent(catalogItemId)}` : ""}`,
-          { signal },
-        );
-        if (!response.ok) throw new Error("Failed to fetch dimensions");
-        const data: DimensionDefinition[] = await response.json();
-        if (!signal?.aborted) setDimensions(data);
+        const data = await apiGet<{ dimensions: DimensionDefinition[] }>("/outreach/dimensions", {
+          appliesTo,
+          catalogItemId: catalogItemId || undefined,
+        });
+        if (!signal?.aborted) setDimensions(data.dimensions);
       } catch (error) {
         if (signal?.aborted) return;
         console.error("Failed to load dimensions:", error);
@@ -138,10 +137,7 @@ function LensPanel({ appliesTo, noun, catalogItemId }: { appliesTo: DimensionApp
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const response = await fetch(`/api/outreach/dimensions/${deleteTarget.id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) throw new Error("Failed to delete dimension");
+      await apiMutate("DELETE", `/outreach/dimensions/${deleteTarget.id}`, { confirm: true });
       setDimensions((items) => items.filter((item) => item.id !== deleteTarget.id));
       toast.success("Dimension deleted");
       setDeleteTarget(null);
@@ -297,9 +293,8 @@ export function TargetingPageClient() {
   const [catalogItemId, setCatalogItemId] = useState("workspace");
 
   useEffect(() => {
-    void fetch("/api/outreach/catalog?active=true")
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((items: CatalogItem[]) => setCatalog(items))
+    void apiGet<{ items: CatalogItem[] }>("/outreach/catalog", { active: true })
+      .then(({ items }) => setCatalog(items))
       .catch(() => undefined);
   }, []);
 
