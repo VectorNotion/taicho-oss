@@ -4,6 +4,8 @@ import { actionStreamResponse } from "@/packages/platform/agents/streaming";
 import { runAccountResearch, streamingDimensionProgress } from "@/products/outreach/agent/account-research";
 import { resolveAccountForProspect } from "@/products/outreach/data/account-repository";
 import { getProspectById } from "@/products/outreach/data/prospect-repository";
+import { getProspectCatalogItem } from "@/products/outreach/data/catalog-repository";
+import { catalogItemContext } from "@/products/outreach/domain/catalog";
 
 export const maxDuration = 600;
 
@@ -28,8 +30,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!prospect) throw new Error(`Prospect not found: ${id}`);
       const account = await resolveAccountForProspect(prospect);
       if (!account) throw new Error("Add a company before researching the account.");
+      const catalogItem = prospect.catalogItemId ? await getProspectCatalogItem(id) : null;
       const result = await runAccountResearch(account.id, {
         forceRefresh: true,
+        catalogItemId: catalogItem?.id,
+        commercialContext: catalogItemContext(catalogItem),
         onDimension: streamingDimensionProgress(emit),
         onProspect: (part) => emit({
           type: "data-research-cascade",

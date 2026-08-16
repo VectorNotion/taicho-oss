@@ -59,6 +59,8 @@ export interface ResearchEntity {
   name: string;
   company?: string;
   title?: string;
+  /** Selected Catalog context. It guides relevance but is never treated as evidence. */
+  commercialContext?: string;
 }
 
 export interface DimensionResearchDeps {
@@ -191,7 +193,8 @@ export function buildDimensionQuery(dim: DimensionDefinition, entity: ResearchEn
   const subject = entity.kind === 'account'
     ? entity.name
     : [entity.name, entity.title, entity.company].filter(Boolean).join(' ');
-  return `${subject} ${dim.name}`.trim();
+  const catalogName = entity.commercialContext?.match(/^Catalog item: ([^(\n]+)/m)?.[1]?.trim();
+  return `${subject} ${dim.name}${catalogName ? ` relevance to ${catalogName}` : ""}`.trim();
 }
 
 export function buildSynthesisPrompt(
@@ -217,6 +220,8 @@ export function buildSynthesisPrompt(
   }));
 
   return `Today is ${now.toISOString().slice(0, 10)}. You are researching ${entityLabel(entity)}.
+
+${entity.commercialContext ? `## Commercial context\nUse this only to decide which facts are relevant to the active sales angle. It is not evidence and must never be repeated as a fact about the researched entity.\n${entity.commercialContext}\n` : ""}
 
 Produce one observation per dimension below, grounded ONLY in the supplied evidence.
 

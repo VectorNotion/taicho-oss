@@ -34,6 +34,8 @@ interface ProspectHeroProps {
   onDelete: () => void;
   /** Optional cross-product action, present when Nurture is available. */
   nurtureAction?: React.ReactNode;
+  /** Optional contextual assistant action, present in the unified shell. */
+  assistantAction?: React.ReactNode;
   /** Opens the standalone Call Recording app with this prospect selected. */
   callRecordingUrl?: string;
 }
@@ -45,6 +47,7 @@ export function ProspectHero({
   onStatusChange,
   onDelete,
   nurtureAction,
+  assistantAction,
   callRecordingUrl,
 }: ProspectHeroProps) {
   const priorityConfig = PROSPECT_PRIORITY_CONFIG[prospect.priority];
@@ -120,6 +123,7 @@ export function ProspectHero({
 
         {/* Right: Actions */}
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          {assistantAction}
           {nurtureAction}
 
           {callRecordingUrl && (

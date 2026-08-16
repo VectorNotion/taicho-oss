@@ -17,7 +17,7 @@ import {
 } from "../domain/prospect-dossier";
 import { DEFAULT_THRESHOLDS, type DimensionMatch, type ObservationRecord } from "../domain/qualification";
 
-type EntityRef = { kind: "account" | "prospect"; id: string };
+type EntityRef = { kind: "account" | "prospect"; id: string; catalogItemId?: string };
 
 export interface ProspectDossierDeps {
   getProspectById: typeof getProspectById;
@@ -77,11 +77,11 @@ export async function getProspectDossier(
     legacy,
     accountSummary,
   ] = await Promise.all([
-    d.getDimensionDefinitions({ activeOnly: true, seedIfEmpty: false }),
-    d.getObservations({ kind: "prospect", id: prospectId }),
-    d.getMatches({ kind: "prospect", id: prospectId }),
-    d.getProspectScore(prospectId),
-    d.getProspectQualification(prospectId),
+    d.getDimensionDefinitions({ activeOnly: true, seedIfEmpty: false, catalogItemId: prospect.catalogItemId }),
+    d.getObservations({ kind: "prospect", id: prospectId, catalogItemId: prospect.catalogItemId }),
+    d.getMatches({ kind: "prospect", id: prospectId, catalogItemId: prospect.catalogItemId }),
+    d.getProspectScore(prospectId, prospect.catalogItemId),
+    d.getProspectQualification(prospectId, prospect.catalogItemId),
     d.getLegacyQualification(prospectId),
     d.getAccountForProspect(prospectId),
   ]);
@@ -92,9 +92,9 @@ export async function getProspectDossier(
   const accountDimensions = dimensions.filter((dimension) => dimension.appliesTo === "account");
   const accountData = accountSummary
     ? await Promise.all([
-        d.getObservations({ kind: "account", id: accountSummary.id }),
-        d.getMatches({ kind: "account", id: accountSummary.id }),
-        d.getAccountScore(accountSummary.id),
+        d.getObservations({ kind: "account", id: accountSummary.id, catalogItemId: prospect.catalogItemId }),
+        d.getMatches({ kind: "account", id: accountSummary.id, catalogItemId: prospect.catalogItemId }),
+        d.getAccountScore(accountSummary.id, prospect.catalogItemId),
       ])
     : null;
   const [accountObservations, accountMatches, accountScore] = accountData ?? [[], [], null];

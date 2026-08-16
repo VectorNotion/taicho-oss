@@ -18,11 +18,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
   DimensionAppliesTo,
   DimensionDefinition,
 } from "@/products/outreach/domain/qualification";
+import type { CatalogItem } from "@/products/outreach/domain/catalog";
 import { DimensionEditorDialog } from "./DimensionEditorDialog";
 
 const LENSES: {
@@ -80,7 +88,7 @@ function WeightIndicator({
   );
 }
 
-function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: string }) {
+function LensPanel({ appliesTo, noun, catalogItemId }: { appliesTo: DimensionAppliesTo; noun: string; catalogItemId?: string }) {
   const [dimensions, setDimensions] = useState<DimensionDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -92,7 +100,7 @@ function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: s
     async (signal?: AbortSignal) => {
       try {
         const response = await fetch(
-          `/api/outreach/dimensions?appliesTo=${appliesTo}`,
+          `/api/outreach/dimensions?appliesTo=${appliesTo}${catalogItemId ? `&catalogItemId=${encodeURIComponent(catalogItemId)}` : ""}`,
           { signal },
         );
         if (!response.ok) throw new Error("Failed to fetch dimensions");
@@ -106,7 +114,7 @@ function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: s
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [appliesTo],
+    [appliesTo, catalogItemId],
   );
 
   useEffect(() => {
@@ -201,25 +209,24 @@ function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: s
           <ListRows>
             {dimensions.map((dimension) => (
               <ListRow
-                actions={[
-                  {
-                    icon: Pencil,
-                    label: `Edit ${dimension.name}`,
-                    onSelect: () => startEdit(dimension),
-                  },
-                  {
-                    destructive: true,
-                    icon: Trash2,
-                    label: `Delete ${dimension.name}`,
-                    onSelect: () => setDeleteTarget(dimension),
-                  },
-                ]}
+                actions={catalogItemId && !dimension.catalogItemId ? [] : [
+                    {
+                      icon: Pencil,
+                      label: `Edit ${dimension.name}`,
+                      onSelect: () => startEdit(dimension),
+                    },
+                    {
+                      destructive: true,
+                      icon: Trash2,
+                      label: `Delete ${dimension.name}`,
+                      onSelect: () => setDeleteTarget(dimension),
+                    },
+                  ]}
                 badge={
-                  mixedTypes ? (
-                    <Badge variant={dimension.dimensionType === "timing" ? "secondary" : "outline"}>
-                      {dimension.dimensionType}
-                    </Badge>
-                  ) : null
+                  <span className="flex gap-1.5">
+                    {catalogItemId && !dimension.catalogItemId ? <Badge variant="outline">Workspace default</Badge> : null}
+                    {mixedTypes ? <Badge variant={dimension.dimensionType === "timing" ? "secondary" : "outline"}>{dimension.dimensionType}</Badge> : null}
+                  </span>
                 }
                 key={dimension.id}
                 leading={
@@ -244,6 +251,7 @@ function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: s
         onOpenChange={setEditorOpen}
         onSaved={() => void load()}
         open={editorOpen}
+        catalogItemId={catalogItemId}
       />
 
       <Dialog
@@ -285,12 +293,38 @@ function LensPanel({ appliesTo, noun }: { appliesTo: DimensionAppliesTo; noun: s
 }
 
 export function TargetingPageClient() {
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [catalogItemId, setCatalogItemId] = useState("workspace");
+
+  useEffect(() => {
+    void fetch("/api/outreach/catalog?active=true")
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((items: CatalogItem[]) => setCatalog(items))
+      .catch(() => undefined);
+  }, []);
+
   return (
     <div className="w-full min-w-0 space-y-8">
       <PageHeader
         description="Define who's worth pursuing: your ICP (the right company) and Persona (the right person). Researchers hunt for these; every finding is scored against them."
         title="Targeting"
       />
+
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-medium">Targeting for</span>
+        <Select value={catalogItemId} onValueChange={setCatalogItemId}>
+          <SelectTrigger className="w-72" aria-label="Choose Catalog context"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="workspace">Workspace defaults</SelectItem>
+            {catalog.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      {catalogItemId !== "workspace" ? (
+        <p className="text-sm text-muted-foreground">
+          Workspace defaults are inherited read-only; dimensions added here apply only to this Catalog item.
+        </p>
+      ) : null}
 
       <Tabs className="space-y-6" defaultValue="account">
         <TabsList>
@@ -302,7 +336,7 @@ export function TargetingPageClient() {
         </TabsList>
         {LENSES.map((lens) => (
           <TabsContent key={lens.value} value={lens.value}>
-            <LensPanel appliesTo={lens.value} noun={lens.noun} />
+            <LensPanel appliesTo={lens.value} noun={lens.noun} catalogItemId={catalogItemId === "workspace" ? undefined : catalogItemId} />
           </TabsContent>
         ))}
       </Tabs>

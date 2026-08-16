@@ -14,6 +14,8 @@ export type DimensionAppliesTo = 'account' | 'prospect';
 
 export interface DimensionDefinition {
   id: string;
+  /** Null/absent dimensions are workspace defaults; scoped dimensions augment one Catalog item. */
+  catalogItemId?: string;
   /** Stable snake_case key, e.g. 'internal_ai_capability'. */
   key: string;
   name: string;

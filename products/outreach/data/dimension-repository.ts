@@ -14,6 +14,7 @@ import { DEFAULT_DIMENSIONS } from "./default-dimensions";
 function mapDimension(props: Record<string, unknown>): DimensionDefinition {
   return {
     id: props.id as string,
+    catalogItemId: (props.catalogItemId as string | null) ?? undefined,
     key: props.key as string,
     name: props.name as string,
     dimensionType: props.dimensionType as DimensionDefinition["dimensionType"],
@@ -41,6 +42,7 @@ function toNumber(value: unknown): number {
 const CREATE_CYPHER = `
   CREATE (d:DimensionDefinition {
     id: randomUUID(),
+    catalogItemId: $catalogItemId,
     key: $key,
     name: $name,
     dimensionType: $dimensionType,
@@ -60,6 +62,7 @@ const CREATE_CYPHER = `
 
 function createParams(input: CreateDimensionInput): Record<string, unknown> {
   return {
+    catalogItemId: input.catalogItemId ?? null,
     key: input.key,
     name: input.name,
     dimensionType: input.dimensionType,
@@ -81,40 +84,54 @@ function createParams(input: CreateDimensionInput): Record<string, unknown> {
 export async function getDimensionDefinitions(opts?: {
   activeOnly?: boolean;
   seedIfEmpty?: boolean;
+  catalogItemId?: string;
 }): Promise<DimensionDefinition[]> {
   const session = await getSession();
   try {
-    const query = opts?.activeOnly
-      ? `MATCH (d:DimensionDefinition {isActive: true}) RETURN d ORDER BY d.appliesTo, d.dimensionType, d.key`
-      : `MATCH (d:DimensionDefinition) RETURN d ORDER BY d.appliesTo, d.dimensionType, d.key`;
-    const result = await session.run(query);
-    if (result.records.length > 0 || !opts?.seedIfEmpty) {
-      return result.records.map((record) => mapDimension(record.get("d").properties));
+    const active = opts?.activeOnly ? "d.isActive = true" : null;
+    const catalog = opts?.catalogItemId
+      ? "(d.catalogItemId IS NULL OR d.catalogItemId = $catalogItemId)"
+      : "d.catalogItemId IS NULL";
+    const conditions = [active, catalog].filter(Boolean).join(" AND ");
+    const query = `MATCH (d:DimensionDefinition) WHERE ${conditions} RETURN d ORDER BY d.appliesTo, d.dimensionType, d.key`;
+    const queryParams = { catalogItemId: opts?.catalogItemId ?? null };
+    const result = await session.run(query, queryParams);
+    const dimensions = result.records.map((record) => mapDimension(record.get("d").properties));
+    if (dimensions.some((dimension) => !dimension.catalogItemId) || !opts?.seedIfEmpty) {
+      return dimensions;
     }
 
-    // Seed guard: another caller may have raced us; MERGE on key keeps it idempotent.
+    // Seed workspace defaults independently of Catalog-scoped dimensions with
+    // the same key. The guard keeps repeat reads idempotent.
     for (const input of DEFAULT_DIMENSIONS) {
       await session.run(
         `
-        MERGE (d:DimensionDefinition {key: $key})
-        ON CREATE SET d.id = randomUUID(),
-                      d.name = $name,
-                      d.dimensionType = $dimensionType,
-                      d.appliesTo = $appliesTo,
-                      d.researchInstruction = $researchInstruction,
-                      d.idealValue = $idealValue,
-                      d.weight = $weight,
-                      d.halfLifeDays = $halfLifeDays,
-                      d.freshnessWindowDays = $freshnessWindowDays,
-                      d.hardExclusionRule = $hardExclusionRule,
-                      d.isActive = $isActive,
-                      d.createdAt = localdatetime(),
-                      d.updatedAt = localdatetime()
+        OPTIONAL MATCH (existing:DimensionDefinition {key: $key})
+        WHERE existing.catalogItemId IS NULL
+        WITH count(existing) AS existingCount
+        FOREACH (_ IN CASE WHEN existingCount = 0 THEN [1] ELSE [] END |
+          CREATE (d:DimensionDefinition {
+            id: randomUUID(),
+            key: $key,
+            name: $name,
+            dimensionType: $dimensionType,
+            appliesTo: $appliesTo,
+            researchInstruction: $researchInstruction,
+            idealValue: $idealValue,
+            weight: $weight,
+            halfLifeDays: $halfLifeDays,
+            freshnessWindowDays: $freshnessWindowDays,
+            hardExclusionRule: $hardExclusionRule,
+            isActive: $isActive,
+            createdAt: localdatetime(),
+            updatedAt: localdatetime()
+          })
+        )
         `,
         createParams(input)
       );
     }
-    const seeded = await session.run(query);
+    const seeded = await session.run(query, queryParams);
     return seeded.records.map((record) => mapDimension(record.get("d").properties));
   } finally {
     await session.close();
@@ -144,7 +161,7 @@ export async function updateDimensionDefinition(
     const fields: Array<keyof UpdateDimensionInput> = [
       "key", "name", "dimensionType", "appliesTo", "researchInstruction",
       "idealValue", "weight", "halfLifeDays", "freshnessWindowDays",
-      "hardExclusionRule", "isActive",
+      "hardExclusionRule", "isActive", "catalogItemId",
     ];
     for (const field of fields) {
       if (patch[field] !== undefined) {

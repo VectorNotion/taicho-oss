@@ -116,13 +116,16 @@ export async function getAccountForProspect(
   try {
     const result = await session.run(
       `
-      MATCH (:Prospect {id: $prospectId})-[:BELONGS_TO]->(a:Account)
-      OPTIONAL MATCH (a)-[:HAS_SCORE]->(sc:AccountScore)
+      MATCH (source:Prospect {id: $prospectId})-[:BELONGS_TO]->(a:Account)
       OPTIONAL MATCH (a)<-[:BELONGS_TO]-(p:Prospect)
       OPTIONAL MATCH (p)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
-      WITH a,
+      WHERE coalesce(q.contextKey, 'workspace') = coalesce(p.catalogItemId, 'workspace')
+      WITH source, a,
            count(DISTINCT p) AS prospectCount,
-           sum(CASE WHEN q.status = 'QUALIFIED' THEN 1 ELSE 0 END) AS qualifiedCount,
+           count(DISTINCT CASE WHEN q.status = 'QUALIFIED' THEN p.id ELSE null END) AS qualifiedCount
+      OPTIONAL MATCH (a)-[:HAS_SCORE]->(sc:AccountScore)
+      WHERE coalesce(sc.contextKey, 'workspace') = coalesce(source.catalogItemId, 'workspace')
+      WITH a, prospectCount, qualifiedCount,
            max(sc.icpScore) AS icpScore,
            max(sc.timingScore) AS timingScore,
            max(CASE WHEN sc.hardExcluded THEN 1 ELSE 0 END) AS hardExcluded
@@ -206,12 +209,14 @@ export interface AccountListPage {
 
 const ACCOUNT_ROLLUP = `
   MATCH (a:Account)
-  OPTIONAL MATCH (a)-[:HAS_SCORE]->(sc:AccountScore)
   OPTIONAL MATCH (a)<-[:BELONGS_TO]-(p:Prospect)
   OPTIONAL MATCH (p)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
+  WHERE coalesce(q.contextKey, 'workspace') = coalesce(p.catalogItemId, 'workspace')
   WITH a,
        count(DISTINCT p) AS prospectCount,
-       sum(CASE WHEN q.status = 'QUALIFIED' THEN 1 ELSE 0 END) AS qualifiedCount,
+       count(DISTINCT CASE WHEN q.status = 'QUALIFIED' THEN p.id ELSE null END) AS qualifiedCount
+  OPTIONAL MATCH (a)-[:HAS_SCORE]->(sc:AccountScore)
+  WITH a, prospectCount, qualifiedCount,
        max(sc.icpScore) AS icpScore,
        max(sc.timingScore) AS timingScore
 `;
@@ -446,7 +451,9 @@ export async function getAccountDetail(id: string): Promise<AccountDetail | null
 
     // Account-level score (ICP fit + timing), written by runAccountResearch.
     const scoreResult = await session.run(
-      `MATCH (a:Account {id: $id})-[:HAS_SCORE]->(s:AccountScore) RETURN s`,
+      `MATCH (a:Account {id: $id})-[:HAS_SCORE]->(s:AccountScore)
+       WHERE coalesce(s.contextKey, 'workspace') = 'workspace'
+       RETURN s`,
       { id },
     );
     const score = scoreResult.records[0]?.get("s")?.properties as Record<string, unknown> | undefined;
@@ -455,7 +462,9 @@ export async function getAccountDetail(id: string): Promise<AccountDetail | null
 
     // ICP fit matches (how well each fit observation matched the ideal).
     const matchResult = await session.run(
-      `MATCH (a:Account {id: $id})-[:HAS_MATCH]->(m:DimensionMatch) RETURN m ORDER BY m.dimensionKey`,
+      `MATCH (a:Account {id: $id})-[:HAS_MATCH]->(m:DimensionMatch)
+       WHERE coalesce(m.contextKey, 'workspace') = 'workspace'
+       RETURN m ORDER BY m.dimensionKey`,
       { id },
     );
     const icpMatches: DimensionMatch[] = matchResult.records.map((record) => {
@@ -473,7 +482,9 @@ export async function getAccountDetail(id: string): Promise<AccountDetail | null
 
     // The raw observations the researcher found (spec §17 "what we found").
     const obsResult = await session.run(
-      `MATCH (a:Account {id: $id})-[:HAS_OBSERVATION]->(o:AccountObservation) RETURN o ORDER BY o.dimensionKey`,
+      `MATCH (a:Account {id: $id})-[:HAS_OBSERVATION]->(o:AccountObservation)
+       WHERE coalesce(o.contextKey, 'workspace') = 'workspace'
+       RETURN o ORDER BY o.dimensionKey`,
       { id },
     );
     const icpObservations: AccountDimensionObservation[] = [];
@@ -506,7 +517,9 @@ export async function getAccountDetail(id: string): Promise<AccountDetail | null
       `
       MATCH (p:Prospect)-[:BELONGS_TO]->(a:Account {id: $id})
       OPTIONAL MATCH (p)-[:HAS_SCORE]->(ps:ProspectScore)
+      WHERE coalesce(ps.contextKey, 'workspace') = coalesce(p.catalogItemId, 'workspace')
       OPTIONAL MATCH (p)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
+      WHERE coalesce(q.contextKey, 'workspace') = coalesce(p.catalogItemId, 'workspace')
       RETURN p, ps, q
       ORDER BY ps.personaScore DESC, p.name
       `,

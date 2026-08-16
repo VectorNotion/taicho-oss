@@ -24,6 +24,8 @@ import {
 import { deleteActionItem, ensureGeneratedFollowUp } from '../data/action-item-repository';
 import { getProspectIntelligenceWorkspace } from '../data/prospect-intelligence-repository';
 import { getActiveOutreachPromptVersion } from '../data/outreach-prompt-repository';
+import { getProspectCatalogItem } from '../data/catalog-repository';
+import type { CatalogItem } from '../domain/catalog';
 import type {
   Prospect,
   ProspectActivity,
@@ -63,6 +65,8 @@ export interface GenerateOutreachInput {
   generationId?: string;
   generationType?: 'initial' | 'follow_up';
   promptVersion?: { key: string; version: number; contentHash: string };
+  catalogItemId?: string;
+  catalogItemName?: string;
 }
 
 export interface GenerateOutreachResult {
@@ -97,6 +101,7 @@ export interface OutreachPromptContext {
   activities?: ProspectActivity[];
   priorMessages?: OutreachMessage[];
   intelligence?: ProspectIntelligenceWorkspace | null;
+  catalogItem?: CatalogItem | null;
 }
 
 function compactText(value: string | undefined, limit = 1_500): string | undefined {
@@ -146,6 +151,18 @@ function groundedProspectContext(
       referredBy: prospect.referredBy ?? null,
       lastContactedAt: prospect.lastContactedAt ?? null,
     },
+    catalogContext: context.catalogItem ? {
+      id: context.catalogItem.id,
+      name: context.catalogItem.name,
+      kind: context.catalogItem.kind,
+      whatIsSold: context.catalogItem.summary,
+      positioning: context.catalogItem.positioning,
+      outcomes: context.catalogItem.outcomes,
+      differentiators: context.catalogItem.differentiators,
+      proof: context.catalogItem.proof,
+      researchGuidance: context.catalogItem.researchGuidance,
+      voice: context.catalogItem.voice || null,
+    } : null,
     research: research ? {
       industry: research.industry,
       companySummary: research.companySummary,
@@ -260,6 +277,8 @@ export async function saveGeneratedOutreach(
     promptKey: input.promptVersion?.key,
     promptVersion: input.promptVersion?.version,
     promptContentHash: input.promptVersion?.contentHash,
+    catalogItemId: input.catalogItemId,
+    catalogItemName: input.catalogItemName,
   }, d.attemptId());
   let nextAction: Awaited<ReturnType<typeof ensureGeneratedFollowUp>> | null = null;
 
@@ -333,7 +352,7 @@ export async function generateOutreach(
       })
     : Promise.resolve(null);
 
-  const [research, settings, notes, activities, priorMessages, intelligence, promptVersion] = await Promise.all([
+  const [research, settings, notes, activities, priorMessages, intelligence, promptVersion, catalogItem] = await Promise.all([
     getProspectResearch(prospectId),
     getSettings(),
     getProspectNotes(prospectId),
@@ -341,6 +360,7 @@ export async function generateOutreach(
     getProspectOutreach(prospectId),
     intelligencePromise,
     getActiveOutreachPromptVersion(),
+    prospect.catalogItemId ? getProspectCatalogItem(prospectId) : Promise.resolve(null),
   ]);
 
   // Build prompt with storytelling approach
@@ -349,12 +369,13 @@ export async function generateOutreach(
     activities,
     priorMessages,
     intelligence,
+    catalogItem,
   }, promptVersion.content);
 
   // Create agent with user's identity/voice/mission
   const agent = createOutreachAgent({
     identity: settings.identity,
-    voice: settings.voice,
+    voice: catalogItem?.voice || settings.voice,
     mission: settings.mission,
   }, promptVersion.content.systemInstructions);
 
@@ -408,6 +429,8 @@ export async function generateOutreach(
       version: promptVersion.version,
       contentHash: promptVersion.contentHash,
     },
+    catalogItemId: catalogItem?.id,
+    catalogItemName: catalogItem?.name,
   }, parsed, prospect.name);
 
   return { success: true, message };
@@ -441,7 +464,7 @@ export async function streamOutreach(
         return null;
       })
     : Promise.resolve(null);
-  const [research, settings, notes, activities, priorMessages, intelligence, promptVersion] = await Promise.all([
+  const [research, settings, notes, activities, priorMessages, intelligence, promptVersion, catalogItem] = await Promise.all([
     getProspectResearch(prospectId),
     getSettings(),
     getProspectNotes(prospectId),
@@ -449,16 +472,18 @@ export async function streamOutreach(
     getProspectOutreach(prospectId),
     intelligencePromise,
     getActiveOutreachPromptVersion(),
+    prospect.catalogItemId ? getProspectCatalogItem(prospectId) : Promise.resolve(null),
   ]);
   const prompt = buildOutreachPrompt(prospect, research, medium, targetContent, {
     notes,
     activities,
     priorMessages,
     intelligence,
+    catalogItem,
   }, promptVersion.content);
   const agent = createOutreachAgent({
     identity: settings.identity,
-    voice: settings.voice,
+    voice: catalogItem?.voice || settings.voice,
     mission: settings.mission,
   }, promptVersion.content.systemInstructions);
 
@@ -542,6 +567,8 @@ export async function streamOutreach(
       version: promptVersion.version,
       contentHash: promptVersion.contentHash,
     },
+    catalogItemId: catalogItem?.id,
+    catalogItemName: catalogItem?.name,
   }, parsed, prospect.name);
   callbacks.onProgress?.({
     id: 'save',

@@ -15,6 +15,22 @@ export type ProspectSource = "manual" | "sales_navigator";
 
 export type ProspectPriority = "low" | "medium" | "high";
 
+export type ProspectLifecycle =
+  | "untouched"
+  | "researched"
+  | "draft_ready"
+  | "follow_up_scheduled"
+  | "contacted"
+  | "replied";
+
+export interface ProspectPipelineState {
+  lifecycle: ProspectLifecycle;
+  hasResearch: boolean;
+  hasDraft: boolean;
+  hasContact: boolean;
+  nextAction?: import("./action-items").ActionItem;
+}
+
 // Prospect notes (user-entered, timestamped)
 export interface ProspectNote {
   id: string;
@@ -54,6 +70,9 @@ export interface Prospect {
   tags: string[];
   customAttributes?: Record<string, string | number | boolean | string[]>;
   revision?: number;
+  catalogItemId?: string;
+  catalogItemName?: string;
+  pipeline?: ProspectPipelineState;
 
   // Context
   about?: string; // LinkedIn bio (from Sales Navigator capture)
@@ -122,6 +141,8 @@ export interface ProspectFilters {
   source?: ProspectSource;
   priority?: ProspectPriority;
   search?: string;
+  catalogItemId?: string;
+  lifecycle?: ProspectLifecycle;
 }
 
 // Status display configuration
@@ -180,6 +201,8 @@ export interface OutreachMessage {
   promptKey?: string;
   promptVersion?: number;
   promptContentHash?: string;
+  catalogItemId?: string;
+  catalogItemName?: string;
 }
 
 export interface OutreachMessageWithProspect {
@@ -204,6 +227,8 @@ export interface CreateOutreachInput {
   promptKey?: string;
   promptVersion?: number;
   promptContentHash?: string;
+  catalogItemId?: string;
+  catalogItemName?: string;
 }
 
 export interface UpdateOutreachInput {

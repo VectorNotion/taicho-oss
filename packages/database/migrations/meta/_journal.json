@@ -183,6 +183,13 @@
       "when": 1786925300000,
       "tag": "0025_register_prospect_capture_oauth_client",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786925400000,
+      "tag": "0026_restore_mastra_agent_workflow_snapshots",
+      "breakpoints": true
     }
   ]
 }

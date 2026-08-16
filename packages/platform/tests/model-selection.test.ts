@@ -9,6 +9,7 @@ import {
   ModelPolicyError,
   languageModelConfig,
   languageModelConfigForStoredSelection,
+  languageModelRuntimeIsConfigured,
   resolveModelSelection,
 } from "../models/resolver";
 
@@ -151,6 +152,20 @@ test("LiteLLM model configs use server credentials and deployment aliases", () =
     if (previousKey === undefined) delete process.env.LITELLM_API_KEY;
     else process.env.LITELLM_API_KEY = previousKey;
   }
+});
+
+test("the language runtime requires both LiteLLM endpoint and credential", () => {
+  assert.equal(languageModelRuntimeIsConfigured({}), false);
+  assert.equal(languageModelRuntimeIsConfigured({
+    LITELLM_BASE_URL: "http://litellm.internal/v1",
+  }), false);
+  assert.equal(languageModelRuntimeIsConfigured({
+    LITELLM_API_KEY: "test-service-key",
+  }), false);
+  assert.equal(languageModelRuntimeIsConfigured({
+    LITELLM_BASE_URL: "http://litellm.internal/v1",
+    LITELLM_API_KEY: "test-service-key",
+  }), true);
 });
 
 test("legacy squad slugs remain executable during catalog migration", () => {

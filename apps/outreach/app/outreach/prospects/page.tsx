@@ -11,6 +11,8 @@ import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import {
   ArrowRight,
+  AlarmClock,
+  FileCheck2,
   Loader2,
   Pencil,
   Trash2,
@@ -46,11 +48,12 @@ import {
   PROSPECT_STATUS_CONFIG,
   type Prospect,
   type ProspectPriority,
+  type ProspectLifecycle,
   type ProspectSource,
   type ProspectStatus,
 } from "@/products/outreach/domain/types";
-import type { ActionItem } from "@/products/outreach/domain/action-items";
 import { DueBadge } from "@/products/outreach/ui/components/action-items/DueBadge";
+import type { CatalogItem } from "@/products/outreach/domain/catalog";
 
 type ProspectListResponse = {
   prospects: Prospect[];
@@ -60,7 +63,17 @@ type ProspectListResponse = {
   counts: {
     total: number;
     byStatus: Record<string, number>;
+    byLifecycle: Record<string, number>;
   };
+};
+
+const LIFECYCLE_LABELS: Record<ProspectLifecycle, string> = {
+  untouched: "Untouched",
+  researched: "Researched",
+  draft_ready: "Draft ready",
+  follow_up_scheduled: "Follow-up scheduled",
+  contacted: "Contacted",
+  replied: "Replied",
 };
 
 async function fetchProspectList(filters: {
@@ -70,12 +83,16 @@ async function fetchProspectList(filters: {
   search: string;
   page: number;
   pageSize: number;
+  lifecycle: ProspectLifecycle | "all";
+  catalogItemId: string | "all";
 }, signal?: AbortSignal): Promise<ProspectListResponse> {
   const params = new URLSearchParams();
   if (filters.status !== "all") params.set("status", filters.status);
   if (filters.source !== "all") params.set("source", filters.source);
   if (filters.priority !== "all") params.set("priority", filters.priority);
   if (filters.search) params.set("search", filters.search);
+  if (filters.lifecycle !== "all") params.set("lifecycle", filters.lifecycle);
+  if (filters.catalogItemId !== "all") params.set("catalogItemId", filters.catalogItemId);
   params.set("page", String(filters.page));
   params.set("pageSize", String(filters.pageSize));
   const response = await fetch(
@@ -99,35 +116,19 @@ export default function PipelinePage() {
   );
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [serverCounts, setServerCounts] = useState<Record<string, number>>({});
+  const [lifecycleCounts, setLifecycleCounts] = useState<Record<string, number>>({});
+  const [lifecycleFilter, setLifecycleFilter] = useState<ProspectLifecycle | "all">("all");
+  const [catalogFilter, setCatalogFilter] = useState("all");
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null);
   const [deleting, setDeleting] = useState(false);
   const loadMoreController = useRef<AbortController | null>(null);
   const pageSize = 50;
-  const [nextActions, setNextActions] = useState<Map<string, ActionItem>>(new Map());
-
-  // Earliest-due open action item per prospect, for the row due badges.
   useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/outreach/action-items?horizonDays=90")
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((data: { items: ActionItem[] }) => {
-        if (cancelled) return;
-        const earliest = new Map<string, ActionItem>();
-        for (const item of data.items) {
-          if (item.prospectId && !earliest.has(item.prospectId)) {
-            earliest.set(item.prospectId, item);
-          }
-        }
-        setNextActions(earliest);
-      })
-      .catch((error) => {
-        // Badges are progressive enhancement; the list stays usable.
-        console.error("Error loading due badges:", error);
-      });
-    return () => {
-      cancelled = true;
-    };
+    void fetch("/api/outreach/catalog")
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((items: CatalogItem[]) => setCatalog(items))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -144,13 +145,15 @@ export default function PipelinePage() {
       search: deferredSearchQuery,
       page: 1,
       pageSize,
+      lifecycle: lifecycleFilter,
+      catalogItemId: catalogFilter,
     }, controller.signal)
       .then((data) => {
         if (cancelled) return;
         setProspects(data.prospects);
         setPage(1);
         setTotal(data.total);
-        setServerCounts(data.counts.byStatus);
+        setLifecycleCounts(data.counts.byLifecycle);
       })
       .catch((error) => {
         if (cancelled || controller.signal.aborted) return;
@@ -169,6 +172,8 @@ export default function PipelinePage() {
     priorityFilter,
     sourceFilter,
     statusFilter,
+    lifecycleFilter,
+    catalogFilter,
   ]);
 
   const loadMore = useCallback(async () => {
@@ -186,6 +191,8 @@ export default function PipelinePage() {
         search: deferredSearchQuery,
         page: nextPage,
         pageSize,
+        lifecycle: lifecycleFilter,
+        catalogItemId: catalogFilter,
       }, controller.signal);
       if (controller.signal.aborted) return;
       setProspects((current) => {
@@ -197,7 +204,7 @@ export default function PipelinePage() {
       });
       setPage(nextPage);
       setTotal(data.total);
-      setServerCounts(data.counts.byStatus);
+      setLifecycleCounts(data.counts.byLifecycle);
     } catch (error) {
       if (controller.signal.aborted) return;
       console.error("Error loading more Outreach people:", error);
@@ -217,6 +224,8 @@ export default function PipelinePage() {
     priorityFilter,
     sourceFilter,
     statusFilter,
+    lifecycleFilter,
+    catalogFilter,
     total,
   ]);
 
@@ -240,11 +249,13 @@ export default function PipelinePage() {
         search: deferredSearchQuery,
         page: 1,
         pageSize,
+        lifecycle: lifecycleFilter,
+        catalogItemId: catalogFilter,
       });
       setProspects(refreshed.prospects);
       setPage(1);
       setTotal(refreshed.total);
-      setServerCounts(refreshed.counts.byStatus);
+      setLifecycleCounts(refreshed.counts.byLifecycle);
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -265,24 +276,26 @@ export default function PipelinePage() {
     },
     {
       label: "New",
-      value: (serverCounts.new ?? 0).toLocaleString(),
-      description: "Waiting for research",
+      value: (lifecycleCounts.untouched ?? 0).toLocaleString(),
+      description: "Never researched or contacted",
     },
     {
       label: "Ready for a next step",
-      value: ((serverCounts.researched ?? 0) + (serverCounts.qualified ?? 0)).toLocaleString(),
-      description: `${(serverCounts.qualified ?? 0).toLocaleString()} qualified`,
+      value: ((lifecycleCounts.researched ?? 0) + (lifecycleCounts.draft_ready ?? 0)).toLocaleString(),
+      description: `${(lifecycleCounts.draft_ready ?? 0).toLocaleString()} drafts ready`,
     },
     {
       label: "Active conversations",
-      value: ((serverCounts.contacted ?? 0) + (serverCounts.replied ?? 0)).toLocaleString(),
-      description: `${(serverCounts.replied ?? 0).toLocaleString()} replied`,
+      value: ((lifecycleCounts.contacted ?? 0) + (lifecycleCounts.replied ?? 0)).toLocaleString(),
+      description: `${(lifecycleCounts.follow_up_scheduled ?? 0).toLocaleString()} with follow-ups`,
     },
   ];
   const filtersActive = Boolean(deferredSearchQuery)
     || statusFilter !== "all"
     || sourceFilter !== "all"
-    || priorityFilter !== "all";
+    || priorityFilter !== "all"
+    || lifecycleFilter !== "all"
+    || catalogFilter !== "all";
 
   return (
     <div className="w-full min-w-0 space-y-8">
@@ -329,6 +342,8 @@ export default function PipelinePage() {
                   setStatusFilter("all");
                   setPriorityFilter("all");
                   setSourceFilter("all");
+                  setLifecycleFilter("all");
+                  setCatalogFilter("all");
                 }}
                 variant="outline"
               >
@@ -343,6 +358,20 @@ export default function PipelinePage() {
         }
         filters={
           <>
+            <Select onValueChange={(value) => setLifecycleFilter(value as ProspectLifecycle | "all")} value={lifecycleFilter}>
+              <SelectTrigger aria-label="Filter by lifecycle" className="w-48"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All lifecycle states</SelectItem>
+                {Object.entries(LIFECYCLE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select onValueChange={setCatalogFilter} value={catalogFilter}>
+              <SelectTrigger aria-label="Filter by Catalog item" className="w-48"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Catalog items</SelectItem>
+                {catalog.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}{item.status === "archived" ? " (archived)" : ""}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <Select
               onValueChange={(value) =>
                 setStatusFilter(value as ProspectStatus | "all")
@@ -416,7 +445,8 @@ export default function PipelinePage() {
                 [prospect.title, prospect.company].filter(Boolean).join(" · ")
                 || prospect.email
                 || "Outreach target";
-              const nextAction = nextActions.get(prospect.id);
+              const nextAction = prospect.pipeline?.nextAction;
+              const lifecycle = prospect.pipeline?.lifecycle ?? "untouched";
 
               return (
                 <ListRow
@@ -438,10 +468,12 @@ export default function PipelinePage() {
                       <Badge variant={PROSPECT_STATUS_CONFIG[prospect.status].variant}>
                         {PROSPECT_STATUS_CONFIG[prospect.status].label}
                       </Badge>
-                      <Badge variant={PROSPECT_PRIORITY_CONFIG[prospect.priority].variant}>
-                        {PROSPECT_PRIORITY_CONFIG[prospect.priority].label}
+                      <Badge variant={lifecycle === "replied" || lifecycle === "contacted" ? "default" : lifecycle === "untouched" ? "outline" : "secondary"}>
+                        {lifecycle === "draft_ready" ? <FileCheck2 className="size-3" /> : null}
+                        {LIFECYCLE_LABELS[lifecycle]}
                       </Badge>
-                      {nextAction && <DueBadge dueAt={nextAction.dueAt} />}
+                      {prospect.catalogItemName ? <Badge variant="outline">{prospect.catalogItemName}</Badge> : null}
+                      {nextAction ? <span className="inline-flex items-center gap-1" title={nextAction.title}><AlarmClock className="size-3.5 text-amber-500" /><DueBadge dueAt={nextAction.dueAt} /></span> : null}
                     </span>
                   }
                   href={`/outreach/prospects/${prospect.id}`}
@@ -458,6 +490,7 @@ export default function PipelinePage() {
                     personContext,
                     ...(prospect.email && personContext !== prospect.email ? [prospect.email] : []),
                     PROSPECT_SOURCE_CONFIG[prospect.source].label,
+                    PROSPECT_PRIORITY_CONFIG[prospect.priority].label,
                     <span key="activity" title={new Date(lastActivity).toLocaleString()}>
                       {formatDistanceToNow(new Date(lastActivity), { addSuffix: true })}
                     </span>,

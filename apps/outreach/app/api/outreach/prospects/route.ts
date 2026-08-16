@@ -2,14 +2,15 @@ import { withProspectOrg } from "@/lib/prospect-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
-  getProspectCounts,
   getProspectByNameAndCompany,
   getProspectOutreach,
-  getProspectsPage,
+  getProspectPipelineCandidates,
   createProspect,
 } from "@/products/outreach/data/prospect-repository";
+import { getOpenActionItemsForProspects } from "@/products/outreach/data/action-item-repository";
 import { resolveAccountForProspect } from "@/products/outreach/data/account-repository";
-import type { ProspectFilters } from "@/products/outreach/domain/types";
+import type { Prospect, ProspectFilters, ProspectLifecycle } from "@/products/outreach/domain/types";
+import { deriveProspectPipelineState } from "@/products/outreach/domain/prospect-lifecycle";
 import { runProspectResearchAsync } from "@/products/outreach/agent/prospect-research";
 
 const corsHeaders = {
@@ -78,13 +79,58 @@ export async function GET(request: NextRequest) {
     }
     const search = searchParams.get("search")?.trim();
     if (search) filters.search = search.slice(0, 500);
-    const page = Number(searchParams.get("page") ?? 1);
-    const pageSize = Number(searchParams.get("pageSize") ?? 50);
-    const [result, counts] = await Promise.all([
-      getProspectsPage(filters, { page, pageSize }),
-      getProspectCounts(),
-    ]);
-    return NextResponse.json({ ...result, counts }, { headers: corsHeaders });
+    const catalogItemId = searchParams.get("catalogItemId");
+    if (catalogItemId) filters.catalogItemId = catalogItemId;
+    const lifecycleParam = searchParams.get("lifecycle");
+    const lifecycles: ProspectLifecycle[] = ["untouched", "researched", "draft_ready", "follow_up_scheduled", "contacted", "replied"];
+    const lifecycle = lifecycles.includes(lifecycleParam as ProspectLifecycle)
+      ? lifecycleParam as ProspectLifecycle
+      : undefined;
+    const requestedPage = Number(searchParams.get("page") ?? 1);
+    const requestedPageSize = Number(searchParams.get("pageSize") ?? 50);
+    const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
+    const pageSize = Number.isFinite(requestedPageSize)
+      ? Math.min(100, Math.max(1, Math.floor(requestedPageSize)))
+      : 50;
+    const candidates = await getProspectPipelineCandidates(filters);
+    const actionItems = await getOpenActionItemsForProspects(
+      candidates.map(({ prospect }) => prospect.id),
+    );
+    const enriched = candidates.map(({ prospect, hasResearch, hasDraft, hasSentMessage }): Prospect => {
+      const nextAction = actionItems.get(prospect.id)?.[0];
+      return {
+        ...prospect,
+        pipeline: deriveProspectPipelineState(prospect, {
+          hasResearch,
+          hasDraft,
+          hasSentMessage,
+          nextAction,
+        }),
+      };
+    });
+    const byLifecycle: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    for (const prospect of enriched) {
+      byStatus[prospect.status] = (byStatus[prospect.status] ?? 0) + 1;
+      const key = prospect.pipeline!.lifecycle;
+      byLifecycle[key] = (byLifecycle[key] ?? 0) + 1;
+      if (prospect.pipeline?.nextAction && key !== "follow_up_scheduled") {
+        byLifecycle.follow_up_scheduled = (byLifecycle.follow_up_scheduled ?? 0) + 1;
+      }
+    }
+    const matching = lifecycle
+      ? enriched.filter((prospect) => lifecycle === "follow_up_scheduled"
+          ? Boolean(prospect.pipeline?.nextAction)
+          : prospect.pipeline?.lifecycle === lifecycle)
+      : enriched;
+    const start = (page - 1) * pageSize;
+    return NextResponse.json({
+      prospects: matching.slice(start, start + pageSize),
+      total: matching.length,
+      page,
+      pageSize,
+      counts: { total: enriched.length, byStatus, byLifecycle },
+    }, { headers: corsHeaders });
    } catch (error) {
     console.error("Error fetching prospects:", error);
     return NextResponse.json(

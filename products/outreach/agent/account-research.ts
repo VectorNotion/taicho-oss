@@ -45,27 +45,27 @@ import { summarizeDatabaseRead } from './research-tracing';
 
 const log = createLogger('account-research');
 
-type EntityRef = { kind: 'account' | 'prospect'; id: string };
+type EntityRef = { kind: 'account' | 'prospect'; id: string; catalogItemId?: string };
 
 // Re-exported so the account research stream route can import both from here.
 export { streamingDimensionProgress, type DimensionProgress };
 
 export interface AccountResearchDeps {
   getAccountById: (id: string) => Promise<{ id: string; name: string } | null>;
-  getDimensionDefinitions: (opts?: { activeOnly?: boolean; seedIfEmpty?: boolean }) => Promise<DimensionDefinition[]>;
+  getDimensionDefinitions: (opts?: { activeOnly?: boolean; seedIfEmpty?: boolean; catalogItemId?: string }) => Promise<DimensionDefinition[]>;
   getObservations: (entity: EntityRef) => Promise<ObservationRecord[]>;
   upsertObservation: (entity: EntityRef, obs: Omit<ObservationRecord, 'id'>) => Promise<ObservationRecord>;
   researchDimensions: (
     dims: DimensionDefinition[],
-    entity: { kind: 'account'; id?: string; name: string },
+    entity: { kind: 'account'; id?: string; name: string; commercialContext?: string },
     runId: string,
     now: Date,
   ) => Promise<Array<Omit<ObservationRecord, 'id'>>>;
   evaluateFitMatches: (dims: DimensionDefinition[], observations: ObservationRecord[], now: Date) => Promise<DimensionMatch[]>;
   saveMatches: (entity: EntityRef, matches: DimensionMatch[]) => Promise<void>;
-  recordResearchRun: (accountId: string, run: { runType: 'full' | 'refresh'; refreshedDimensions: string[] }) => Promise<unknown>;
-  hasAnyResearchRun: (accountId: string) => Promise<boolean>;
-  saveAccountScore: (accountId: string, score: AccountScoreRecord) => Promise<void>;
+  recordResearchRun: (accountId: string, run: { runType: 'full' | 'refresh'; refreshedDimensions: string[] }, catalogItemId?: string) => Promise<unknown>;
+  hasAnyResearchRun: (accountId: string, catalogItemId?: string) => Promise<boolean>;
+  saveAccountScore: (accountId: string, score: AccountScoreRecord, catalogItemId?: string) => Promise<void>;
   now: () => Date;
   thresholds: QualificationThresholds;
   onDimension?: (part: DimensionProgress) => void;
@@ -78,6 +78,8 @@ export interface AccountResearchDeps {
   cascade?: boolean;
   /** Explicit user-triggered research refreshes every account dimension. */
   forceRefresh?: boolean;
+  catalogItemId?: string;
+  commercialContext?: string;
   getAccountProspects: (accountId: string) => Promise<string[]>;
   prospectHasResearch: (prospectId: string) => Promise<boolean>;
   researchProspect: (prospectId: string, opts: { cascade: boolean }) => void;
@@ -139,9 +141,9 @@ const loadAccountResearchContext = traceable(
   async (accountId: string, deps: AccountResearchDeps) => {
     const account = await deps.getAccountById(accountId);
     if (!account) throw new Error(`Account not found: ${accountId}`);
-    const dimensions = await deps.getDimensionDefinitions({ activeOnly: true, seedIfEmpty: true });
-    const hasPriorResearchRun = await deps.hasAnyResearchRun(accountId);
-    const observations = await deps.getObservations({ kind: 'account', id: accountId });
+    const dimensions = await deps.getDimensionDefinitions({ activeOnly: true, seedIfEmpty: true, catalogItemId: deps.catalogItemId });
+    const hasPriorResearchRun = await deps.hasAnyResearchRun(accountId, deps.catalogItemId);
+    const observations = await deps.getObservations({ kind: 'account', id: accountId, catalogItemId: deps.catalogItemId });
     const loaded = { account, dimensions, hasPriorResearchRun, observations };
     return {
       ...loaded,
@@ -214,7 +216,7 @@ const planAccountRefresh = traceable(
 
 const reloadAccountEvidence = traceable(
   async (accountId: string, deps: AccountResearchDeps) => {
-    const observations = await deps.getObservations({ kind: 'account', id: accountId });
+    const observations = await deps.getObservations({ kind: 'account', id: accountId, catalogItemId: deps.catalogItemId });
     return {
       observations,
       database: summarizeDatabaseRead('reload_account_evidence', observations, 1, {
@@ -290,7 +292,7 @@ export async function runAccountResearch(
       if (dimensionsToResearch.length > 0) {
         const fresh = await d.researchDimensions(
           dimensionsToResearch,
-          { kind: 'account', id: accountId, name: account.name },
+          { kind: 'account', id: accountId, name: account.name, commercialContext: d.commercialContext },
           runId,
           now,
         );
@@ -311,7 +313,7 @@ export async function runAccountResearch(
           },
         }, async () => {
           for (const observation of fresh) {
-            await d.upsertObservation({ kind: 'account', id: accountId }, observation);
+            await d.upsertObservation({ kind: 'account', id: accountId, catalogItemId: d.catalogItemId }, observation);
           }
           return { observationsWritten: fresh.length, dimensionKeys: fresh.map((observation) => observation.dimensionKey) };
         });
@@ -392,7 +394,7 @@ export async function runAccountResearch(
           runType,
         },
       }, async () => {
-        await d.saveMatches({ kind: 'account', id: accountId }, icpMatches);
+        await d.saveMatches({ kind: 'account', id: accountId, catalogItemId: d.catalogItemId }, icpMatches);
         await d.saveAccountScore(accountId, {
           icpScore,
           icpScoreConfident,
@@ -400,11 +402,11 @@ export async function runAccountResearch(
           hardExcluded,
           timingBreakdown: timing.breakdown,
           computedAt: now.toISOString(),
-        });
+        }, d.catalogItemId);
         await d.recordResearchRun(accountId, {
           runType,
           refreshedDimensions: dimensionsToResearch.map((dimension) => dimension.key),
-        });
+        }, d.catalogItemId);
         return { matchesWritten: icpMatches.length, scoreWritten: true, researchRunWritten: true };
       });
 

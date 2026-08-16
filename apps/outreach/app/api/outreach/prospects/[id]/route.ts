@@ -7,6 +7,7 @@ import {
   updateProspect,
 } from "@/products/outreach/data/prospect-repository";
 import { withProspectOrg } from "@/lib/prospect-scope";
+import { assignProspectCatalogItem, getCatalogItem } from "@/products/outreach/data/catalog-repository";
 
 export const maxDuration = 600;
 
@@ -35,6 +36,7 @@ const updateSchema = z.object({
     z.string().max(100),
     z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
   ).optional(),
+  catalogItemId: z.string().uuid().nullable().optional(),
 });
 
 export async function OPTIONS() {
@@ -79,9 +81,25 @@ export async function PATCH(
     }
     try {
       const { id } = await params;
+      const { catalogItemId, ...prospectPatch } = parsed.data;
+      if (catalogItemId) {
+        const catalogItem = await getCatalogItem(catalogItemId);
+        if (!catalogItem || catalogItem.status !== "active") {
+          return NextResponse.json({ error: "Active Catalog item not found" }, { status: 404 });
+        }
+      }
       const previous = parsed.data.status ? await getProspectById(id) : null;
-      const prospect = await updateProspect(id, parsed.data);
+      let prospect = Object.keys(prospectPatch).length > 0
+        ? await updateProspect(id, prospectPatch)
+        : await getProspectById(id);
       if (!prospect) return NextResponse.json({ error: "Prospect not found" }, { status: 404 });
+      if (catalogItemId !== undefined) {
+        const assigned = await assignProspectCatalogItem(id, catalogItemId);
+        if (catalogItemId && !assigned) {
+          return NextResponse.json({ error: "Active Catalog item not found" }, { status: 404 });
+        }
+        prospect = (await getProspectById(id)) ?? prospect;
+      }
       let insightStatus = "unchanged";
       if (parsed.data.status && previous?.status !== parsed.data.status) {
         insightStatus = "refreshed";

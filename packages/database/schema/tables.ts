@@ -323,6 +323,19 @@ export const mastra_threads = pgTable("mastra_threads", {
 	index("mastra_threads_resourceid_createdat_idx").using("btree", table.resourceId.asc().nullsLast(), table.createdAt.desc().nullsFirst()),
 ]);
 
+export const mastra_workflow_snapshot = pgTable("mastra_workflow_snapshot", {
+	workflow_name: text().notNull(),
+	run_id: text().notNull(),
+	resourceId: text(),
+	snapshot: jsonb().notNull(),
+	createdAt: timestamp({ mode: 'string' }).notNull(),
+	updatedAt: timestamp({ mode: 'string' }).notNull(),
+	createdAtZ: timestamp({ withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAtZ: timestamp({ withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	unique("public_mastra_workflow_snapshot_workflow_name_run_id_key").on(table.workflow_name, table.run_id),
+]);
+
 export const mastra_messages = pgTable("mastra_messages", {
 	id: text().primaryKey().notNull(),
 	thread_id: text().notNull(),

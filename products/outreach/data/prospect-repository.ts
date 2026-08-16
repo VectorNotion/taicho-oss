@@ -267,6 +267,10 @@ export async function getProspects(filters?: ProspectFilters): Promise<Prospect[
       );
       params.search = filters.search;
     }
+    if (filters?.catalogItemId) {
+      whereClauses.push('l.catalogItemId = $catalogItemId');
+      params.catalogItemId = filters.catalogItemId;
+    }
 
     const whereClause =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -322,6 +326,10 @@ export async function getProspectsPage(
       );
       params.search = filters.search;
     }
+    if (filters?.catalogItemId) {
+      whereClauses.push("l.catalogItemId = $catalogItemId");
+      params.catalogItemId = filters.catalogItemId;
+    }
     const where = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
     const result = await session.run(
       `
@@ -352,6 +360,60 @@ export interface ProspectNavigationItem {
   name: string;
   company?: string;
   title?: string;
+}
+
+export interface ProspectPipelineCandidate {
+  prospect: Prospect;
+  hasResearch: boolean;
+  hasDraft: boolean;
+  hasSentMessage: boolean;
+}
+
+/** Cross-graph portion of the prospect index lifecycle projection. Postgres
+ * action items are joined at the route boundary under the same org context. */
+export async function getProspectPipelineCandidates(
+  filters?: Omit<ProspectFilters, "lifecycle">,
+): Promise<ProspectPipelineCandidate[]> {
+  const session = await getSession();
+  try {
+    const where: string[] = [];
+    const params: Record<string, unknown> = {};
+    if (filters?.status) { where.push("l.status = $status"); params.status = filters.status; }
+    if (filters?.source) { where.push("l.source = $source"); params.source = filters.source; }
+    if (filters?.priority) { where.push("l.priority = $priority"); params.priority = filters.priority; }
+    if (filters?.catalogItemId) { where.push("l.catalogItemId = $catalogItemId"); params.catalogItemId = filters.catalogItemId; }
+    if (filters?.search) {
+      where.push("(toLower(l.name) CONTAINS toLower($search) OR toLower(l.company) CONTAINS toLower($search) OR toLower(l.email) CONTAINS toLower($search))");
+      params.search = filters.search;
+    }
+    const result = await session.run(
+      `MATCH (l:Prospect)
+       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       OPTIONAL MATCH (l)-[:HAS_OUTREACH]->(message:OutreachMessage)
+       WITH l,
+            max(CASE WHEN message.status = 'draft'
+                       AND coalesce(message.catalogItemId, 'workspace') = coalesce(l.catalogItemId, 'workspace')
+                     THEN 1 ELSE 0 END) AS hasDraft,
+            max(CASE WHEN message.status = 'sent' THEN 1 ELSE 0 END) AS hasSentMessage
+       OPTIONAL MATCH (l)-[:HAS_RESEARCH|HAS_OBSERVATION|HAS_SCORE]->(research)
+       WHERE coalesce(research.contextKey, 'workspace') = coalesce(l.catalogItemId, 'workspace')
+       RETURN l, hasDraft, hasSentMessage, count(research) > 0 AS hasResearch
+       ORDER BY l.createdAt DESC, l.id ASC`,
+      params,
+    );
+    return result.records.map((record) => ({
+      prospect: mapProspectFromNeo4j(record.get("l").properties),
+      hasDraft: typeof record.get("hasDraft")?.toNumber === "function"
+        ? record.get("hasDraft").toNumber() > 0
+        : Number(record.get("hasDraft") ?? 0) > 0,
+      hasSentMessage: typeof record.get("hasSentMessage")?.toNumber === "function"
+        ? record.get("hasSentMessage").toNumber() > 0
+        : Number(record.get("hasSentMessage") ?? 0) > 0,
+      hasResearch: Boolean(record.get("hasResearch")),
+    }));
+  } finally {
+    await session.close();
+  }
 }
 
 export interface ProspectNavigation {
@@ -784,6 +846,8 @@ function mapProspectFromNeo4j(prospect: Record<string, unknown>): Prospect {
     revision: typeof (prospect.revision as { toNumber?: () => number } | undefined)?.toNumber === "function"
       ? (prospect.revision as { toNumber: () => number }).toNumber()
       : Number(prospect.revision ?? 0),
+    catalogItemId: (prospect.catalogItemId as string | null) ?? undefined,
+    catalogItemName: (prospect.catalogItemName as string | null) ?? undefined,
     about: prospect.about as string | undefined,
     // notes are fetched separately as ProspectNote[] via relationship
     referredBy: prospect.referredBy as string | undefined,
@@ -817,6 +881,8 @@ export async function createOutreachMessage(
         linkedContentId: $linkedContentId,
         linkedContentUrl: $linkedContentUrl,
         status: $status,
+        catalogItemId: coalesce($catalogItemId, l.catalogItemId),
+        catalogItemName: coalesce($catalogItemName, l.catalogItemName),
         createdAt: localdatetime(),
         updatedAt: localdatetime(),
         sentAt: null
@@ -836,6 +902,8 @@ export async function createOutreachMessage(
         linkedContentId: data.linkedContentId ?? null,
         linkedContentUrl: data.linkedContentUrl ?? null,
         status: data.status ?? 'draft',
+        catalogItemId: data.catalogItemId ?? null,
+        catalogItemName: data.catalogItemName ?? null,
       }
     );
 
@@ -879,6 +947,8 @@ export async function createGeneratedOutreachMessage(
         m.promptKey = $promptKey,
         m.promptVersion = $promptVersion,
         m.promptContentHash = $promptContentHash,
+        m.catalogItemId = coalesce($catalogItemId, l.catalogItemId),
+        m.catalogItemName = coalesce($catalogItemName, l.catalogItemName),
         m.createdByAttemptId = $attemptId,
         m.createdAt = localdatetime(),
         m.updatedAt = localdatetime(),
@@ -893,6 +963,8 @@ export async function createGeneratedOutreachMessage(
         promptKey: data.promptKey ?? null,
         promptVersion: data.promptVersion ?? null,
         promptContentHash: data.promptContentHash ?? null,
+        catalogItemId: data.catalogItemId ?? null,
+        catalogItemName: data.catalogItemName ?? null,
         attemptId,
         medium: data.medium,
         subject: data.subject ?? null,
@@ -1169,6 +1241,8 @@ function mapOutreachFromNeo4j(message: Record<string, unknown>): OutreachMessage
         ? (message.promptVersion as { toNumber: () => number }).toNumber()
         : Number(message.promptVersion),
     promptContentHash: (message.promptContentHash as string | null) ?? undefined,
+    catalogItemId: (message.catalogItemId as string | null) ?? undefined,
+    catalogItemName: (message.catalogItemName as string | null) ?? undefined,
   };
 }
 

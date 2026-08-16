@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DimensionDefinition } from '../domain/qualification';
 import {
+  buildDimensionQuery,
   buildSynthesisPrompt,
   researchDimensions,
   type DimensionResearchDeps,
@@ -97,6 +98,28 @@ test('synthesis prompt carries instructions and the no-recency-judgment rule', (
   assert.ok(prompt.includes('research hiring_activity'));
   assert.ok(/do not judge recency/i.test(prompt.replace(/\n/g, ' ')), 'recency rule present');
   assert.ok(prompt.includes('2026-08-10'), 'today injected');
+});
+
+test('Catalog context guides search relevance and is explicitly non-evidence', () => {
+  const commercialContext = [
+    'Catalog item: Automation advisory (service)',
+    'Customer outcomes: A prioritized automation roadmap.',
+  ].join('\n');
+  const query = buildDimensionQuery(FIT_DIM, {
+    kind: 'account',
+    name: 'Acme Corp',
+    commercialContext,
+  });
+  assert.match(query, /relevance to Automation advisory/);
+
+  const prompt = buildSynthesisPrompt(
+    [FIT_DIM],
+    [{ dimensionKey: FIT_DIM.key, results: [] }],
+    { kind: 'account', name: 'Acme Corp', commercialContext },
+    NOW,
+  );
+  assert.ok(prompt.includes('Customer outcomes: A prioritized automation roadmap.'));
+  assert.match(prompt, /It is not evidence/i);
 });
 
 test('empty dimension list short-circuits without calling anything', async () => {

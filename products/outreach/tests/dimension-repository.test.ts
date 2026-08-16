@@ -17,6 +17,7 @@ import {
 } from '../data/dimension-repository';
 
 const ORGANIZATION_ID = `outreach-dimension-test-organization-${process.pid}`;
+const SCOPED_SEED_ORGANIZATION_ID = `outreach-dimension-scoped-seed-${process.pid}`;
 
 function inOrganization<T>(callback: () => T): T {
   return runWithGraphOrganization(ORGANIZATION_ID, callback);
@@ -35,8 +36,27 @@ async function clearGraph() {
 before(() => inOrganization(clearGraph));
 after(() => inOrganization(async () => {
   await clearGraph();
+  await runWithGraphOrganization(SCOPED_SEED_ORGANIZATION_ID, clearGraph);
   await closeDriver();
 }));
+
+test('workspace defaults seed even when a Catalog-scoped dimension already exists', async () => {
+  await runWithGraphOrganization(SCOPED_SEED_ORGANIZATION_ID, async () => {
+    await clearGraph();
+    const catalogItemId = '77777777-7777-4777-8777-777777777777';
+    await createDimensionDefinition({
+      ...DEFAULT_DIMENSIONS[0],
+      catalogItemId,
+    });
+
+    const effective = await getDimensionDefinitions({ catalogItemId, seedIfEmpty: true });
+    assert.equal(effective.length, DEFAULT_DIMENSIONS.length + 1);
+    assert.equal(effective.filter((dimension) => !dimension.catalogItemId).length, DEFAULT_DIMENSIONS.length);
+
+    const workspace = await getDimensionDefinitions();
+    assert.equal(workspace.length, DEFAULT_DIMENSIONS.length);
+  });
+});
 
 test('seedIfEmpty seeds the spec defaults exactly once', async () => {
   const seeded = await getDimensionDefinitions({ seedIfEmpty: true });

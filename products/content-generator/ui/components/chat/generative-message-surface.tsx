@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
-  Bot,
-  BrainCircuit,
   Check,
   ChevronDown,
   CircleAlert,
@@ -13,41 +11,23 @@ import {
   Search,
   Sparkles,
 } from 'lucide-react';
-import { ThreadPrimitive, useAssistantState } from '@assistant-ui/react';
+import { useAssistantState } from '@assistant-ui/react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 
 type WorkStatus = 'queued' | 'running' | 'partial' | 'complete' | 'failed';
 type WorkCategory = 'knowledge' | 'web' | 'synthesis' | 'action';
 
-type ChatEvent =
-  | {
-      id: string;
-      event: 'assistant.ack';
-      at: number;
-      intent: string;
-      message: string;
-    }
-  | {
-      id: string;
-      event: 'activity.started' | 'activity.completed' | 'activity.failed';
-      at: number;
-      label: string;
-      category: WorkCategory;
-      detail?: string;
-      owner?: string;
-    }
-  | {
-      id: string;
-      event: 'tool.progress';
-      at: number;
-      tool: string;
-      label: string;
-      status: WorkStatus;
-      detail?: string;
-      query?: string;
-      resultCount?: number;
-    };
+type ChatEvent = {
+  id: string;
+  event: 'tool.progress';
+  at: number;
+  tool: string;
+  label: string;
+  status: WorkStatus;
+  detail?: string;
+  query?: string;
+  resultCount?: number;
+};
 
 type ActivityView = {
   id: string;
@@ -87,14 +67,6 @@ function normalizeToolName(name: string): string {
   return name.replace(/tool$/i, '').replaceAll('-', '').toLowerCase();
 }
 
-function isChatEvent(value: unknown): value is ChatEvent {
-  if (!value || typeof value !== 'object') return false;
-  const event = value as Partial<ChatEvent>;
-  return typeof event.id === 'string'
-    && typeof event.event === 'string'
-    && typeof event.at === 'number';
-}
-
 function statusFromPart(part: AssistantPart): WorkStatus {
   if (part.isError || part.status?.type === 'error' || part.status?.type === 'incomplete') {
     return 'failed';
@@ -112,10 +84,6 @@ function eventsFromParts(parts: AssistantPart[]): ChatEvent[] {
   }
   const events: ChatEvent[] = [];
   for (const [index, part] of parts.entries()) {
-    if (part.type === 'data' && part.name === 'taicho-event' && isChatEvent(part.data)) {
-      events.push(part.data);
-      continue;
-    }
     if (part.type === 'tool-call' && part.toolName && part.toolCallId) {
       const normalized = normalizeToolName(part.toolName);
       const config = TOOL_LABELS[normalized]
@@ -169,39 +137,20 @@ function eventsFromParts(parts: AssistantPart[]): ChatEvent[] {
 }
 
 function viewFromEvents(events: ChatEvent[]) {
-  let acknowledgement: Extract<ChatEvent, { event: 'assistant.ack' }> | null = null;
   const activities = new Map<string, ActivityView>();
   for (const event of events) {
-    if (event.event === 'assistant.ack') {
-      acknowledgement = event;
-      continue;
-    }
-    if (event.event === 'tool.progress') {
-      const normalized = normalizeToolName(event.tool);
-      activities.set(event.id, {
-        id: event.id,
-        label: event.label,
-        category: TOOL_LABELS[normalized]?.category ?? 'knowledge',
-        status: event.status,
-        detail: event.detail ?? event.query,
-        tool: event.tool,
-        resultCount: event.resultCount,
-      });
-      continue;
-    }
+    const normalized = normalizeToolName(event.tool);
     activities.set(event.id, {
       id: event.id,
       label: event.label,
-      category: event.category,
-      status: event.event === 'activity.completed'
-        ? 'complete'
-        : event.event === 'activity.failed'
-          ? 'failed'
-          : 'running',
-      detail: event.detail,
+      category: TOOL_LABELS[normalized]?.category ?? 'knowledge',
+      status: event.status,
+      detail: event.detail ?? event.query,
+      tool: event.tool,
+      resultCount: event.resultCount,
     });
   }
-  return { acknowledgement, activities: [...activities.values()] };
+  return [...activities.values()];
 }
 
 function ActivityIcon({ activity }: { activity: ActivityView }) {
@@ -229,7 +178,7 @@ function WorkReceipt({ activities, onExpand }: {
         <ListChecks className="size-3.5" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium">{failed ? 'Work needs attention' : 'Work complete'}</p>
+        <p className="text-xs font-medium">{failed ? 'Tool activity needs attention' : 'Tool activity complete'}</p>
         <p className="mt-0.5 text-[10px] text-muted-foreground">
           {activities.length} step{activities.length === 1 ? '' : 's'}
           {results ? ` · ${results} results` : ''}
@@ -273,8 +222,7 @@ function ActivityRail({ activities, running }: {
           {hasActive ? <span className="absolute -right-0.5 -top-0.5 size-2 animate-pulse rounded-full bg-primary" /> : null}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium">{hasActive ? 'Running workflow capabilities' : 'Work complete'}</p>
-          <p className="mt-0.5 text-[10px] text-muted-foreground">Actions and artifacts stay visible; private reasoning stays private.</p>
+          <p className="text-xs font-medium">{hasActive ? 'Running tools' : 'Tool activity complete'}</p>
         </div>
         <Badge variant={hasActive ? 'secondary' : 'outline'}>
           {hasActive ? 'Live' : `${activities.length} step${activities.length === 1 ? '' : 's'}`}
@@ -307,74 +255,25 @@ function ActivityRail({ activities, running }: {
 export function GenerativeMessageSurface() {
   const parts = useAssistantState(({ message }) => message.parts as AssistantPart[]);
   const status = useAssistantState(({ message }) => message.status?.type);
-  const view = useMemo(() => viewFromEvents(eventsFromParts(parts)), [parts]);
+  const activities = useMemo(() => viewFromEvents(eventsFromParts(parts)), [parts]);
   const running = status === 'running' || status === 'requires-action';
-  if (!view.acknowledgement && view.activities.length === 0) return null;
+  if (activities.length === 0) return null;
   return (
     <div className="mb-3" data-component="CHAT-04 Assistant Message Block">
-      {view.acknowledgement ? (
-        <div className="mb-3 flex items-start gap-3">
-          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-            <Sparkles className="size-3.5" />
-          </span>
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-primary/80">{view.acknowledgement.intent}</p>
-            <p className="mt-1 text-sm leading-6 text-foreground/90">{view.acknowledgement.message}</p>
-          </div>
-        </div>
-      ) : null}
-      <ActivityRail activities={view.activities} running={running} />
+      <ActivityRail activities={activities} running={running} />
     </div>
   );
 }
 
 export function AssistantStartingState() {
   return (
-    <div className="mb-3 flex items-center gap-3 py-2 text-sm text-muted-foreground">
-      <span className="relative grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
-        <Bot className="size-3.5" />
-        <span className="absolute -right-0.5 -top-0.5 size-2 animate-ping rounded-full bg-primary/50" />
-      </span>
-      <span>Taicho is understanding the request…</span>
+    <div className="mb-3 flex items-center gap-2 py-2 text-sm text-muted-foreground" role="status">
+      <span className="size-2 animate-pulse rounded-full bg-primary" />
+      <span>Waiting for response…</span>
     </div>
   );
 }
 
-export function SafeReasoningIndicator() {
-  return (
-    <div className="my-2 flex items-center gap-2 text-[11px] text-muted-foreground" aria-label="Taicho is planning the response">
-      <BrainCircuit className="size-3.5 animate-pulse text-primary" />
-      <span>Choosing the next useful capability</span>
-    </div>
-  );
-}
-
-export function ContextualSuggestedActions() {
-  const parts = useAssistantState(({ message }) => message.parts as AssistantPart[]);
-  const status = useAssistantState(({ message }) => message.status?.type);
-  const isLast = useAssistantState(({ message }) => message.isLast);
-  const view = useMemo(() => viewFromEvents(eventsFromParts(parts)), [parts]);
-  if (!isLast || status === 'running' || !view.acknowledgement) return null;
-  const intent = view.acknowledgement.intent.toLowerCase();
-  const suggestions = intent.includes('prospect')
-    ? [
-        { label: 'Prepare outreach', prompt: 'Create a grounded outreach artifact for this prospect. Do not send it.' },
-        { label: 'Explain the score', prompt: 'Explain the qualification evidence and uncertainty.' },
-      ]
-    : [
-        { label: 'Go one level deeper', prompt: 'Go one level deeper using the strongest available evidence.' },
-        { label: 'Suggest the next workflow', prompt: 'Which fixed intelligence workflow should we run next?' },
-      ];
-  return (
-    <div className="mt-4 flex flex-wrap gap-2">
-      {suggestions.map((suggestion) => (
-        <ThreadPrimitive.Suggestion asChild key={suggestion.label} prompt={suggestion.prompt} send>
-          <Button className="h-8 rounded-full text-xs" size="sm" variant="outline">
-            <Sparkles className="size-3" />
-            {suggestion.label}
-          </Button>
-        </ThreadPrimitive.Suggestion>
-      ))}
-    </div>
-  );
+export function HiddenReasoning() {
+  return null;
 }

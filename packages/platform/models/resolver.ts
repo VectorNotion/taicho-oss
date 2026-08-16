@@ -120,6 +120,15 @@ export type MastraLanguageModelConfig = `${string}/${string}` | {
   apiKey: string;
 };
 
+export function languageModelRuntimeIsConfigured(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(
+    environment.LITELLM_BASE_URL?.trim()
+    && environment.LITELLM_API_KEY?.trim(),
+  );
+}
+
 export function languageModelConfig(selection: ResolvedModelSelection): MastraLanguageModelConfig {
   if (selection.deployment.provider !== "litellm") {
     throw new ModelPolicyError(`${selection.model.name} is a creative model and cannot run as a language model.`, "missing_capability");

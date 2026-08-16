@@ -30,9 +30,8 @@ import { ArticleResults } from "@/components/chat/tool-parts/article-results";
 import { ToolRecoveryCard } from "@/components/chat/tool-parts/tool-recovery-card";
 import {
   AssistantStartingState,
-  ContextualSuggestedActions,
   GenerativeMessageSurface,
-  SafeReasoningIndicator,
+  HiddenReasoning,
 } from "@/components/chat/generative-message-surface";
 
 // Tool components wrapper to match assistant-ui interface
@@ -306,7 +305,7 @@ export const AssistantMessage: FC = () => {
             components={{
               Empty: AssistantStartingState,
               Text: MarkdownText,
-              Reasoning: SafeReasoningIndicator,
+              Reasoning: HiddenReasoning,
               tools: {
                 by_name: {
                   searchKnowledgeTool: SearchKnowledgeTool,
@@ -326,7 +325,6 @@ export const AssistantMessage: FC = () => {
               },
             }}
           />
-          <ContextualSuggestedActions />
           <MessageError />
         </div>
 

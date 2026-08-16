@@ -38,6 +38,8 @@ interface ThreadProps extends ThreadSuggestionsProps {
   welcome?: string;
   agentName?: string;
   contactTargets?: ChatContactTarget[];
+  contactLocked?: boolean;
+  compact?: boolean;
   controls: ChatControls;
   modelOptions?: PublicModelDefinition[];
   onControlsChange: (controls: ChatControls) => void;
@@ -50,6 +52,8 @@ export const Thread: FC<ThreadProps> = ({
   welcome = "How can I help you today?",
   agentName,
   contactTargets,
+  contactLocked = false,
+  compact = false,
   controls,
   modelOptions = [],
   onControlsChange,
@@ -63,13 +67,14 @@ export const Thread: FC<ThreadProps> = ({
             ["--thread-max-width" as string]: "48rem",
           }}
         >
-          <ThreadPrimitive.Viewport className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll px-4">
+          <ThreadPrimitive.Viewport className="relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto px-3 sm:px-4">
             <ThreadPrimitive.If empty>
               <ThreadWelcome
                 disabled={disabled}
                 suggestions={suggestions}
                 welcome={welcome}
                 agentName={agentName}
+                compact={compact}
               />
             </ThreadPrimitive.If>
 
@@ -88,10 +93,12 @@ export const Thread: FC<ThreadProps> = ({
             <Composer
               availability={availability}
               contactTargets={contactTargets}
+              contactLocked={contactLocked}
               controls={controls}
               disabled={disabled}
               modelOptions={modelOptions}
               onControlsChange={onControlsChange}
+              autoFocus={!compact}
             />
           </ThreadPrimitive.Viewport>
         </ThreadPrimitive.Root>
@@ -104,6 +111,7 @@ interface ThreadWelcomeProps extends ThreadSuggestionsProps {
   disabled?: boolean;
   welcome: string;
   agentName?: string;
+  compact?: boolean;
 }
 
 const ThreadWelcome: FC<ThreadWelcomeProps> = ({
@@ -111,11 +119,12 @@ const ThreadWelcome: FC<ThreadWelcomeProps> = ({
   disabled = false,
   welcome,
   agentName,
+  compact = false,
 }) => {
   return (
     <div className="mx-auto my-auto flex w-full max-w-3xl grow flex-col">
       <div className="flex w-full grow flex-col items-center justify-center">
-        <div className="flex size-full flex-col items-center justify-center px-8 text-center">
+        <div className="flex size-full flex-col items-center justify-center px-2 py-6 text-center sm:px-6">
           <m.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -131,7 +140,7 @@ const ThreadWelcome: FC<ThreadWelcomeProps> = ({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
             transition={{ delay: 0.05 }}
-            className="mt-4 text-3xl font-semibold tracking-tight"
+            className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl"
           >
             {welcome}
           </m.h1>
@@ -147,17 +156,18 @@ const ThreadWelcome: FC<ThreadWelcomeProps> = ({
           </m.p>
         </div>
       </div>
-      <ThreadSuggestions disabled={disabled} suggestions={suggestions} />
+      <ThreadSuggestions compact={compact} disabled={disabled} suggestions={suggestions} />
     </div>
   );
 };
 
-const ThreadSuggestions: FC<ThreadSuggestionsProps & { disabled?: boolean }> = ({
+const ThreadSuggestions: FC<ThreadSuggestionsProps & { compact?: boolean; disabled?: boolean }> = ({
+  compact = false,
   disabled = false,
   suggestions,
 }) => {
   return (
-    <div className="grid w-full gap-2 pb-4 md:grid-cols-2">
+    <div className="grid w-full gap-2 pb-4 md:grid-cols-2 [@media(max-height:640px)]:hidden">
       {suggestions?.map((suggestedAction, index) => (
         <m.div
           initial={{ opacity: 0, y: 20 }}
@@ -174,7 +184,7 @@ const ThreadSuggestions: FC<ThreadSuggestionsProps & { disabled?: boolean }> = (
           >
             <Button
               variant="outline"
-              className="group min-h-24 w-full justify-start gap-3 bg-card p-3.5 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:border-primary/45 hover:bg-primary/5 hover:shadow-md"
+              className="group min-h-24 w-full justify-start gap-3 whitespace-normal bg-card p-3.5 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:border-primary/45 hover:bg-primary/5 hover:shadow-md"
               aria-label={suggestedAction.prompt}
               disabled={disabled}
             >
@@ -182,6 +192,7 @@ const ThreadSuggestions: FC<ThreadSuggestionsProps & { disabled?: boolean }> = (
                 description={suggestedAction.label ?? suggestedAction.prompt}
                 icon={suggestedAction.icon ?? "research"}
                 service={suggestedAction.service ?? "Workspace"}
+                showService={!compact}
                 title={suggestedAction.title}
               />
               <ArrowUpRightIcon className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-foreground" />

@@ -5,6 +5,7 @@ import {
   createDimensionDefinition,
   getDimensionDefinitions,
 } from '@/products/outreach/data/dimension-repository';
+import { getCatalogItem } from '@/products/outreach/data/catalog-repository';
 
 const createDimensionSchema = z.object({
   key: z.string().min(1).regex(/^[a-z][a-z0-9_]*$/, 'snake_case key required'),
@@ -18,6 +19,7 @@ const createDimensionSchema = z.object({
   freshnessWindowDays: z.number().positive(),
   hardExclusionRule: z.string().optional(),
   isActive: z.boolean().default(true),
+  catalogItemId: z.string().uuid().optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -26,7 +28,8 @@ export async function GET(request: NextRequest) {
       const { searchParams } = new URL(request.url);
       const activeOnly = searchParams.get('active') === 'true';
       const appliesTo = searchParams.get('appliesTo');
-      const dimensions = await getDimensionDefinitions({ activeOnly, seedIfEmpty: true });
+      const catalogItemId = searchParams.get('catalogItemId') || undefined;
+      const dimensions = await getDimensionDefinitions({ activeOnly, seedIfEmpty: true, catalogItemId });
       const filtered = appliesTo === 'account' || appliesTo === 'prospect'
         ? dimensions.filter((dim) => dim.appliesTo === appliesTo)
         : dimensions;
@@ -52,6 +55,21 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { error: 'Timing dimensions apply to accounts only' },
           { status: 400 }
+        );
+      }
+      if (parsed.data.catalogItemId) {
+        const catalogItem = await getCatalogItem(parsed.data.catalogItemId);
+        if (!catalogItem || catalogItem.status !== 'active') {
+          return NextResponse.json({ error: 'Active Catalog item not found' }, { status: 400 });
+        }
+      }
+      const effectiveDimensions = await getDimensionDefinitions({
+        catalogItemId: parsed.data.catalogItemId,
+      });
+      if (effectiveDimensions.some(({ key }) => key === parsed.data.key)) {
+        return NextResponse.json(
+          { error: 'A dimension with this key already exists in the selected context' },
+          { status: 409 },
         );
       }
       const dimension = await createDimensionDefinition(parsed.data);

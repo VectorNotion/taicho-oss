@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BookOpen,
   Building2,
+  Crosshair,
   FileText,
   LayoutDashboard,
   ListFilter,
@@ -27,6 +29,8 @@ import {
 
 const navItems = [
   { href: "/outreach", label: "Overview", icon: LayoutDashboard, exact: true },
+  { href: "/catalog", label: "Catalog", icon: BookOpen, exact: false },
+  { href: "/targeting", label: "Targeting", icon: Crosshair, exact: false },
   { href: "/outreach/accounts", label: "Accounts", icon: Building2, exact: false },
   { href: "/outreach/prospects", label: "Prospects", icon: ListFilter, exact: false },
   { href: "/outreach/drafts", label: "Drafts", icon: FileText, exact: false },

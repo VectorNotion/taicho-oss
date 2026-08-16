@@ -256,6 +256,7 @@ export function ComposerControlDock({
   availability,
   className,
   contactTargets,
+  contactLocked = false,
   controls,
   disabled,
   modelOptions = [],
@@ -264,6 +265,7 @@ export function ComposerControlDock({
   availability: ChatControlAvailability;
   className?: string;
   contactTargets?: ChatContactTarget[];
+  contactLocked?: boolean;
   controls: ChatControls;
   disabled?: boolean;
   modelOptions?: PublicModelDefinition[];
@@ -288,7 +290,17 @@ export function ComposerControlDock({
       disabled={disabled}
     >
       <legend className="sr-only">Chat controls</legend>
-      {availability.contacts && contactTargets !== undefined ? (
+      {availability.contacts && contactTargets !== undefined && contactLocked ? (
+        <Badge
+          aria-label={`Pinned contact: ${controls.contact?.label ?? "None"}`}
+          className="h-8 max-w-40 gap-1.5 px-2 text-xs font-normal"
+          title="This conversation stays in the current prospect context"
+          variant="outline"
+        >
+          <LockKeyholeIcon className="size-3.5" />
+          <span className="truncate">{controls.contact?.label ?? "Contact"}</span>
+        </Badge>
+      ) : availability.contacts && contactTargets !== undefined ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -470,11 +482,13 @@ export function ChatStarterVisual({
   title,
   description,
   service,
+  showService = true,
 }: {
   icon: ChatStarterIcon;
   title: string;
   description?: string;
   service?: string;
+  showService?: boolean;
 }) {
   const config = starterIcons[icon];
   const Icon = config.icon;
@@ -490,8 +504,8 @@ export function ChatStarterVisual({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="text-sm font-medium">{title}</span>
-          {service && (
+          <span className="text-sm font-medium leading-5">{title}</span>
+          {service && showService && (
             <Badge className="hidden text-[9px] xl:inline-flex" variant="outline">
               {service}
             </Badge>

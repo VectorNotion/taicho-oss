@@ -18,7 +18,11 @@ import type {
  * JSON string properties — the customAttributes pattern from prospect-repository.
  */
 
-type EntityRef = { kind: "account" | "prospect"; id: string };
+type EntityRef = { kind: "account" | "prospect"; id: string; catalogItemId?: string };
+
+function contextKey(catalogItemId?: string): string {
+  return catalogItemId || "workspace";
+}
 
 function entityMatch(entity: EntityRef): { label: string; obsLabel: string } {
   return entity.kind === "account"
@@ -77,9 +81,10 @@ export async function upsertObservation(
     await session.run(
       `
       MATCH (e:${label} {id: $entityId})-[:HAS_OBSERVATION]->(o:${obsLabel} {dimensionKey: $dimensionKey})
+      WHERE coalesce(o.contextKey, 'workspace') = $contextKey
       DETACH DELETE o
       `,
-      { entityId: entity.id, dimensionKey: obs.dimensionKey }
+      { entityId: entity.id, dimensionKey: obs.dimensionKey, contextKey: contextKey(entity.catalogItemId) }
     );
     const result = await session.run(
       `
@@ -93,7 +98,8 @@ export async function upsertObservation(
         evidenceJson: $evidenceJson,
         confidence: $confidence,
         researchedAt: $researchedAt,
-        runId: $runId
+        runId: $runId,
+        contextKey: $contextKey
       })
       CREATE (e)-[:HAS_OBSERVATION]->(o)
       RETURN o
@@ -108,6 +114,7 @@ export async function upsertObservation(
         confidence: obs.confidence,
         researchedAt: obs.researchedAt,
         runId: obs.runId,
+        contextKey: contextKey(entity.catalogItemId),
       }
     );
     if (result.records.length === 0) {
@@ -126,9 +133,10 @@ export async function getObservations(entity: EntityRef): Promise<ObservationRec
     const result = await session.run(
       `
       MATCH (e:${label} {id: $entityId})-[:HAS_OBSERVATION]->(o:${obsLabel})
+      WHERE coalesce(o.contextKey, 'workspace') = $contextKey
       RETURN o ORDER BY o.dimensionKey
       `,
-      { entityId: entity.id }
+      { entityId: entity.id, contextKey: contextKey(entity.catalogItemId) }
     );
     return result.records.map((record) => mapObservation(record.get("o").properties));
   } finally {
@@ -144,9 +152,10 @@ export async function saveMatches(entity: EntityRef, matches: DimensionMatch[]):
     await session.run(
       `
       MATCH (e:${label} {id: $entityId})-[:HAS_MATCH]->(m:DimensionMatch)
+      WHERE coalesce(m.contextKey, 'workspace') = $contextKey
       DETACH DELETE m
       `,
-      { entityId: entity.id }
+      { entityId: entity.id, contextKey: contextKey(entity.catalogItemId) }
     );
     for (const m of matches) {
       await session.run(
@@ -160,7 +169,8 @@ export async function saveMatches(entity: EntityRef, matches: DimensionMatch[]):
           classification: $classification,
           hardExclusion: $hardExclusion,
           confidence: $confidence,
-          evaluatedAt: localdatetime()
+          evaluatedAt: localdatetime(),
+          contextKey: $contextKey
         })
         CREATE (e)-[:HAS_MATCH]->(m)
         `,
@@ -172,6 +182,7 @@ export async function saveMatches(entity: EntityRef, matches: DimensionMatch[]):
           classification: m.classification,
           hardExclusion: m.hardExclusion,
           confidence: m.confidence,
+          contextKey: contextKey(entity.catalogItemId),
         }
       );
     }
@@ -187,9 +198,10 @@ export async function getMatches(entity: EntityRef): Promise<DimensionMatch[]> {
     const result = await session.run(
       `
       MATCH (e:${label} {id: $entityId})-[:HAS_MATCH]->(m:DimensionMatch)
+      WHERE coalesce(m.contextKey, 'workspace') = $contextKey
       RETURN m ORDER BY m.dimensionKey
       `,
-      { entityId: entity.id }
+      { entityId: entity.id, contextKey: contextKey(entity.catalogItemId) }
     );
     return result.records.map((record) => {
       const props = record.get("m").properties as Record<string, unknown>;
@@ -222,10 +234,10 @@ export interface PersonaDimensionObservation {
  * Per persona (prospect fit) dimension: what the researcher found (observation +
  * evidence) joined with its match — the prospect page's want→found→match view.
  */
-export async function getProspectPersonaDetail(prospectId: string): Promise<PersonaDimensionObservation[]> {
+export async function getProspectPersonaDetail(prospectId: string, catalogItemId?: string): Promise<PersonaDimensionObservation[]> {
   const [observations, matches] = await Promise.all([
-    getObservations({ kind: "prospect", id: prospectId }),
-    getMatches({ kind: "prospect", id: prospectId }),
+    getObservations({ kind: "prospect", id: prospectId, catalogItemId }),
+    getMatches({ kind: "prospect", id: prospectId, catalogItemId }),
   ]);
   const matchByKey = new Map(matches.map((m) => [m.dimensionKey, m]));
   return observations
@@ -269,12 +281,13 @@ export interface ProspectScoreRecord {
   computedAt: string;
 }
 
-export async function saveAccountScore(accountId: string, score: AccountScoreRecord): Promise<void> {
+export async function saveAccountScore(accountId: string, score: AccountScoreRecord, catalogItemId?: string): Promise<void> {
   const session = await getSession();
   try {
     await session.run(
-      `MATCH (a:Account {id: $accountId})-[:HAS_SCORE]->(s:AccountScore) DETACH DELETE s`,
-      { accountId }
+      `MATCH (a:Account {id: $accountId})-[:HAS_SCORE]->(s:AccountScore)
+       WHERE coalesce(s.contextKey, 'workspace') = $contextKey DETACH DELETE s`,
+      { accountId, contextKey: contextKey(catalogItemId) }
     );
     const created = await session.run(
       `
@@ -287,7 +300,8 @@ export async function saveAccountScore(accountId: string, score: AccountScoreRec
         hardExcluded: $hardExcluded,
         reviewReason: $reviewReason,
         timingBreakdownJson: $timingBreakdownJson,
-        computedAt: $computedAt
+        computedAt: $computedAt,
+        contextKey: $contextKey
       })
       CREATE (a)-[:HAS_SCORE]->(s)
       RETURN s
@@ -301,6 +315,7 @@ export async function saveAccountScore(accountId: string, score: AccountScoreRec
         reviewReason: score.reviewReason ?? null,
         timingBreakdownJson: JSON.stringify(score.timingBreakdown),
         computedAt: score.computedAt,
+        contextKey: contextKey(catalogItemId),
       }
     );
     if (created.records.length === 0) throw new Error(`Account not found: ${accountId}`);
@@ -309,12 +324,13 @@ export async function saveAccountScore(accountId: string, score: AccountScoreRec
   }
 }
 
-export async function getAccountScore(accountId: string): Promise<AccountScoreRecord | null> {
+export async function getAccountScore(accountId: string, catalogItemId?: string): Promise<AccountScoreRecord | null> {
   const session = await getSession();
   try {
     const result = await session.run(
-      `MATCH (a:Account {id: $accountId})-[:HAS_SCORE]->(s:AccountScore) RETURN s`,
-      { accountId }
+      `MATCH (a:Account {id: $accountId})-[:HAS_SCORE]->(s:AccountScore)
+       WHERE coalesce(s.contextKey, 'workspace') = $contextKey RETURN s`,
+      { accountId, contextKey: contextKey(catalogItemId) }
     );
     if (result.records.length === 0) return null;
     const s = result.records[0].get("s").properties as Record<string, unknown>;
@@ -332,12 +348,13 @@ export async function getAccountScore(accountId: string): Promise<AccountScoreRe
   }
 }
 
-export async function saveProspectScore(prospectId: string, score: ProspectScoreRecord): Promise<void> {
+export async function saveProspectScore(prospectId: string, score: ProspectScoreRecord, catalogItemId?: string): Promise<void> {
   const session = await getSession();
   try {
     await session.run(
-      `MATCH (p:Prospect {id: $prospectId})-[:HAS_SCORE]->(s:ProspectScore) DETACH DELETE s`,
-      { prospectId }
+      `MATCH (p:Prospect {id: $prospectId})-[:HAS_SCORE]->(s:ProspectScore)
+       WHERE coalesce(s.contextKey, 'workspace') = $contextKey DETACH DELETE s`,
+      { prospectId, contextKey: contextKey(catalogItemId) }
     );
     const created = await session.run(
       `
@@ -348,7 +365,8 @@ export async function saveProspectScore(prospectId: string, score: ProspectScore
         personaScoreConfident: $personaScoreConfident,
         hardExcluded: $hardExcluded,
         reviewReason: $reviewReason,
-        computedAt: $computedAt
+        computedAt: $computedAt,
+        contextKey: $contextKey
       })
       CREATE (p)-[:HAS_SCORE]->(s)
       RETURN s
@@ -360,6 +378,7 @@ export async function saveProspectScore(prospectId: string, score: ProspectScore
         hardExcluded: score.hardExcluded,
         reviewReason: score.reviewReason ?? null,
         computedAt: score.computedAt,
+        contextKey: contextKey(catalogItemId),
       }
     );
     if (created.records.length === 0) throw new Error(`Prospect not found: ${prospectId}`);
@@ -368,12 +387,13 @@ export async function saveProspectScore(prospectId: string, score: ProspectScore
   }
 }
 
-export async function getProspectScore(prospectId: string): Promise<ProspectScoreRecord | null> {
+export async function getProspectScore(prospectId: string, catalogItemId?: string): Promise<ProspectScoreRecord | null> {
   const session = await getSession();
   try {
     const result = await session.run(
-      `MATCH (p:Prospect {id: $prospectId})-[:HAS_SCORE]->(s:ProspectScore) RETURN s`,
-      { prospectId }
+      `MATCH (p:Prospect {id: $prospectId})-[:HAS_SCORE]->(s:ProspectScore)
+       WHERE coalesce(s.contextKey, 'workspace') = $contextKey RETURN s`,
+      { prospectId, contextKey: contextKey(catalogItemId) }
     );
     if (result.records.length === 0) return null;
     const s = result.records[0].get("s").properties as Record<string, unknown>;
@@ -392,16 +412,18 @@ export async function getProspectScore(prospectId: string): Promise<ProspectScor
 /** Replace the prospect's ProspectQualification with the latest decision. */
 export async function saveProspectQualification(
   prospectId: string,
-  result: ProspectQualificationResult
+  result: ProspectQualificationResult,
+  catalogItemId?: string,
 ): Promise<void> {
   const session = await getSession();
   try {
     await session.run(
       `
       MATCH (l:Prospect {id: $prospectId})-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
+      WHERE coalesce(q.contextKey, 'workspace') = $contextKey
       DETACH DELETE q
       `,
-      { prospectId }
+      { prospectId, contextKey: contextKey(catalogItemId) }
     );
     const created = await session.run(
       `
@@ -417,7 +439,8 @@ export async function saveProspectQualification(
         personaMatchesJson: $personaMatchesJson,
         timingBreakdownJson: $timingBreakdownJson,
         reviewReason: $reviewReason,
-        computedAt: $computedAt
+        computedAt: $computedAt,
+        contextKey: $contextKey
       })
       CREATE (l)-[:HAS_PROSPECT_QUALIFICATION]->(q)
       RETURN q
@@ -433,6 +456,7 @@ export async function saveProspectQualification(
         timingBreakdownJson: JSON.stringify(result.timingBreakdown),
         reviewReason: result.reviewReason ?? null,
         computedAt: result.computedAt,
+        contextKey: contextKey(catalogItemId),
       }
     );
     if (created.records.length === 0) {
@@ -444,16 +468,18 @@ export async function saveProspectQualification(
 }
 
 export async function getProspectQualification(
-  prospectId: string
+  prospectId: string,
+  catalogItemId?: string,
 ): Promise<ProspectQualificationResult | null> {
   const session = await getSession();
   try {
     const result = await session.run(
       `
       MATCH (l:Prospect {id: $prospectId})-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification)
+      WHERE coalesce(q.contextKey, 'workspace') = $contextKey
       RETURN q
       `,
-      { prospectId }
+      { prospectId, contextKey: contextKey(catalogItemId) }
     );
     if (result.records.length === 0) return null;
     const props = result.records[0].get("q").properties as Record<string, unknown>;
@@ -475,7 +501,8 @@ export async function getProspectQualification(
 
 export async function recordResearchRun(
   accountId: string,
-  run: { runType: "full" | "refresh"; refreshedDimensions: string[] }
+  run: { runType: "full" | "refresh"; refreshedDimensions: string[] },
+  catalogItemId?: string,
 ): Promise<ResearchRunRecord> {
   const session = await getSession();
   try {
@@ -486,7 +513,8 @@ export async function recordResearchRun(
         id: randomUUID(),
         runType: $runType,
         refreshedDimensionsJson: $refreshedDimensionsJson,
-        createdAt: localdatetime()
+        createdAt: localdatetime(),
+        contextKey: $contextKey
       })
       CREATE (a)-[:HAS_RESEARCH_RUN]->(r)
       RETURN r
@@ -495,6 +523,7 @@ export async function recordResearchRun(
         accountId,
         runType: run.runType,
         refreshedDimensionsJson: JSON.stringify(run.refreshedDimensions),
+        contextKey: contextKey(catalogItemId),
       }
     );
     if (result.records.length === 0) {
@@ -512,15 +541,16 @@ export async function recordResearchRun(
   }
 }
 
-export async function hasAnyResearchRun(accountId: string): Promise<boolean> {
+export async function hasAnyResearchRun(accountId: string, catalogItemId?: string): Promise<boolean> {
   const session = await getSession();
   try {
     const result = await session.run(
       `
       MATCH (a:Account {id: $accountId})-[:HAS_RESEARCH_RUN]->(r:ResearchRun)
+      WHERE coalesce(r.contextKey, 'workspace') = $contextKey
       RETURN count(r) AS runs
       `,
-      { accountId }
+      { accountId, contextKey: contextKey(catalogItemId) }
     );
     return toNumber(result.records[0].get("runs")) > 0;
   } finally {
@@ -548,6 +578,7 @@ export async function getTouchList(limit = 25): Promise<TouchListEntry[]> {
     const result = await session.run(
       `
       MATCH (l:Prospect)-[:HAS_PROSPECT_QUALIFICATION]->(q:ProspectQualification {status: 'QUALIFIED'})
+      WHERE coalesce(q.contextKey, 'workspace') = coalesce(l.catalogItemId, 'workspace')
       RETURN l, q
       ORDER BY q.timingScore DESC
       LIMIT ${Math.max(1, Math.min(200, Math.floor(limit)))}

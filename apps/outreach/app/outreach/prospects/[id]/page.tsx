@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, use } from "react";
+import { useState, useEffect, useCallback, useRef, use, type ReactNode } from "react";
 import { toast } from "sonner";
-import { ArrowLeft, GitBranch, Loader2, UserX } from "lucide-react";
+import { ArrowLeft, BookOpen, GitBranch, Loader2, UserX } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,6 +57,7 @@ import type {
   ProspectActivity,
 } from "@/products/outreach/domain/types";
 import { callRecordingProspectUrl } from "@/products/outreach/ui/call-recording-link";
+import type { CatalogItem } from "@/products/outreach/domain/catalog";
 
 type ConfirmDelete =
   | { type: "prospect" }
@@ -65,13 +66,21 @@ type ConfirmDelete =
 
 type NurtureFunnel = { id: string; name: string };
 
-export default function ProspectDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export function ProspectDetailPage({
+  params,
+  assistantAction,
+}: {
+  params: Promise<{ id: string }>;
+  assistantAction?: ReactNode;
+}) {
   const { id: routeProspectId } = use(params);
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const prospectId = routeProspectId;
   const [prospect, setProspect] = useState<Prospect | null>(null);
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [updatingCatalog, setUpdatingCatalog] = useState(false);
   const [navigation, setNavigation] = useState<ProspectNavigation | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(true);
   const [navigationError, setNavigationError] = useState(false);
@@ -155,6 +164,57 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     void fetchProspect();
     return () => { cancelled = true; };
   }, [routeProspectId]);
+
+  useEffect(() => {
+    void fetch("/api/outreach/catalog")
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((items: CatalogItem[]) => setCatalog(items))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    function refreshAfterAssistant() {
+      void Promise.all([
+        fetch(`/api/outreach/prospects/${prospectId}`, { cache: "no-store" }),
+        fetch(`/api/outreach/prospects/${prospectId}/outreach`, { cache: "no-store" }),
+        fetch(`/api/outreach/prospects/${prospectId}/notes`, { cache: "no-store" }),
+        fetch(`/api/outreach/prospects/${prospectId}/activities`, { cache: "no-store" }),
+        fetch(`/api/outreach/action-items?prospectId=${encodeURIComponent(prospectId)}`, { cache: "no-store" }),
+      ]).then(async ([prospectResponse, outreachResponse, notesResponse, activitiesResponse, actionsResponse]) => {
+        if (prospectResponse.ok) setProspect(await prospectResponse.json());
+        if (outreachResponse.ok) setOutreachMessages(await outreachResponse.json());
+        if (notesResponse.ok) setNotes(await notesResponse.json());
+        if (activitiesResponse.ok) setActivities(await activitiesResponse.json());
+        if (actionsResponse.ok) {
+          const data = await actionsResponse.json();
+          setActionItems(data.items as ActionItem[]);
+        }
+      }).catch(() => undefined);
+      void fetchDossier({ silent: true });
+    }
+    window.addEventListener("prospect-chat-closed", refreshAfterAssistant);
+    return () => window.removeEventListener("prospect-chat-closed", refreshAfterAssistant);
+  }, [fetchDossier, prospectId]);
+
+  async function handleCatalogChange(value: string) {
+    setUpdatingCatalog(true);
+    try {
+      const response = await fetch(`/api/outreach/prospects/${prospectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ catalogItemId: value === "none" ? null : value }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error ?? "Catalog context could not be updated");
+      setProspect(result);
+      await fetchDossier({ silent: true });
+      toast.success(value === "none" ? "Catalog context cleared" : "Catalog context updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Catalog context could not be updated");
+    } finally {
+      setUpdatingCatalog(false);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -809,6 +869,7 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
         />
         <ProspectHero
           prospect={prospect}
+          assistantAction={assistantAction}
           callRecordingUrl={callRecordingProspectUrl(prospect.id)}
           isDeleting={isDeleting}
           updatingStatus={updatingStatus}
@@ -822,6 +883,23 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
           ) : undefined}
         />
       </div>
+
+      <Card>
+        <CardContent className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center">
+          <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><BookOpen className="size-4" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Catalog context</p>
+            <p className="text-xs text-muted-foreground">Research, qualification, chat, and outreach use the selected commercial angle.</p>
+          </div>
+          <Select disabled={updatingCatalog} value={prospect.catalogItemId ?? "none"} onValueChange={(value) => void handleCatalogChange(value)}>
+            <SelectTrigger className="w-full sm:w-72" aria-label="Catalog context"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No Catalog item selected</SelectItem>
+              {catalog.map((item) => <SelectItem disabled={item.status === "archived" && item.id !== prospect.catalogItemId} key={item.id} value={item.id}>{item.name}{item.status === "archived" ? " (archived)" : ""}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
 
       <ProspectDossierCard
         dossier={dossier}
@@ -1061,3 +1139,5 @@ export default function ProspectDetailPage({ params }: { params: Promise<{ id: s
     </div>
   );
 }
+
+export default ProspectDetailPage;

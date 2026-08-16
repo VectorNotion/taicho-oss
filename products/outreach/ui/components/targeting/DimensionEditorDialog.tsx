@@ -85,12 +85,14 @@ export function DimensionEditorDialog({
   appliesTo,
   dimension,
   onSaved,
+  catalogItemId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appliesTo: DimensionAppliesTo;
   dimension?: DimensionDefinition | null;
   onSaved: () => void;
+  catalogItemId?: string;
 }) {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
@@ -141,6 +143,7 @@ export function DimensionEditorDialog({
           : undefined,
     };
     if (!isEdit) body.key = toKey(form.name);
+    if (!isEdit && catalogItemId) body.catalogItemId = catalogItemId;
 
     setSaving(true);
     try {

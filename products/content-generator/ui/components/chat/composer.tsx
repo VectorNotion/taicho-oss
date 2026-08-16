@@ -14,29 +14,33 @@ import type {
 import type { PublicModelDefinition } from "@content-automation/platform/models/catalog";
 
 export const Composer: FC<{
+  autoFocus?: boolean;
   availability: ChatControlAvailability;
   contactTargets?: ChatContactTarget[];
+  contactLocked?: boolean;
   controls: ChatControls;
   disabled?: boolean;
   modelOptions: PublicModelDefinition[];
   onControlsChange: (controls: ChatControls) => void;
 }> = ({
+  autoFocus = true,
   availability,
   contactTargets,
+  contactLocked = false,
   controls,
   disabled = false,
   modelOptions,
   onControlsChange,
 }) => {
   return (
-    <div className="sticky bottom-0 mx-auto flex w-full max-w-3xl flex-col gap-4 overflow-visible bg-gradient-to-t from-background via-background to-transparent pb-4 pt-6 md:pb-6" data-component="CHAT-05 Composer">
+    <div className="sticky bottom-0 mx-auto flex w-full max-w-3xl flex-col gap-2 overflow-visible bg-gradient-to-t from-background via-background to-transparent pb-3 pt-4 sm:gap-4 sm:pb-4 sm:pt-6 md:pb-6" data-component="CHAT-05 Composer">
       <ThreadScrollToBottom />
       <ComposerPrimitive.Root className="group/input-group relative flex w-full flex-col overflow-visible rounded-2xl border border-primary/25 bg-card shadow-lg shadow-primary/5 transition-[color,box-shadow] outline-none has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-[3px] has-[textarea:focus-visible]:ring-ring/50">
         <ComposerPrimitive.Input
           placeholder="Ask Taicho anything…"
-          className="max-h-48 min-h-24 w-full resize-none bg-transparent px-4 py-4 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
+          className="max-h-48 min-h-20 w-full resize-none bg-transparent px-4 py-4 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0 sm:min-h-24"
           rows={3}
-          autoFocus
+          autoFocus={autoFocus}
           aria-label="Message input"
           disabled={disabled}
         />
@@ -44,6 +48,7 @@ export const Composer: FC<{
           <ComposerControlDock
             availability={availability}
             contactTargets={contactTargets}
+            contactLocked={contactLocked}
             controls={controls}
             disabled={disabled}
             modelOptions={modelOptions}

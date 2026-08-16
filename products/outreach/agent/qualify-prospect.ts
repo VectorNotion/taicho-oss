@@ -42,9 +42,9 @@ const log = createLogger('prospect-qualification');
 export interface QualifyProspectDeps {
   getProspectById: (id: string) => Promise<Prospect | null>;
   resolveAccountForProspect: (prospect: { id: string; company?: string }) => Promise<AccountRecord | null>;
-  getAccountScore: (accountId: string) => Promise<AccountScoreRecord | null>;
-  getProspectScore: (prospectId: string) => Promise<ProspectScoreRecord | null>;
-  saveProspectQualification: (prospectId: string, result: ProspectQualificationResult) => Promise<void>;
+  getAccountScore: (accountId: string, catalogItemId?: string) => Promise<AccountScoreRecord | null>;
+  getProspectScore: (prospectId: string, catalogItemId?: string) => Promise<ProspectScoreRecord | null>;
+  saveProspectQualification: (prospectId: string, result: ProspectQualificationResult, catalogItemId?: string) => Promise<void>;
   updateProspectPriorityByScore: (prospectId: string, score: number) => Promise<unknown>;
   now: () => Date;
   thresholds: QualificationThresholds;
@@ -72,8 +72,8 @@ const loadQualificationContext = traceable(
     const prospect = await deps.getProspectById(prospectId);
     if (!prospect) throw new Error(`Prospect not found: ${prospectId}`);
     const account = await deps.resolveAccountForProspect(prospect);
-    const accountScore = account ? await deps.getAccountScore(account.id) : null;
-    const prospectScore = await deps.getProspectScore(prospectId);
+    const accountScore = account ? await deps.getAccountScore(account.id, prospect.catalogItemId) : null;
+    const prospectScore = await deps.getProspectScore(prospectId, prospect.catalogItemId);
     const loaded = { prospect, account, accountScore, prospectScore };
     return {
       ...loaded,
@@ -170,7 +170,7 @@ export async function runQualifyProspect(
         kind: 'persistence',
         input: { prospectId, qualification, priorityScore: Math.round(icpScore) },
       }, async () => {
-        await d.saveProspectQualification(prospectId, qualification);
+        await d.saveProspectQualification(prospectId, qualification, prospect.catalogItemId);
         await d.updateProspectPriorityByScore(prospectId, Math.round(icpScore));
         return { qualificationWritten: true, priorityWritten: true };
       });
