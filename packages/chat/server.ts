@@ -46,6 +46,7 @@ export type {
   EscalationActor,
 } from './service'
 export { buildDocsCorpus } from './docs-export'
+export { createAssistantRuntime, supportAssistantTenantId } from './runtime-factory'
 export { pruneAssistantData } from './retention'
 export type {
   AssistantRetentionOptions,

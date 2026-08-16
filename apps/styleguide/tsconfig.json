@@ -13,7 +13,6 @@
       "@/components/StatRow": ["./packages/ui/components/StatRow.tsx"],
       "@/components/genui": ["./packages/ui/components/genui/index.ts"],
       "@/lib/utils": ["./packages/ui/lib/utils.ts"],
-      "@/hooks/use-action-stream": ["./packages/ui/hooks/use-action-stream.ts"],
       "@/*": ["./*"]
     }
   },

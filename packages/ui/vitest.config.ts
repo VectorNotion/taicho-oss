@@ -15,7 +15,7 @@ export default defineConfig({
     restoreMocks: true,
     coverage: {
       provider: 'v8',
-      include: ['components/genui/**/*.{ts,tsx}', 'hooks/use-action-stream.ts'],
+      include: ['components/genui/**/*.{ts,tsx}', 'hooks/use-capability-stream.ts'],
       exclude: ['components/genui/index.ts'],
       reporter: ['text', 'json-summary', 'html'],
       thresholds: {

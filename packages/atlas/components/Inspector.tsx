@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useActionStream } from '@/hooks/use-action-stream';
+import { useCapabilityStream } from '@content-automation/ui/hooks/use-capability-stream';
 import type { BrainNode } from '../types';
 import { TYPE_COLOR, TYPE_WORD } from '../palette';
 
@@ -10,30 +10,31 @@ const DRAFT_TYPES = [
   ['linkedin_post', 'LinkedIn post'], ['video_script', 'Video script'],
 ] as const;
 
+/** `api` is a stream-capability rest path under /api/v1, without /stream. */
 type StreamAction = { label: string; api: string; body?: Record<string, unknown> };
 
 function actionsFor(node: BrainNode): { streams: StreamAction[]; open: string | null } {
   switch (node.type) {
     case 'project':
       return {
-        streams: [{ label: 'Re-extract capabilities', api: `/api/content/projects/${node.id}/ingest/stream` }],
+        streams: [{ label: 'Re-extract capabilities', api: `/content/projects/${node.id}/ingest` }],
         open: `/content/projects/${node.id}`,
       };
     case 'topic':
       return {
-        streams: [{ label: 'Generate ideas', api: '/api/content/generate-ideas/stream', body: { count: 5 } }],
+        streams: [{ label: 'Generate ideas', api: '/content/ideas/generate', body: { count: 5 } }],
         open: '/content/topics',
       };
     case 'idea':
       return {
         streams: node.meta.status === 'refined'
           ? []
-          : [{ label: 'Refine', api: `/api/content/ideas/${node.id}/refine/stream` }],
+          : [{ label: 'Refine', api: `/content/ideas/${node.id}/refine` }],
         open: `/content/${node.id}`,
       };
     case 'prospect':
       return {
-        streams: [{ label: 'Re-score fit', api: `/api/outreach/prospects/${node.id}/qualify/stream` }],
+        streams: [{ label: 'Re-score fit', api: `/outreach/prospects/${node.id}/qualify` }],
         open: `/outreach/pipeline/${node.id}`,
       };
     case 'draft':
@@ -63,7 +64,7 @@ function subtitle(node: BrainNode): string {
   }
 }
 
-/** Inner card keyed by node+action so useActionStream binds a fresh route per run. */
+/** Inner card keyed by node+action so useCapabilityStream binds a fresh capability per run. */
 function InspectorCard({ node, onDone, onPulse, onClose }: {
   node: BrainNode;
   onDone: (id: string) => void;
@@ -119,7 +120,7 @@ function InspectorCard({ node, onDone, onPulse, onClose }: {
                 if (e.target.value) {
                   setActive({
                     label: 'Post',
-                    api: `/api/content/ideas/${node.id}/draft/stream`,
+                    api: `/content/ideas/${node.id}/draft`,
                     body: { contentType: e.target.value },
                   });
                 }
@@ -148,7 +149,7 @@ function RunningAction({ action, nodeId, onPulse, onDone, onCancel }: {
   onDone: (id: string) => void;
   onCancel: () => void;
 }) {
-  const stream = useActionStream({ api: action.api });
+  const stream = useCapabilityStream({ api: action.api });
 
   useEffect(() => {
     stream.start(action.body);

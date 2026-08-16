@@ -40,7 +40,7 @@ import {
   type Activity,
 } from "@/components/prospects";
 import type { ActionItem } from "@/products/outreach/domain/action-items";
-import { useActionStream } from "@/hooks/use-action-stream";
+import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
 import {
   Select,
   SelectContent,
@@ -111,19 +111,19 @@ export function ProspectDetailPage({
   const [selectedFunnelId, setSelectedFunnelId] = useState("");
   const [enrollEmail, setEnrollEmail] = useState("");
   const [isEnrolling, setIsEnrolling] = useState(false);
-  const qualifyStream = useActionStream<{ score?: number; notes?: string }, { score?: number }>({
-    api: `/api/outreach/prospects/${prospectId}/qualify/stream`,
+  const qualifyStream = useCapabilityStream<{ score?: number; notes?: string }, { score?: number }>({
+    api: `/outreach/prospects/${prospectId}/qualify`,
   });
   const personResearch = useDimensionResearch(
-    `/api/outreach/prospects/${prospectId}/research/person/stream`,
+    `/outreach/prospects/${prospectId}/research/person`,
     { primaryScope: "person" },
   );
   const accountResearch = useDimensionResearch(
-    `/api/outreach/prospects/${prospectId}/research/account/stream`,
+    `/outreach/prospects/${prospectId}/research/account`,
     { primaryScope: "account" },
   );
-  const outreachGeneration = useActionStream<OutreachDraftPartial, OutreachMessage>({
-    api: `/api/outreach/prospects/${prospectId}/outreach/stream`,
+  const outreachGeneration = useCapabilityStream<OutreachDraftPartial, OutreachMessage>({
+    api: `/outreach/prospects/${prospectId}/outreach`,
   });
   const isGeneratingOutreach = outreachGeneration.isStreaming;
 
@@ -230,9 +230,8 @@ export function ProspectDetailPage({
   // Outreach shell. A successful response enables the cross-product handoff;
   // 403/404 deliberately leave the action hidden.
   useEffect(() => {
-    void fetch("/api/cascade/funnels")
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((funnels: NurtureFunnel[]) => setNurtureFunnels(funnels))
+    void apiGet<{ funnels: NurtureFunnel[] }>("/cascade/funnels")
+      .then((data) => setNurtureFunnels(data.funnels))
       .catch(() => setNurtureFunnels(null));
   }, []);
 
@@ -565,23 +564,17 @@ export function ProspectDetailPage({
     const funnel = nurtureFunnels?.find((item) => item.id === selectedFunnelId);
     setIsEnrolling(true);
     try {
-      const response = await fetch(`/api/cascade/funnels/${selectedFunnelId}/members`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: enrollEmail.trim(),
-          workspaceContactId: prospect.id,
-          attributes: {
-            name: prospect.name,
-            company: prospect.company,
-            title: prospect.title,
-            prospectStatus: prospect.status,
-            source: "outreach",
-          },
-        }),
+      await apiMutate("POST", `/cascade/funnels/${selectedFunnelId}/members`, {
+        email: enrollEmail.trim(),
+        workspaceContactId: prospect.id,
+        attributes: {
+          name: prospect.name,
+          company: prospect.company,
+          title: prospect.title,
+          prospectStatus: prospect.status,
+          source: "outreach",
+        },
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? "Could not add this person");
 
       if (prospect.email !== enrollEmail.trim()) {
         try {

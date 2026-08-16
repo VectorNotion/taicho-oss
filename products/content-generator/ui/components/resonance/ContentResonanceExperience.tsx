@@ -33,7 +33,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 
-import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,7 +71,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReasoningTicker } from "@/components/genui";
 import { LiveDot } from "@/components/LiveDot";
-import { useActionStream } from "@/hooks/use-action-stream";
+import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
 import {
   audienceSliderScale,
   nearestSliderPosition,
@@ -484,8 +484,8 @@ export function ContentResonanceExperience({
   const workbenchRef = React.useRef<HTMLDivElement>(null);
   const startedRef = React.useRef(false);
 
-  const stream = useActionStream<Record<string, unknown>, ContentResonanceExperimentResult>({
-    api: `/api/content/drafts/${draft.id}/resonance/stream`,
+  const stream = useCapabilityStream<Record<string, unknown>, ContentResonanceExperimentResult>({
+    api: `/content/drafts/${draft.id}/resonance`,
   });
 
   const audienceSize = audienceSliderScale(audiencePosition);
@@ -554,18 +554,23 @@ export function ContentResonanceExperience({
     const poll = async () => {
       if (terminal) return;
       try {
-        const response = await fetch(`/api/resonance/runs/${experiment.resonanceJobId}`);
-        if (response.status === 401) {
-          throw new Error("Your session expired. The run is still safe; sign in again to resume live updates.");
+        let body: RunApiBody;
+        try {
+          body = await apiGet<RunApiBody>(`/resonance/runs/${experiment.resonanceJobId}`);
+        } catch (requestError) {
+          if (requestError instanceof ApiError) {
+            if (requestError.status === 401) {
+              throw new Error("Your session expired. The run is still safe; sign in again to resume live updates.");
+            }
+            if (requestError.status === 404) {
+              terminal = true;
+              setRunError("This audience run could not be found.");
+              setState("failed");
+              return;
+            }
+          }
+          throw new Error("Could not read audience progress.");
         }
-        if (response.status === 404) {
-          terminal = true;
-          setRunError("This audience run could not be found.");
-          setState("failed");
-          return;
-        }
-        if (!response.ok) throw new Error("Could not read audience progress.");
-        const body = await response.json() as RunApiBody;
         if (!active) return;
         failures = 0;
         setPollWarning(null);

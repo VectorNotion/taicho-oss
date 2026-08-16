@@ -42,30 +42,50 @@ function json(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
 
-async function adminContext(headers: Headers) {
-  const context = await getAuthorizationContext(headers);
-  if (!context) return { error: json({ error: "Unauthenticated" }, 401), context: null };
-  const organizationAdmin = canManageOrganization(context.role);
-  const teamAdmin = hasAnyRole(context.role, ["team_admin"]);
-  if (!organizationAdmin && !teamAdmin) return { error: json({ error: "Forbidden" }, 403), context: null };
-
+/**
+ * Team-scoped administration access for a workspace actor. Headless core
+ * shared by the legacy Request handler and the admin-console capabilities.
+ */
+export async function getAdminAccess(input: { organizationId: string; userId: string; role: string }) {
+  const organizationAdmin = canManageOrganization(input.role);
+  const teamAdmin = hasAnyRole(input.role, ["team_admin"]);
   const assigned = teamAdmin
     ? await authDatabase
         .select({ teamId: teamAdministratorTable.team_id })
         .from(teamAdministratorTable)
         .innerJoin(memberTable, eq(memberTable.id, teamAdministratorTable.member_id))
         .where(and(
-          eq(memberTable.userId, context.session.user.id),
-          eq(memberTable.organizationId, context.organizationId),
+          eq(memberTable.userId, input.userId),
+          eq(memberTable.organizationId, input.organizationId),
         ))
     : [];
-  return { error: null, context, organizationAdmin, assignedTeamIds: assigned.map((row) => row.teamId) };
+  return { organizationAdmin, teamAdmin, assignedTeamIds: assigned.map((row) => row.teamId) };
 }
 
-async function overview(headers: Headers) {
-  const access = await adminContext(headers);
-  if (access.error || !access.context) return access.error;
-  const { context, organizationAdmin, assignedTeamIds } = access;
+async function adminContext(headers: Headers) {
+  const context = await getAuthorizationContext(headers);
+  if (!context) return { error: json({ error: "Unauthenticated" }, 401), context: null };
+  const access = await getAdminAccess({
+    organizationId: context.organizationId,
+    userId: context.session.user.id,
+    role: context.role,
+  });
+  if (!access.organizationAdmin && !access.teamAdmin) return { error: json({ error: "Forbidden" }, 403), context: null };
+  return { error: null, context, organizationAdmin: access.organizationAdmin, assignedTeamIds: access.assignedTeamIds };
+}
+
+/**
+ * The administration console overview, scoped to the actor's visibility
+ * (organization admins see everything; team admins see their teams).
+ */
+export async function getAdminConsoleOverview(input: {
+  organizationId: string;
+  organizationName: string;
+  userId: string;
+  role: string;
+}) {
+  const { organizationAdmin, assignedTeamIds } = await getAdminAccess(input);
+  const context = { organizationId: input.organizationId, organizationName: input.organizationName };
 
   const [memberRows, teamRows, membershipRows, adminRows] = await Promise.all([
     authDatabase
@@ -106,7 +126,7 @@ async function overview(headers: Headers) {
   const visibleTeamIds = organizationAdmin ? teamsResult.map((team) => team.id) : assignedTeamIds;
   const visibleMemberships = membershipResult.filter((membership) => visibleTeamIds.includes(membership.teamId));
   const visibleUserIds = new Set(visibleMemberships.map((membership) => membership.userId));
-  if (!organizationAdmin) visibleUserIds.add(context.session.user.id);
+  if (!organizationAdmin) visibleUserIds.add(input.userId);
   const members = membersResult
     .filter((member) => organizationAdmin || visibleUserIds.has(member.userId))
     .map((member) => ({
@@ -115,15 +135,26 @@ async function overview(headers: Headers) {
       administeredTeams: adminResult.filter((admin) => admin.memberId === member.id).map((admin) => admin.teamId),
     }));
 
-  return json({
+  return {
     organization: { id: context.organizationId, name: context.organizationName },
-    currentUser: { id: context.session.user.id, role: context.role },
+    currentUser: { id: input.userId, role: input.role },
     access: { organizationAdmin, assignedTeamIds },
     roles: roleDefinitions,
     assignableRoles,
     members,
     teams: teamsResult.filter((team) => visibleTeamIds.includes(team.id)),
-  });
+  };
+}
+
+async function overview(headers: Headers) {
+  const access = await adminContext(headers);
+  if (access.error || !access.context) return access.error;
+  return json(await getAdminConsoleOverview({
+    organizationId: access.context.organizationId,
+    organizationName: access.context.organizationName,
+    userId: access.context.session.user.id,
+    role: access.context.role,
+  }));
 }
 
 async function assertTeamScope(organizationId: string, teamId: string, organizationAdmin: boolean, assignedTeamIds: string[]) {

@@ -17,6 +17,7 @@ import {
   UserPlus,
   UsersRound,
 } from "lucide-react";
+import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { ListRow, ListRows } from "@content-automation/ui/components/ListRow";
 import {
   FilterSelect,
@@ -150,12 +151,7 @@ export function AdminConsole() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin", { cache: "no-store" });
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body.error || "Unable to load administration data");
-      }
-      setData(body);
+      setData(await apiGet<Overview>("/workspace/admin-console"));
     } catch (cause) {
       setMessage({
         type: "error",
@@ -174,19 +170,41 @@ export function AdminConsole() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  // Console actions map onto their registry capabilities on /api/v1.
+  function capabilityRequestFor(action: AdminAction): {
+    method: "POST" | "PATCH" | "PUT" | "DELETE";
+    path: string;
+    body?: Record<string, unknown>;
+  } {
+    const value = (name: string) => encodeURIComponent(String(action[name] ?? ""));
+    switch (action.action) {
+      case "add_member":
+        return { method: "POST", path: "/workspace/members", body: { email: action.email, role: action.role } };
+      case "update_role":
+        return { method: "PATCH", path: `/workspace/members/${value("memberId")}`, body: { role: action.role } };
+      case "remove_member":
+        return { method: "DELETE", path: `/workspace/members/${value("memberId")}`, body: { confirm: true } };
+      case "create_team":
+        return { method: "POST", path: "/workspace/teams", body: { name: action.name } };
+      case "remove_team":
+        return { method: "DELETE", path: `/workspace/teams/${value("teamId")}`, body: { confirm: true } };
+      case "add_team_member":
+        return { method: "PUT", path: `/workspace/teams/${value("teamId")}/members/${value("userId")}`, body: { enabled: true } };
+      case "remove_team_member":
+        return { method: "PUT", path: `/workspace/teams/${value("teamId")}/members/${value("userId")}`, body: { enabled: false } };
+      case "set_team_admin":
+        return { method: "PUT", path: `/workspace/teams/${value("teamId")}/administrators/${value("memberId")}`, body: { enabled: action.enabled === true } };
+      default:
+        throw new Error("Unknown administration action");
+    }
+  }
+
   async function act(key: string, action: AdminAction, success: string) {
     setPending(key);
     setMessage(null);
     try {
-      const response = await fetch("/api/admin", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(action),
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body.error || "The operation could not be completed");
-      }
+      const request = capabilityRequestFor(action);
+      await apiMutate(request.method, request.path, request.body);
       setMessage({ type: "success", text: success });
       await load();
     } catch (cause) {

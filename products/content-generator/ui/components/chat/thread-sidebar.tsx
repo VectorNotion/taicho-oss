@@ -11,8 +11,9 @@ interface ChatThread {
   id: string;
   resourceId: string;
   title?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  // API-served threads arrive as ISO strings; the renderer normalizes below.
+  createdAt: Date | string;
+  updatedAt: Date | string;
   metadata?: Record<string, unknown>;
 }
 

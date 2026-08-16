@@ -16,7 +16,7 @@ import { ListRow, ListRows } from "@/components/ListRow";
 import { ListSurface } from "@/components/ListSurface";
 import { StatRow } from "@/components/StatRow";
 import { ReasoningTicker, StreamSection } from "@/components/genui";
-import { useActionStream } from "@/hooks/use-action-stream";
+import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
 import {
   Dialog,
   DialogContent,
@@ -84,9 +84,9 @@ export default function TopicsPage() {
   // Dismiss confirmation state
   const [dismissTarget, setDismissTarget] = useState<Topic | null>(null);
 
-  const topicsStream = useActionStream<{
+  const topicsStream = useCapabilityStream<{
     topics?: Array<{ display_name?: string; displayName?: string; name?: string }>;
-  }, { topicsCreated: number }>({ api: "/api/content/topics/generate/stream" });
+  }, { topicsCreated: number }>({ api: "/content/topics/extract" });
   const generateLoading = topicsStream.isStreaming;
 
   // Reset Topics state

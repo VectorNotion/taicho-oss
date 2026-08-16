@@ -195,7 +195,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   const [navigationLoading, setNavigationLoading] = useState(true);
   const [navigationError, setNavigationError] = useState(false);
   const research = useDimensionResearch(
-    `/api/outreach/accounts/${id}/research/stream`,
+    `/outreach/accounts/${id}/research`,
     { primaryScope: "account" },
   );
 

@@ -8,7 +8,15 @@ import { permissionForRequest, type ProductId } from '../permissions';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 async function routeFiles(directory: string): Promise<string[]> {
-  const entries = await readdir(directory);
+  let entries: string[];
+  try {
+    entries = await readdir(directory);
+  } catch (error) {
+    // A product whose internal route tree fully migrated onto the capability
+    // registry (spec 2026-08-16 single-registry-surface) has no directory left.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
   const files: string[] = [];
   for (const entry of entries) {
     const absolute = path.join(directory, entry);

@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/PageHeader";
 import { ReasoningTicker, StreamList, StreamSection, StreamingText } from "@/components/genui";
-import { useActionStream } from "@/hooks/use-action-stream";
+import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
 import {
   CONTENT_TYPES,
   CONTENT_TYPE_CONFIG,
@@ -90,14 +90,14 @@ export default function ContentBaseDetailPage({
   const [idea, setIdea] = useState<ContentIdea | null>(null);
   const [drafts, setDrafts] = useState<ContentDraft[]>([]);
   const [loading, setLoading] = useState(true);
-  const refineStream = useActionStream<{
+  const refineStream = useCapabilityStream<{
     outline?: string[]; key_points?: string[]; keyPoints?: string[];
-  }, { refined: true }>({ api: `/api/content/ideas/${id}/refine/stream` });
-  const draftStream = useActionStream<{
+  }, { refined: true }>({ api: `/content/ideas/${id}/refine` });
+  const draftStream = useCapabilityStream<{
     title?: string; introduction?: string; sections?: string[]; conclusion?: string;
     tweets?: string[]; hook?: string; body?: string; main_sections?: string[];
     post?: string; headline?: string; primary_text?: string; description?: string; call_to_action?: string;
-  }, { draftId: string }>({ api: `/api/content/ideas/${id}/draft/stream` });
+  }, { draftId: string }>({ api: `/content/ideas/${id}/draft` });
   const refining = refineStream.isStreaming;
   const generatingDraft = draftStream.isStreaming;
 

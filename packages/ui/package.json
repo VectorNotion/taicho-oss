@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "exports": {
+    "./hooks/use-capability-stream": "./hooks/use-capability-stream.ts",
     "./components/ModelPicker": "./components/ModelPicker.tsx",
     "./components/ListCard": "./components/ListCard.tsx",
     "./components/ListRow": "./components/ListRow.tsx",

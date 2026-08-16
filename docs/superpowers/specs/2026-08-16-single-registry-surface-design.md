@@ -1,6 +1,6 @@
 # Single-Registry Surface: UI on the OAuth API
 
-**Status:** Draft for review
+**Status:** Implemented (2026-08-16) — all four phases landed; §7 remains the one open product decision
 **Date:** 2026-08-16
 **Builds on:** the MCP projection overhaul (landed on main 2026-08-16, commit `3865b64`)
 
@@ -174,7 +174,25 @@ Streaming is **not** on this list — streams are registry citizens via Phase 2.
 - Logic duplication between UI and API: impossible (route files with logic can't exist).
 - Features invisible to automation: impossible (a feature that isn't a capability doesn't work in the UI either).
 
-## 7. Execution order
+## 7. Open decision: standalone product shells
+
+The migration scoped `apps/unified` (the 8GB-host default). The standalone
+shells (`apps/outreach` :3004, `apps/content-generator` :3005) share the
+migrated page components, which now call `/api/v1` — but the open-core
+contract forbids those AGPL shells from importing the commercial
+`@content-automation/capabilities` package, so they cannot mount the
+dispatcher, and (outreach at least) no longer carry their own route trees.
+They build, but their data calls 404 at runtime.
+
+Options, owner's call:
+1. Declare the standalone shells build/prune artifacts only (unified is the
+   runnable app); document it and delete their remaining route trees.
+2. Introduce an open-core seam: an injectable dispatcher interface in the
+   AGPL core that the private repo's build wires to the registry.
+3. Restore thin standalone route trees (recreates the duplication this spec
+   exists to kill — not recommended).
+
+## 8. Execution order
 
 1. Phase 1: session→context adapter **+ the route-allowlist ratchet** (freezes the internal API at 144 before anything else)
 2. Phase 2: stream infra

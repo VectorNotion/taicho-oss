@@ -16,7 +16,7 @@ import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
 import { PageHeader } from "@/components/PageHeader";
 import { EntityChipStream, ReasoningTicker, StreamSection } from "@/components/genui";
-import { useActionStream } from "@/hooks/use-action-stream";
+import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
 import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -36,9 +36,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [project, setProject] = useState<any>(null);
   const [entities, setEntities] = useState<ProjectEntity[]>([]);
   const [entitiesLoading, setEntitiesLoading] = useState(true);
-  const entitiesStream = useActionStream<{
+  const entitiesStream = useCapabilityStream<{
     entities?: Array<{ name: string; type: string }>;
-  }, { entityCount: number }>({ api: `/api/content/projects/${projectId}/ingest/stream` });
+  }, { entityCount: number }>({ api: `/content/projects/${projectId}/ingest` });
   const isReingesting = entitiesStream.isStreaming;
 
   useEffect(() => {

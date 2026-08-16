@@ -14,7 +14,7 @@ import { ListRow, ListRows } from "@/components/ListRow";
 import { FilterSelect, ListSurface } from "@/components/ListSurface";
 import { StatRow } from "@/components/StatRow";
 import { ReasoningTicker, StreamSection } from "@/components/genui";
-import { useActionStream } from "@/hooks/use-action-stream";
+import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -122,8 +122,8 @@ export default function ResearchPage() {
   const [deleteSourceTarget, setDeleteSourceTarget] = useState<ResearchSource | null>(null);
   const [deleteItemTarget, setDeleteItemTarget] = useState<ResearchItem | null>(null);
 
-  const researchStream = useActionStream<unknown, { itemsCreated: number }>({
-    api: "/api/content/research/run/stream",
+  const researchStream = useCapabilityStream<unknown, { itemsCreated: number }>({
+    api: "/content/research/run",
   });
   const runResearchLoading = researchStream.isStreaming;
 

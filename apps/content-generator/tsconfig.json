@@ -20,7 +20,6 @@
       "@/components/ContentCard": ["./products/content-generator/ui/components/ContentCard.tsx"],
       "@/components/ContextView": ["./products/content-generator/ui/components/ContextView.tsx"],
       "@/hooks/use-mobile": ["./packages/ui/hooks/use-mobile.ts"],
-      "@/hooks/use-action-stream": ["./packages/ui/hooks/use-action-stream.ts"],
       "@/lib/utils": ["./packages/ui/lib/utils.ts"],
       "@/*": ["./*"]
     }

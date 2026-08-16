@@ -24,7 +24,7 @@ import {
 } from "@content-automation/database";
 import * as databaseSchema from "@content-automation/database/schema";
 import { authDatabase } from "./database";
-import { ac, canManageOrganization, canOpenAdmin, roles, type ProductAction, type ProductId, permissionForRequest, roleHasPermission } from "./permissions";
+import { ac, canManageOrganization, canOpenAdmin, hasAnyRole, roles, type ProductAction, type ProductId, permissionForRequest, roleHasPermission } from "./permissions";
 import { signupPolicy } from "./signup-policy";
 
 function productionAuthConfiguration() {
@@ -643,6 +643,9 @@ export function sessionScopesForRole(role: string): OAuthScope[] {
     || roleHasPermission(role, "content", "research")
     || roleHasPermission(role, "outreach", "research")
   ) scopes.add("vn:ai:execute");
+  // Team administrators reach the admin-console capabilities; their role
+  // authorization inside each capability still restricts them to their teams.
+  if (hasAnyRole(role, ["team_admin"])) scopes.add("vn:workspace:admin");
   if (canManageOrganization(role)) {
     scopes.add("vn:workspace:write");
     scopes.add("vn:workspace:admin");

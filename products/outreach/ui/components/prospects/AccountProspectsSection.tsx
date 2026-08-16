@@ -108,7 +108,7 @@ function ProspectResearchSurface({
   onComplete: () => void;
 }) {
   const { start, final, error, isStreaming, isComplete, dimensions } = useDimensionResearch(
-    `/api/outreach/prospects/${prospectId}/research/stream`,
+    `/outreach/prospects/${prospectId}/research`,
   );
   const completed = useRef(false);
 

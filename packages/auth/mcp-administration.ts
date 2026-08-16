@@ -136,6 +136,12 @@ export async function getMcpOrganizationAdministration(organizationId: string) {
   };
 }
 
+export async function getMcpActorIdentity(userId: string) {
+  const [user] = await authDatabase.select({ name: userTable.name, email: userTable.email }).from(userTable)
+    .where(eq(userTable.id, userId)).limit(1);
+  return user ?? null;
+}
+
 export async function getMcpActorEmail(userId: string) {
   const [user] = await authDatabase.select({ email: userTable.email }).from(userTable)
     .where(eq(userTable.id, userId)).limit(1);

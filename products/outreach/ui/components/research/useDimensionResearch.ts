@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useActionStream } from "@/hooks/use-action-stream";
+import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
 
 export interface DimensionSignal {
   signal: string;
@@ -40,10 +40,11 @@ const PHASE_ORDER: Record<DimensionLane["phase"], number> = { searching: 0, foun
  * keeping the most advanced phase and merging the fields that arrive with it.
  */
 export function useDimensionResearch(
+  /** Stream-capability rest path under /api/v1, without the /stream suffix. */
   api: string,
   options: { primaryScope?: "person" | "account" } = {},
 ) {
-  const stream = useActionStream<unknown, unknown>({ api });
+  const stream = useCapabilityStream<unknown, unknown>({ api });
   const primaryScope = options.primaryScope ?? "person";
 
   const allDimensions = useMemo(() => {
