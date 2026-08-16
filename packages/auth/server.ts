@@ -610,6 +610,79 @@ export async function getApiAuthorizationContext(headers: Headers): Promise<Exte
   return getExternalAuthorizationContext(headers, "api");
 }
 
+/**
+ * Dashboard sessions call the same /api/v1 surface as OAuth clients. Their
+ * synthetic client id keeps rate limiting and idempotency per-user without an
+ * oauthClient row.
+ */
+export const SESSION_CLIENT_ID_PREFIX = "session:";
+
+/**
+ * Scopes a dashboard session receives, derived from the workspace role. The
+ * registry re-checks role authorization on every call, so scopes here only
+ * bound the surface — they never widen what the role can do.
+ *
+ * vn:commercial:operator is deliberately never session-derived: it is a
+ * platform-operator scope, not a workspace-role scope. Operator capabilities
+ * require an OAuth token explicitly granted that scope.
+ */
+export function sessionScopesForRole(role: string): OAuthScope[] {
+  const scopes = new Set<OAuthScope>(["vn:read", "vn:workspace:read", "vn:operations:read"]);
+  const products: Array<{ product: ProductId; read: OAuthScope; write: OAuthScope }> = [
+    { product: "outreach", read: "vn:outreach:read", write: "vn:outreach:write" },
+    { product: "content", read: "vn:content:read", write: "vn:content:write" },
+    { product: "cascade", read: "vn:cascade:read", write: "vn:cascade:write" },
+  ];
+  for (const { product, read, write } of products) {
+    if (roleHasPermission(role, product, "read")) scopes.add(read);
+    if (roleHasPermission(role, product, "create") || roleHasPermission(role, product, "update")) scopes.add(write);
+  }
+  if (roleHasPermission(role, "content", "publish")) scopes.add("vn:content:publish");
+  if (
+    roleHasPermission(role, "content", "generate")
+    || roleHasPermission(role, "content", "research")
+    || roleHasPermission(role, "outreach", "research")
+  ) scopes.add("vn:ai:execute");
+  if (canManageOrganization(role)) {
+    scopes.add("vn:workspace:write");
+    scopes.add("vn:workspace:admin");
+    scopes.add("vn:integrations:write");
+    scopes.add("vn:billing:write");
+    scopes.add("vn:webhooks:read");
+    scopes.add("vn:webhooks:write");
+    scopes.add("vn:intelligence:read");
+    scopes.add("vn:intelligence:execute");
+    scopes.add("vn:intelligence:outcomes:write");
+  }
+  return [...scopes];
+}
+
+/**
+ * Authenticate a dashboard session as an API caller. Returns null when no
+ * valid session is present so the caller can fall through to its
+ * unauthenticated handling. CSRF defense for cookie-authenticated mutations
+ * is the transport layer's responsibility — this function only mints the
+ * context.
+ */
+export async function getSessionApiAuthorizationContext(headers: Headers): Promise<ExternalAuthorizationContext | null> {
+  const context = await getAuthorizationContext(headers);
+  if (!context) return null;
+  const userId = context.session.user.id;
+  const { session: _session, ...organization } = context;
+  return {
+    ...organization,
+    actor: {
+      type: "user",
+      userId,
+      clientId: `${SESSION_CLIENT_ID_PREFIX}${userId}`,
+      billingUserId: userId,
+    },
+    scopes: sessionScopesForRole(organization.role),
+    resource: "api",
+    claims: {},
+  };
+}
+
 export function requireOAuthScopes(
   context: Pick<ExternalAuthorizationContext, "scopes">,
   requiredScopes: readonly OAuthScope[],

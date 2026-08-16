@@ -936,11 +936,9 @@ export const external_api_rate_limit = pgTable("external_api_rate_limit", {
 }, (table) => [
 	primaryKey({ columns: [table.organization_id, table.oauth_client_id, table.bucket, table.window_start], name: "external_api_rate_limit_pkey" }),
 	index("external_api_rate_limit_expiry_idx").using("btree", table.expires_at.asc().nullsLast()),
-	foreignKey({
-			columns: [table.oauth_client_id],
-			foreignColumns: [oauthClient.clientId],
-			name: "external_api_rate_limit_oauth_client_fk"
-		}).onDelete("cascade"),
+	// oauth_client_id intentionally has no FK: dashboard sessions rate-limit
+	// under synthetic "session:<userId>" client ids that have no oauthClient
+	// row. Cleanup is handled by expiry pruning, not cascade.
 	foreignKey({
 			columns: [table.organization_id],
 			foreignColumns: [organization.id],

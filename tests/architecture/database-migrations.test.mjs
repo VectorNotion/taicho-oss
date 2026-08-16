@@ -95,6 +95,7 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0024_restore_jobs_admin_grant",
       "0025_register_prospect_capture_oauth_client",
       "0026_restore_mastra_agent_workflow_snapshots",
+      "0027_drop_rate_limit_oauth_client_fk",
     ],
   );
 });

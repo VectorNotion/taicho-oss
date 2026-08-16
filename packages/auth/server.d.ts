@@ -196,6 +196,9 @@ export function getExternalAuthorizationContext(
 ): Promise<ExternalAuthorizationContext>;
 export function getMcpAuthorizationContext(headers: Headers): Promise<McpAuthorizationContext>;
 export function getApiAuthorizationContext(headers: Headers): Promise<ExternalAuthorizationContext>;
+export const SESSION_CLIENT_ID_PREFIX: "session:";
+export function sessionScopesForRole(role: string): OAuthScope[];
+export function getSessionApiAuthorizationContext(headers: Headers): Promise<ExternalAuthorizationContext | null>;
 export function requireOAuthScopes(
   context: Pick<ExternalAuthorizationContext, "scopes">,
   requiredScopes: readonly OAuthScope[],

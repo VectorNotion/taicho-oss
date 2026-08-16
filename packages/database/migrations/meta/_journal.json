@@ -190,6 +190,13 @@
       "when": 1786925400000,
       "tag": "0026_restore_mastra_agent_workflow_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1786925500000,
+      "tag": "0027_drop_rate_limit_oauth_client_fk",
+      "breakpoints": true
     }
   ]
 }
