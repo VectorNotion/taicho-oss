@@ -65,6 +65,11 @@ export async function observeOperation<T>(
   const attributes: Attributes = {
     ...safeAttributes(normalizedInput.attributes),
     "taicho.operation": operation,
+    // Every observeOperation span is a deliberate business span and must
+    // survive the workflow-focused export filter: exporting only the inner
+    // semantic spans orphans them from their parents and renders the trace
+    // flat in the backend.
+    "taicho.trace.category": "workflow",
   };
 
   const parentContext = normalizedInput.traceCarrier?.traceparent
