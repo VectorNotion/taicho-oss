@@ -46,14 +46,19 @@ function obsFor(dimension: DimensionDefinition, researchedAt = NOW.toISOString()
   };
 }
 
-interface Rec { researched: string[][]; savedScore: { icpScore: number; timingScore: number; hardExcluded: boolean } | null; progress: DimensionProgress[] }
+interface Rec {
+  researched: string[][];
+  savedScore: { icpScore: number; timingScore: number; hardExcluded: boolean } | null;
+  progress: DimensionProgress[];
+  opportunityRefreshes: string[];
+}
 
 function makeDeps(config: {
   matchScores?: Record<string, { score: number; hardExclusion?: boolean }>;
   existing?: ObservationRecord[];
   hasRun?: boolean;
 }): { deps: Partial<AccountResearchDeps>; rec: Rec } {
-  const rec: Rec = { researched: [], savedScore: null, progress: [] };
+  const rec: Rec = { researched: [], savedScore: null, progress: [], opportunityRefreshes: [] };
   const store = [...(config.existing ?? [])];
   const deps: Partial<AccountResearchDeps> = {
     cascade: false,
@@ -85,6 +90,10 @@ function makeDeps(config: {
     recordResearchRun: async () => undefined,
     hasAnyResearchRun: async () => config.hasRun ?? false,
     saveAccountScore: async (_id, score) => { rec.savedScore = { icpScore: score.icpScore, timingScore: score.timingScore, hardExcluded: score.hardExcluded }; },
+    refreshAccountOpportunityAngles: async (input) => {
+      rec.opportunityRefreshes.push(input.account.id);
+      return { count: 2 };
+    },
     now: () => NOW,
     onDimension: (p) => rec.progress.push(p),
   };
@@ -100,6 +109,8 @@ test('runAccountResearch researches account fit+timing only, scores, ignores pro
   assert.ok(Math.abs(result.icpScore - 85) < 1e-6, 'icp = mean(0.9,0.8)×100');
   assert.equal(result.timingScore, 100, 'fresh signal → full heat');
   assert.equal(result.hardExcluded, false);
+  assert.equal(result.opportunityCount, 2);
+  assert.deepEqual(rec.opportunityRefreshes, ['acct-1']);
   assert.equal(rec.savedScore?.icpScore.toFixed(0), '85');
   assert.equal(rec.savedScore?.timingScore, 100);
 
@@ -108,6 +119,18 @@ test('runAccountResearch researches account fit+timing only, scores, ignores pro
   assert.ok(keys.has('icp_a') && keys.has('hiring_activity'));
   assert.ok(!keys.has('persona_a'), 'prospect dims never appear in account research');
   assert.ok(rec.progress.some((p) => p.phase === 'matched' && p.dimensionKey === 'icp_a'));
+});
+
+test('Catalog-scoped account research does not rewrite account opportunity angles', async () => {
+  const { deps, rec } = makeDeps({});
+  const result = await runAccountResearch('acct-1', {
+    ...deps,
+    catalogItemId: 'catalog-1',
+    commercialContext: 'Catalog item: Product one',
+  });
+
+  assert.equal(result.opportunityCount, null);
+  assert.deepEqual(rec.opportunityRefreshes, []);
 });
 
 test('hard exclusion on an account fit dimension propagates to the account score', async () => {

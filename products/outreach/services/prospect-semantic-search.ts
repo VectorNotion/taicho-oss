@@ -204,7 +204,7 @@ export function buildProspectKnowledgeSources(input: {
   return sources.filter((source) => source.content.length > 0);
 }
 
-async function embedTexts(
+export async function embedTexts(
   config: ProspectSemanticSearchConfig,
   inputs: string[],
   inputType?: string,
@@ -239,7 +239,7 @@ async function embedTexts(
         : typeof body?.error?.message === 'string'
           ? body.error.message
           : `HTTP ${response.status}`;
-      throw new Error(`The prospect embedding provider rejected the request: ${detail}`);
+      throw new Error(`The embedding provider rejected the request: ${detail}`);
     }
     const result = await response.json() as {
       data?: Array<{ index?: number; embedding?: unknown }>;
@@ -256,7 +256,7 @@ async function embedTexts(
       ))
     ) {
       throw new Error(
-        `The prospect embedding provider did not return ${config.embeddingDimensions}-dimension vectors.`,
+        `The embedding provider did not return ${config.embeddingDimensions}-dimension vectors.`,
       );
     }
     allEmbeddings.push(...embeddings as number[][]);

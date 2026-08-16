@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
@@ -18,7 +19,8 @@ import {
   Check,
   ArrowRight,
   ExternalLink,
-  Loader2,
+  Lightbulb,
+  RefreshCw,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -26,15 +28,18 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/PageHeader";
 import { ListRow, ListRows } from "@/components/ListRow";
-import { ListSurface } from "@/components/ListSurface";
+import { FilterSelect, ListSurface } from "@/components/ListSurface";
 import { StatRow } from "@/components/StatRow";
-import { ReasoningTicker, StreamSection } from "@/components/genui";
-import { useActionStream } from "@/hooks/use-action-stream";
 import type {
   ContentIdea,
   ContentDraft,
   ContentType,
 } from "@/products/content-generator/domain/content";
+import type {
+  ContentInsight,
+  ContentInsightFeed,
+  ContentInsightState,
+} from "@/products/content-generator/domain/content-insight";
 
 const typeConfig: Record<ContentType, { icon: React.ElementType; label: string }> = {
   video_script: { icon: Video, label: "YouTube" },
@@ -53,11 +58,21 @@ const priorityConfig = {
 };
 
 const statusConfig = {
-  idea: { label: "Angle", variant: "secondary" as const },
+  idea: { label: "Idea", variant: "secondary" as const },
   refined: { label: "Content Base", variant: "default" as const },
   draft: { label: "Post", variant: "secondary" as const },
   ready: { label: "Ready", variant: "default" as const },
   published: { label: "Published", variant: "default" as const },
+};
+
+const insightStateConfig: Record<ContentInsightState, {
+  label: string;
+  variant: "default" | "secondary" | "outline";
+}> = {
+  content_gap: { label: "Content needed", variant: "default" },
+  solution_gap: { label: "Solution gap", variant: "secondary" },
+  account_ineligible: { label: "Account ineligible", variant: "outline" },
+  covered: { label: "Covered", variant: "outline" },
 };
 
 const performanceConfig = {
@@ -67,41 +82,35 @@ const performanceConfig = {
 };
 
 export default function ContentPage() {
+  const router = useRouter();
   const [ideas, setIdeas] = useState<ContentIdea[]>([]);
   const [drafts, setDrafts] = useState<ContentDraft[]>([]);
-  const [counts, setCounts] = useState({
-    totalIdeas: 0,
-    totalDrafts: 0,
-    byIdeaStatus: {} as Record<string, number>,
-    byDraftStatus: {} as Record<string, number>,
-    byType: {} as Record<string, number>,
-  });
+  const [insightFeed, setInsightFeed] = useState<ContentInsightFeed | null>(null);
   const [loading, setLoading] = useState(true);
+  const [creatingInsightId, setCreatingInsightId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const ideasStream = useActionStream<{
-    ideas?: Array<{ title?: string; description?: string; priority?: string }>;
-  }, { ideasCreated: number }>({ api: "/api/content/generate-ideas/stream" });
-  const generating = ideasStream.isStreaming;
+  const [insightState, setInsightState] = useState<ContentInsightState | "all">("content_gap");
 
   const fetchData = async (signal?: AbortSignal) => {
+    setLoading(true);
     try {
-      const [ideasRes, draftsRes, countsRes] = await Promise.all([
+      const [insightsRes, ideasRes, draftsRes] = await Promise.all([
+        fetch("/api/content/insights", { signal }),
         fetch("/api/content/ideas", { signal }),
         fetch("/api/content/drafts", { signal }),
-        fetch("/api/content/counts", { signal }),
       ]);
 
       if (signal?.aborted) return;
+      if (insightsRes.ok) {
+        setInsightFeed(await insightsRes.json());
+      }
       if (ideasRes.ok) {
         setIdeas(await ideasRes.json());
       }
       if (draftsRes.ok) {
         setDrafts(await draftsRes.json());
       }
-      if (countsRes.ok) {
-        setCounts(await countsRes.json());
-      }
-      if (!ideasRes.ok || !draftsRes.ok || !countsRes.ok) {
+      if (!insightsRes.ok || !ideasRes.ok || !draftsRes.ok) {
         toast.error("Could not load some content. Refresh to try again.");
       }
     } catch {
@@ -118,13 +127,41 @@ export default function ContentPage() {
     return () => controller.abort();
   }, []);
 
-  const handleGenerateIdeas = () => ideasStream.start({ count: 5 });
-  useEffect(() => { if (ideasStream.final) void fetchData(); }, [ideasStream.final]);
-  useEffect(() => { if (ideasStream.error) toast.error(ideasStream.error); }, [ideasStream.error]);
+  const createIdeaFromInsight = async (insight: ContentInsight) => {
+    setCreatingInsightId(insight.id);
+    try {
+      const response = await fetch(
+        `/api/content/insights/${encodeURIComponent(insight.id)}/idea`,
+        { method: "POST" },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error || "Could not create a content idea.");
+      }
+      const idea = body as ContentIdea;
+      setIdeas((current) => [idea, ...current.filter((item) => item.id !== idea.id)]);
+      toast.success("Content idea created from the calculated gap.");
+      router.push(`/content/${idea.id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create a content idea.");
+    } finally {
+      setCreatingInsightId(null);
+    }
+  };
 
   const publishedDrafts = drafts.filter((d) => d.status === "published");
   const activeDrafts = drafts.filter((d) => d.status !== "published");
   const normalizedSearch = searchQuery.trim().toLowerCase();
+  const insights = insightFeed?.insights ?? [];
+  const filteredInsights = insights.filter((insight) =>
+    (insightState === "all" || insight.state === insightState)
+    && [
+      insight.title,
+      insight.providerLabel,
+      insight.context?.label ?? "",
+      insight.supportingMatch?.label ?? "",
+      insight.reason,
+    ].join(" ").toLowerCase().includes(normalizedSearch));
   const filteredIdeas = ideas.filter((idea) => [
     idea.title,
     idea.description,
@@ -146,103 +183,156 @@ export default function ContentPage() {
 
   const stats = [
     {
-      label: "Content Bases",
-      value: counts.totalIdeas.toLocaleString(),
-      description: `${(counts.byIdeaStatus?.refined || 0).toLocaleString()} built from angles`,
-    },
-    {
-      label: "Posts",
-      value: counts.totalDrafts.toLocaleString(),
-      description: `${(counts.byDraftStatus?.draft || 0).toLocaleString()} created`,
-    },
-    {
-      label: "Ready",
-      value: (counts.byDraftStatus?.ready || 0).toLocaleString(),
-      description: "Waiting for publishing",
-    },
-    {
       featured: true,
-      label: "Published",
-      value: (counts.byDraftStatus?.published || 0).toLocaleString(),
-      description: "Completed content",
+      label: "Content gaps",
+      value: (insightFeed?.summary.contentGaps ?? 0).toLocaleString(),
+      description: "Eligible demand with solution coverage but insufficient published content",
+    },
+    {
+      label: "Accounts blocked",
+      value: (insightFeed?.summary.blockedContexts ?? 0).toLocaleString(),
+      description: "Distinct accounts currently held back by a content gap",
+    },
+    {
+      label: "Solution gaps",
+      value: (insightFeed?.summary.solutionGaps ?? 0).toLocaleString(),
+      description: "Opportunities requiring catalogue or product coverage first",
+    },
+    {
+      label: "Touch ready",
+      value: (insightFeed?.summary.covered ?? 0).toLocaleString(),
+      description: "Eligible opportunities with both solution and content coverage",
     },
   ];
-
-  const generateButton = (
-    <Button onClick={handleGenerateIdeas} disabled={generating}>
-      {generating ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : (
-        <Sparkles className="h-4 w-4" />
-      )}
-      Generate angles
-    </Button>
-  );
 
   return (
     <div className="w-full min-w-0">
       <PageHeader
         title="Content"
-        description="Content Bases and the Posts created from them"
-        actions={generateButton}
+        description="Demand insights, Content Bases, and the Posts created from them"
+        actions={(
+          <Button disabled={loading} onClick={() => void fetchData()} variant="outline">
+            <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            Refresh insights
+          </Button>
+        )}
       />
       <div className="space-y-8">
-        {ideasStream.isStreaming && (
-          <div className="space-y-4" aria-live="polite" data-testid="ideas-stream">
-            <ReasoningTicker text={ideasStream.reasoning} active />
-            <StreamSection title="Generating angles" state="streaming">
-              <div className="grid gap-3">
-                {(ideasStream.partial?.ideas ?? []).filter((idea) => idea?.title).map((idea, index) => (
-                  <div key={index} className="animate-in fade-in slide-in-from-bottom-2 rounded-lg border bg-card p-4 duration-300">
-                    <div className="font-medium">{idea.title}</div>
-                    {idea.description && <div className="mt-1 text-sm text-muted-foreground">{idea.description}</div>}
-                  </div>
-                ))}
-              </div>
-            </StreamSection>
-          </div>
-        )}
         <StatRow isLoading={loading} stats={stats} />
 
         {/* Tabs */}
         <Tabs
           className="space-y-4"
-          defaultValue="ideas"
+          defaultValue="insights"
           onValueChange={() => setSearchQuery("")}
         >
           <TabsList>
+            <TabsTrigger value="insights">Insights ({insights.length})</TabsTrigger>
             <TabsTrigger value="ideas">Content Bases ({ideas.length})</TabsTrigger>
             <TabsTrigger value="drafts">Posts ({activeDrafts.length})</TabsTrigger>
             <TabsTrigger value="published">Published ({publishedDrafts.length})</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="insights" className="space-y-4">
+            <ListSurface
+              count={filteredInsights.length}
+              description="Calculated demand from product modules. Outreach is the first provider; gaps are recalculated from current coverage."
+              emptyState={(
+                <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+                  <Lightbulb className="mb-4 h-8 w-8 text-muted-foreground" />
+                  <p className="max-w-xl text-sm text-muted-foreground">
+                    {searchQuery
+                      ? `No insights match “${searchQuery}”.`
+                      : insightState === "content_gap"
+                        ? "No actionable content gaps right now. Research accounts in Outreach to create opportunity demand."
+                        : "No calculated insights in this state."}
+                  </p>
+                  {searchQuery ? (
+                    <Button className="mt-4" onClick={() => setSearchQuery("")} variant="outline">
+                      Clear search
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+              filters={(
+                <FilterSelect
+                  label="State"
+                  onValueChange={(value) => setInsightState(value as ContentInsightState | "all")}
+                  options={[
+                    { value: "content_gap", label: "Content needed" },
+                    { value: "solution_gap", label: "Solution gaps" },
+                    { value: "account_ineligible", label: "Ineligible accounts" },
+                    { value: "covered", label: "Covered" },
+                    { value: "all", label: "All insights" },
+                  ]}
+                  value={insightState}
+                />
+              )}
+              isLoading={loading}
+              onSearchChange={setSearchQuery}
+              searchPlaceholder="Search insights…"
+              searchValue={searchQuery}
+              title="Demand insights"
+            >
+              {!loading && filteredInsights.length > 0 ? (
+                <ListRows>
+                  {filteredInsights.map((insight: ContentInsight) => {
+                    const state = insightStateConfig[insight.state];
+                    return (
+                      <ListRow
+                        actions={insight.state === "content_gap" ? [{
+                          disabled: creatingInsightId != null,
+                          icon: PenLine,
+                          label: creatingInsightId === insight.id
+                            ? "Creating content idea"
+                            : "Create content idea",
+                          onSelect: () => void createIdeaFromInsight(insight),
+                        }] : []}
+                        badge={<Badge variant={state.variant}>{state.label}</Badge>}
+                        detail={<p className="text-xs leading-5 text-muted-foreground">{insight.reason}</p>}
+                        key={insight.id}
+                        meta={[
+                          insight.providerLabel,
+                          insight.context?.label ?? "Workspace demand",
+                          insight.supportingMatch
+                            ? `${insight.supportingMatch.label} ${insight.supportingMatch.score}%`
+                            : "No catalogue match",
+                          `Content ${insight.currentContentScore}% / ${insight.contentThreshold}% required`,
+                          insight.context?.fitScore != null ? `ICP ${Math.round(insight.context.fitScore)}%` : "ICP unscored",
+                          insight.context?.timingScore != null ? `Timing ${Math.round(insight.context.timingScore)}%` : "No timing",
+                        ]}
+                        title={insight.title}
+                      />
+                    );
+                  })}
+                </ListRows>
+              ) : null}
+            </ListSurface>
+            {insightFeed?.calculationStatus !== "ready" ? (
+              <p className="text-xs text-muted-foreground">
+                {insightFeed?.unavailableReasons.join(" ") || "Some insight providers are unavailable."}
+              </p>
+            ) : null}
+          </TabsContent>
+
           {/* Ideas Tab */}
           <TabsContent value="ideas" className="space-y-4">
             <ListSurface
               count={filteredIdeas.length}
-              description="Angles and the Content Bases built from them."
+              description="Ideas and the Content Bases built from them."
               emptyState={
                 <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
                   <Sparkles className="mb-4 h-8 w-8 text-muted-foreground" />
                   <p className="mb-4 text-sm text-muted-foreground">
                     {searchQuery
                       ? `No Content Bases match “${searchQuery}”.`
-                      : "Generate an angle, then build it into a Content Base."}
+                      : "Content ideas and refined Content Bases appear here."}
                   </p>
                   {searchQuery ? (
                     <Button onClick={() => setSearchQuery("")} variant="outline">
                       Clear search
                     </Button>
-                  ) : (
-                    <Button variant="outline" onClick={handleGenerateIdeas} disabled={generating}>
-                      {generating ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-4 w-4" />
-                      )}
-                      Generate angles
-                    </Button>
-                  )}
+                  ) : null}
                 </div>
               }
               isLoading={loading}

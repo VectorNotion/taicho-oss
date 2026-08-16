@@ -10,6 +10,7 @@
     "./data/research-repository": "./data/research-repository.ts",
     "./data/topic-repository": "./data/topic-repository.ts",
     "./domain/content": "./domain/content.ts",
+    "./domain/content-insight": "./domain/content-insight.ts",
     "./domain/content-export": "./domain/content-export.ts",
     "./domain/generated-content": "./domain/generated-content.ts",
     "./domain/posting-reminder": "./domain/posting-reminder.ts",

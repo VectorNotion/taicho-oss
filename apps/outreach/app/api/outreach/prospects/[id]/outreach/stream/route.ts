@@ -4,6 +4,7 @@ import { runWithGraphOrganization } from '@content-automation/platform/data/grap
 import { releaseReservation, settleReservation } from '@content-automation/platform/commercial';
 import { createLogger } from '@content-automation/observability';
 import { streamOutreach } from '@/products/outreach/agent/generator';
+import { OutreachOpportunityBlockedError } from '@/products/outreach/services/outreach-opportunity-context';
 import type { OutreachMedium } from '@/products/outreach/domain/types';
 
 export const maxDuration = 600;
@@ -91,7 +92,11 @@ export async function POST(
           writer.write({
             type: 'data-action-error',
             id: 'error',
-            data: { message: 'Could not generate this outreach draft.' },
+            data: {
+              message: error instanceof OutreachOpportunityBlockedError
+                ? error.message
+                : 'Could not generate this outreach draft.',
+            },
           } as never);
         }
       },

@@ -42,6 +42,7 @@ import {
   type TimingDimensionBreakdown,
 } from '../domain/qualification';
 import { summarizeDatabaseRead } from './research-tracing';
+import { refreshAccountOpportunityAngles as refreshAccountOpportunityAnglesDefault } from './account-opportunities';
 
 const log = createLogger('account-research');
 
@@ -86,6 +87,7 @@ export interface AccountResearchDeps {
   /** Recompute an already-researched prospect against this account's new score. */
   qualifyProspect: (prospectId: string) => Promise<unknown>;
   onProspect?: (part: { prospectId: string; phase: 'researching' }) => void;
+  refreshAccountOpportunityAngles: typeof refreshAccountOpportunityAnglesDefault;
 }
 
 export interface AccountResearchResult {
@@ -94,6 +96,8 @@ export interface AccountResearchResult {
   hardExcluded: boolean;
   icpMatches: DimensionMatch[];
   timingBreakdown: TimingDimensionBreakdown[];
+  /** Null for Catalog-scoped research; opportunity angles belong to the account baseline. */
+  opportunityCount: number | null;
 }
 
 const defaultDeps: AccountResearchDeps = {
@@ -125,6 +129,7 @@ const defaultDeps: AccountResearchDeps = {
     const { runQualifyProspect } = await import('./qualify-prospect');
     return runQualifyProspect(prospectId);
   },
+  refreshAccountOpportunityAngles: refreshAccountOpportunityAnglesDefault,
   now: () => new Date(),
   thresholds: DEFAULT_THRESHOLDS,
 };
@@ -410,6 +415,28 @@ export async function runAccountResearch(
         return { matchesWritten: icpMatches.length, scoreWritten: true, researchRunWritten: true };
       });
 
+      const opportunityCount = d.catalogItemId
+        ? null
+        : await observeWorkflowStep('research.account.generate_opportunity_angles', {
+            kind: 'generation',
+            input: {
+              accountId,
+              researchRunId: runId,
+              observationCount: observations.length,
+            },
+          }, async () => {
+            const result = await d.refreshAccountOpportunityAngles({
+              account,
+              dimensions: allAccountDims,
+              observations,
+              matches: icpMatches,
+              timingBreakdown: timing.breakdown,
+              researchRunId: runId,
+              generatedAt: now.toISOString(),
+            });
+            return { opportunityCount: result.count };
+          }).then((result) => result.opportunityCount);
+
       log.info('outreach.account_research.completed', {
         account_id: accountId,
         icp_score: icpScore,
@@ -454,6 +481,7 @@ export async function runAccountResearch(
         icpScore,
         timingScore: timing.score,
         hardExcluded,
+        opportunityCount,
         icpMatches,
         timingBreakdown: timing.breakdown,
       };

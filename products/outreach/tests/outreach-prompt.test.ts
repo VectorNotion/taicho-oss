@@ -13,6 +13,7 @@ import type {
   ProspectResearch,
   OutreachMessage,
 } from '../domain/types';
+import type { OutreachOpportunityContext } from '../services/outreach-opportunity-context';
 
 const prospect: Prospect = {
   id: 'prospect-1',
@@ -105,6 +106,58 @@ test('outreach prompt enforces a customer-first pain, path, next-step structure'
   assert.match(completeInstructions, /omit weak or adjacent proof/i);
   assert.doesNotMatch(prompt, /Open with something TRUE about your work/);
   assert.doesNotMatch(prompt, /Reference your ACTUAL documented work/);
+});
+
+test('outreach prompt receives the account opportunity and its deterministic matches', () => {
+  const opportunityContext: OutreachOpportunityContext = {
+    account: {
+      id: 'account-1',
+      name: 'Analytical Engines',
+      icpScore: 88,
+      timingScore: 73,
+      hardExcluded: false,
+    },
+    coverage: {
+      calculationStatus: 'ready',
+      accountEligible: true,
+      thresholds: { solution: 65, content: 65 },
+      opportunities: [{
+        id: 'opportunity-1',
+        accountId: 'account-1',
+        angle: 'Reduce manual operational review work.',
+        sourceDimensionKeys: ['manual_work'],
+        evidence: ['https://example.test/evidence'],
+        evidenceConfidence: 0.9,
+        researchRunId: 'research-1',
+        generatedAt: '2026-08-16T00:00:00.000Z',
+        solutionMatches: [{
+          catalogItemId: 'catalog-1',
+          name: 'Workflow Automation',
+          kind: 'service',
+          summary: 'Automates repeated operational workflows.',
+          score: 91,
+        }],
+        contentMatches: [{
+          contentId: 'content-1',
+          title: 'Operational review playbook',
+          type: 'blog_post',
+          publishedUrl: 'https://example.test/review-playbook',
+          score: 82,
+        }],
+        coverage: { solutionGap: false, contentGap: false, touchReady: true },
+      }],
+    },
+  };
+  const prompt = buildOutreachPrompt(prospect, research, 'email', undefined, {
+    opportunityContext,
+  });
+
+  assert.match(prompt, /Reduce manual operational review work\./);
+  assert.match(prompt, /Workflow Automation/);
+  assert.match(prompt, /Automates repeated operational workflows\./);
+  assert.match(prompt, /https:\/\/example\.test\/review-playbook/);
+  assert.match(prompt, /Anchor the message in exactly one opportunity where coverage\.touchReady is true/);
+  assert.match(prompt, /Never expose match scores, thresholds, gap labels/);
 });
 
 test('workspace templates compile documented variables without invoking a model', () => {

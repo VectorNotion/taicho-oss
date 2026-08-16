@@ -6,6 +6,10 @@ import {
   updateOutreachMessage,
   deleteOutreachMessage,
 } from '@/products/outreach/data/prospect-repository';
+import {
+  evaluateOutreachOpportunityReadiness,
+  getOutreachOpportunityContext,
+} from '@/products/outreach/services/outreach-opportunity-context';
 
 export const maxDuration = 600;
 
@@ -46,6 +50,17 @@ export async function PATCH(
     const existing = await getOutreachById(messageId);
     if (!existing || existing.prospectId !== id) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 });
+    }
+    if (body?.status === 'sent' && existing.status !== 'sent') {
+      const readiness = evaluateOutreachOpportunityReadiness(
+        await getOutreachOpportunityContext(id),
+      );
+      if (!readiness.ready) {
+        return NextResponse.json(
+          { error: readiness.message, code: readiness.code },
+          { status: 409 },
+        );
+      }
     }
     const message = await updateOutreachMessage(messageId, body);
     if (!message) {

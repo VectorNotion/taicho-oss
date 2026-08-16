@@ -26,6 +26,12 @@ import { getProspectIntelligenceWorkspace } from '../data/prospect-intelligence-
 import { getActiveOutreachPromptVersion } from '../data/outreach-prompt-repository';
 import { getProspectCatalogItem } from '../data/catalog-repository';
 import type { CatalogItem } from '../domain/catalog';
+import type { OutreachOpportunityContext } from '../services/outreach-opportunity-context';
+import {
+  evaluateOutreachOpportunityReadiness,
+  getOutreachOpportunityContext,
+  requireOutreachOpportunityReadiness,
+} from '../services/outreach-opportunity-context';
 import type {
   Prospect,
   ProspectActivity,
@@ -73,6 +79,7 @@ export interface GenerateOutreachResult {
   success: boolean;
   message?: OutreachMessage;
   error?: string;
+  errorCode?: "opportunity_coverage_blocked";
 }
 
 export interface OutreachStreamCallbacks {
@@ -102,6 +109,7 @@ export interface OutreachPromptContext {
   priorMessages?: OutreachMessage[];
   intelligence?: ProspectIntelligenceWorkspace | null;
   catalogItem?: CatalogItem | null;
+  opportunityContext?: OutreachOpportunityContext | null;
 }
 
 function compactText(value: string | undefined, limit = 1_500): string | undefined {
@@ -163,6 +171,20 @@ function groundedProspectContext(
       researchGuidance: context.catalogItem.researchGuidance,
       voice: context.catalogItem.voice || null,
     } : null,
+    accountOpportunityCoverage: context.opportunityContext ? {
+      account: context.opportunityContext.account,
+      calculationStatus: context.opportunityContext.coverage.calculationStatus,
+      thresholds: context.opportunityContext.coverage.thresholds,
+      opportunities: context.opportunityContext.coverage.opportunities.map((opportunity) => ({
+        id: opportunity.id,
+        angle: opportunity.angle,
+        evidence: opportunity.evidence,
+        evidenceConfidence: opportunity.evidenceConfidence,
+        solutionMatches: opportunity.solutionMatches.slice(0, 3),
+        contentMatches: opportunity.contentMatches.slice(0, 3),
+        coverage: opportunity.coverage,
+      })),
+    } : null,
     research: research ? {
       industry: research.industry,
       companySummary: research.companySummary,
@@ -211,6 +233,9 @@ ${groundedProspectContext(prospect, research, context)}
 </prospect_context>
 
 Use this context to understand the relationship and avoid repeating prior outreach. Do not mention internal notes, transcripts, pipeline status, inferred sentiment, or private activity tracking. Do not claim you "saw" or "noticed" research unless the task is a direct content comment.
+${context.opportunityContext ? `
+The account opportunity coverage above is an authoritative system calculation. Anchor the message in exactly one opportunity where coverage.touchReady is true. Use that opportunity's matched offering and published content as the supported path; do not borrow a blocked opportunity. Never expose match scores, thresholds, gap labels, or internal readiness language to the recipient.
+` : ''}
 `;
 
   // Talking points are possible customer problems, not sender-centric hooks.
@@ -344,6 +369,20 @@ export async function generateOutreach(
     return { success: false, error: `Prospect not found: ${prospectId}` };
   }
 
+  const opportunityContext = await getOutreachOpportunityContext(prospectId);
+  const opportunityReadiness = evaluateOutreachOpportunityReadiness(opportunityContext);
+  if (!opportunityReadiness.ready) {
+    log.warn('outreach.generation.blocked_by_opportunity_coverage', {
+      prospect_id: prospectId,
+      code: opportunityReadiness.code,
+    });
+    return {
+      success: false,
+      error: opportunityReadiness.message,
+      errorCode: "opportunity_coverage_blocked",
+    };
+  }
+
   const organizationId = currentExecutionContext()?.organizationId;
   const intelligencePromise = organizationId
     ? getProspectIntelligenceWorkspace(organizationId, prospectId).catch(() => {
@@ -370,6 +409,7 @@ export async function generateOutreach(
     priorMessages,
     intelligence,
     catalogItem,
+    opportunityContext,
   }, promptVersion.content);
 
   // Create agent with user's identity/voice/mission
@@ -450,12 +490,15 @@ export async function streamOutreach(
   log.info('outreach.generation_stream.started', { prospect_id: prospectId, medium });
   callbacks.onProgress?.({
     id: 'context',
-    label: '1. Identify their industry pain and business consequence',
+    label: '1. Validate the account opportunity and current coverage',
     state: 'running',
   });
 
   const prospect = await getProspectById(prospectId);
   if (!prospect) throw new Error(`Prospect not found: ${prospectId}`);
+
+  const opportunityContext = await getOutreachOpportunityContext(prospectId);
+  requireOutreachOpportunityReadiness(opportunityContext);
 
   const organizationId = currentExecutionContext()?.organizationId;
   const intelligencePromise = organizationId
@@ -480,6 +523,7 @@ export async function streamOutreach(
     priorMessages,
     intelligence,
     catalogItem,
+    opportunityContext,
   }, promptVersion.content);
   const agent = createOutreachAgent({
     identity: settings.identity,
@@ -489,7 +533,7 @@ export async function streamOutreach(
 
   callbacks.onProgress?.({
     id: 'context',
-    label: '1. Their problem and consequence are grounded',
+    label: '1. A touch-ready account opportunity is grounded',
     state: 'complete',
   });
   callbacks.onProgress?.({

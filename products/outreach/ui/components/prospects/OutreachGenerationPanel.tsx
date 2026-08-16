@@ -32,7 +32,7 @@ export interface OutreachGenerationStep {
 }
 
 const STAGES = [
-  { id: "context", label: "Understand their pain" },
+  { id: "context", label: "Validate opportunity coverage" },
   { id: "draft", label: "Shape the path and next step" },
   { id: "save", label: "Save and schedule follow-up" },
 ] as const;

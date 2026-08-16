@@ -91,7 +91,10 @@ export async function POST(
         await releaseReservation(reservationId); reservationId = null;
         return NextResponse.json(
           { error: result.error || 'Failed to generate outreach' },
-          { status: 500, headers: corsHeaders }
+          {
+            status: result.errorCode === 'opportunity_coverage_blocked' ? 409 : 500,
+            headers: corsHeaders,
+          }
         );
       }
 

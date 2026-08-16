@@ -623,7 +623,10 @@ export function ProspectDetailPage({
         body: JSON.stringify({ status: newStatus }),
       });
 
-      if (!response.ok) throw new Error("Failed to update message status");
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || "Failed to update message status");
+      }
 
       const updated = await response.json();
       setOutreachMessages((prev) =>
@@ -639,7 +642,9 @@ export function ProspectDetailPage({
       toast.success(newStatus === "sent" ? "Message marked as sent externally" : "Message moved back to drafts");
     } catch (error) {
       console.error("Error updating message status:", error);
-      toast.error("Could not update the message status — try again");
+      toast.error(error instanceof Error
+        ? error.message
+        : "Could not update the message status — try again");
     }
   };
 

@@ -31,6 +31,16 @@ export type PerformanceLevel = "low" | "medium" | "high";
 
 // ============= CONTENT IDEAS =============
 
+export interface ContentIdeaInsightSource {
+  provider: string;
+  sourceId: string;
+  title: string;
+  contextId?: string;
+  contextLabel?: string;
+  evidence: string[];
+  generatedAt: string;
+}
+
 export interface ContentIdea {
   id: string;
   title: string;
@@ -48,6 +58,7 @@ export interface ContentIdea {
   // Source relationships
   sourceTopics?: Array<{ id: string; name: string }>;
   sourceResearch?: Array<{ id: string; title: string }>;
+  sourceInsight?: ContentIdeaInsightSource;
 
   createdAt: string;
   updatedAt: string;
@@ -60,6 +71,7 @@ export interface CreateContentIdeaInput {
   priority?: ContentPriority;
   sourceTopicIds?: string[];
   sourceResearchIds?: string[];
+  sourceInsight?: ContentIdeaInsightSource;
 }
 
 export interface UpdateContentIdeaInput {

@@ -75,6 +75,56 @@ export async function createContentIdea(data: CreateContentIdeaInput): Promise<C
   }
 }
 
+/**
+ * Idempotently promote one calculated insight into an idea. The insight is a
+ * provenance snapshot; it does not make a gap durable or mark it covered.
+ */
+export async function findOrCreateContentIdeaFromInsight(
+  data: CreateContentIdeaInput & { sourceInsight: NonNullable<CreateContentIdeaInput['sourceInsight']> }
+): Promise<ContentIdea> {
+  const session = await getSession();
+  const source = data.sourceInsight;
+  try {
+    const result = await session.run(
+      `MERGE (i:ContentIdea {
+         sourceInsightProvider: $sourceInsightProvider,
+         sourceInsightId: $sourceInsightId
+       })
+       ON CREATE SET
+         i.id = randomUUID(),
+         i.title = $title,
+         i.description = $description,
+         i.rationale = $rationale,
+         i.priority = $priority,
+         i.status = 'idea',
+         i.sourceInsightTitle = $sourceInsightTitle,
+         i.sourceInsightContextId = $sourceInsightContextId,
+         i.sourceInsightContextLabel = $sourceInsightContextLabel,
+         i.sourceInsightEvidenceJson = $sourceInsightEvidenceJson,
+         i.sourceInsightGeneratedAt = $sourceInsightGeneratedAt,
+         i.createdAt = localdatetime(),
+         i.updatedAt = localdatetime()
+       RETURN i`,
+      {
+        title: data.title,
+        description: data.description,
+        rationale: data.rationale,
+        priority: data.priority ?? 'medium',
+        sourceInsightProvider: source.provider,
+        sourceInsightId: source.sourceId,
+        sourceInsightTitle: source.title,
+        sourceInsightContextId: source.contextId ?? null,
+        sourceInsightContextLabel: source.contextLabel ?? null,
+        sourceInsightEvidenceJson: JSON.stringify(source.evidence),
+        sourceInsightGeneratedAt: source.generatedAt,
+      }
+    );
+    return mapIdeaFromNeo4j(result.records[0].get('i').properties);
+  } finally {
+    await session.close();
+  }
+}
+
 export async function getContentIdeas(filters?: ContentIdeaFilters): Promise<ContentIdea[]> {
   const session = await getSession();
 
@@ -631,6 +681,21 @@ function mapIdeaFromNeo4j(
   topics?: Array<{ id: string; name: string }>,
   research?: Array<{ id: string; title: string }>
 ): ContentIdea {
+  const sourceInsight = idea.sourceInsightProvider && idea.sourceInsightId
+    ? {
+        provider: String(idea.sourceInsightProvider),
+        sourceId: String(idea.sourceInsightId),
+        title: String(idea.sourceInsightTitle ?? idea.title),
+        contextId: idea.sourceInsightContextId
+          ? String(idea.sourceInsightContextId)
+          : undefined,
+        contextLabel: idea.sourceInsightContextLabel
+          ? String(idea.sourceInsightContextLabel)
+          : undefined,
+        evidence: parseStringArray(idea.sourceInsightEvidenceJson),
+        generatedAt: String(idea.sourceInsightGeneratedAt ?? idea.createdAt),
+      }
+    : undefined;
   // Ideas are format-agnostic - no type or targetPlatform
   return {
     id: idea.id as string,
@@ -644,9 +709,22 @@ function mapIdeaFromNeo4j(
     suggestedCitations: idea.suggestedCitations as string[] | undefined,
     sourceTopics: topics,
     sourceResearch: research,
+    sourceInsight,
     createdAt: idea.createdAt?.toString() ?? new Date().toISOString(),
     updatedAt: idea.updatedAt?.toString() ?? new Date().toISOString(),
   };
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function mapDraftFromNeo4j(

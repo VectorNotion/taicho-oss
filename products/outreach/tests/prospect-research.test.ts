@@ -161,7 +161,7 @@ test('cascade still invokes account research when the account has prior research
     resolveAccountForProspect: async () => ({ id: 'acct-1', name: 'Acme' }),
     researchAccount: async () => {
       called = true;
-      return { icpScore: 80, timingScore: 30, hardExcluded: false, icpMatches: [], timingBreakdown: [] };
+      return { icpScore: 80, timingScore: 30, hardExcluded: false, icpMatches: [], timingBreakdown: [], opportunityCount: null };
     },
   });
   assert.equal(called, true, 'account pipeline decides whether evidence needs refreshing');

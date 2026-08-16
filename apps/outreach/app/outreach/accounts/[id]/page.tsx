@@ -17,6 +17,8 @@ import {
 } from "@/components/prospects";
 import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
 import { ResearchProgressPanel } from "@/products/outreach/ui/components/research/ResearchProgressPanel";
+import { AccountOpportunitiesCard } from "@/products/outreach/ui/components/accounts/AccountOpportunitiesCard";
+import type { AccountOpportunityCoverageResult } from "@/products/outreach/domain/account-opportunity";
 
 type DimensionMatch = {
   dimensionKey: string;
@@ -67,6 +69,7 @@ type AccountDetail = {
   timingBreakdown: TimingBreakdown[];
   timingSignals: AccountTimingSignals[];
   prospects: AccountProspect[];
+  opportunityCoverage: AccountOpportunityCoverageResult;
 };
 
 function formatDimensionKey(key: string): string {
@@ -280,7 +283,6 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
       name: account.prospects.find((prospect) => prospect.id === target.entityId)?.name ?? "A prospect",
     }));
   const showResearchProgress = research.isStreaming || Boolean(research.error);
-
   return (
     <div className="w-full min-w-0 space-y-8">
       <div>
@@ -350,6 +352,8 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
           {account.reviewReason ? <span> {account.reviewReason}</span> : null}
         </p>
       )}
+
+      <AccountOpportunitiesCard result={account.opportunityCoverage} />
 
       {/* Research findings — two balanced columns of similar height. */}
       <div className="grid gap-4 lg:grid-cols-2">
