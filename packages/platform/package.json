@@ -22,6 +22,7 @@
     "./integrations/mcp/schema": "./integrations/mcp/schema.ts",
     "./intelligence/contracts": "./intelligence/contracts.ts",
     "./intelligence/chat-controls": "./intelligence/chat-controls.ts",
+    "./intelligence/chat-thread-scope": "./intelligence/chat-thread-scope.ts",
     "./intelligence/dispatcher": "./intelligence/dispatcher.ts",
     "./intelligence/event-policy": "./intelligence/event-policy.ts",
     "./intelligence/external-api": "./intelligence/external-api.ts",

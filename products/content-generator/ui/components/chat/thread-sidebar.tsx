@@ -38,7 +38,7 @@ export function ThreadSidebar({
   onClose,
 }: ThreadSidebarProps) {
   return (
-    <div className="flex h-full flex-col overflow-hidden border-r bg-background">
+    <div className="flex h-full flex-col overflow-hidden border-l bg-background">
       <div className="flex items-center justify-between px-3 pt-4 pb-2 shrink-0">
         <h2 className="text-sm font-semibold">Chat History</h2>
         {onClose && (

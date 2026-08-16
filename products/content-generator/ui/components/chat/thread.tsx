@@ -9,6 +9,7 @@ import { ArrowUpRightIcon, SparklesIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Composer } from "@/components/chat/composer";
+import { ChatToolApprovalCard } from "@/components/chat/tool-approval-card";
 import { AssistantMessage } from "@/components/chat/assistant-message";
 import { UserMessage, EditComposer } from "@/components/chat/user-message";
 import {
@@ -90,6 +91,8 @@ export const Thread: FC<ThreadProps> = ({
               <div className="min-h-8 grow" />
             </ThreadPrimitive.If>
 
+            <ChatToolApprovalCard />
+
             <Composer
               availability={availability}
               contactTargets={contactTargets}
@@ -151,8 +154,8 @@ const ThreadWelcome: FC<ThreadWelcomeProps> = ({
             transition={{ delay: 0.1 }}
             className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground"
           >
-            Start with an outcome. Taicho can bring in workspace context,
-            invoke the right fixed workflow, and return a reusable artifact.
+            Start with an outcome. Taicho can inspect live workspace context,
+            use the available capabilities, and keep working until the job is done.
           </m.p>
         </div>
       </div>
