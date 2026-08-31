@@ -25,8 +25,10 @@ import type {
   LegacyQualification,
   CreateQualificationInput,
 } from '../domain/types';
+import type { QualificationStatus } from '../domain/qualification';
 import { CONTACT_ACTIVITY_TYPES } from '../domain/types';
 import {
+  dismissOpenGeneratedFollowUpForMessage,
   dismissOpenActionItemsForProspect,
   ensureFollowUpForProspect,
 } from './action-item-repository';
@@ -367,6 +369,7 @@ export interface ProspectPipelineCandidate {
   hasResearch: boolean;
   hasDraft: boolean;
   hasSentMessage: boolean;
+  qualificationStatus: QualificationStatus | null;
 }
 
 /** Cross-graph portion of the prospect index lifecycle projection. Postgres
@@ -389,15 +392,19 @@ export async function getProspectPipelineCandidates(
     const result = await session.run(
       `MATCH (l:Prospect)
        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+       OPTIONAL MATCH (l)-[:HAS_PROSPECT_QUALIFICATION]->(qualification:ProspectQualification)
+       WHERE coalesce(qualification.contextKey, 'workspace') = coalesce(l.catalogItemId, 'workspace')
+       WITH l, head(collect(qualification)) AS qualification
        OPTIONAL MATCH (l)-[:HAS_OUTREACH]->(message:OutreachMessage)
-       WITH l,
+       WITH l, qualification,
             max(CASE WHEN message.status = 'draft'
                        AND coalesce(message.catalogItemId, 'workspace') = coalesce(l.catalogItemId, 'workspace')
                      THEN 1 ELSE 0 END) AS hasDraft,
             max(CASE WHEN message.status = 'sent' THEN 1 ELSE 0 END) AS hasSentMessage
        OPTIONAL MATCH (l)-[:HAS_RESEARCH|HAS_OBSERVATION|HAS_SCORE]->(research)
        WHERE coalesce(research.contextKey, 'workspace') = coalesce(l.catalogItemId, 'workspace')
-       RETURN l, hasDraft, hasSentMessage, count(research) > 0 AS hasResearch
+       RETURN l, qualification.status AS qualificationStatus,
+              hasDraft, hasSentMessage, count(research) > 0 AS hasResearch
        ORDER BY l.createdAt DESC, l.id ASC`,
       params,
     );
@@ -410,6 +417,7 @@ export async function getProspectPipelineCandidates(
         ? record.get("hasSentMessage").toNumber() > 0
         : Number(record.get("hasSentMessage") ?? 0) > 0,
       hasResearch: Boolean(record.get("hasResearch")),
+      qualificationStatus: (record.get("qualificationStatus") as QualificationStatus | null) ?? null,
     }));
   } finally {
     await session.close();
@@ -883,6 +891,8 @@ export async function createOutreachMessage(
         status: $status,
         catalogItemId: coalesce($catalogItemId, l.catalogItemId),
         catalogItemName: coalesce($catalogItemName, l.catalogItemName),
+        usedClaimIdsJson: $usedClaimIdsJson,
+        usedEvidenceIdsJson: $usedEvidenceIdsJson,
         createdAt: localdatetime(),
         updatedAt: localdatetime(),
         sentAt: null
@@ -904,6 +914,8 @@ export async function createOutreachMessage(
         status: data.status ?? 'draft',
         catalogItemId: data.catalogItemId ?? null,
         catalogItemName: data.catalogItemName ?? null,
+        usedClaimIdsJson: JSON.stringify(data.usedClaimIds ?? []),
+        usedEvidenceIdsJson: JSON.stringify(data.usedEvidenceIds ?? []),
       }
     );
 
@@ -949,6 +961,8 @@ export async function createGeneratedOutreachMessage(
         m.promptContentHash = $promptContentHash,
         m.catalogItemId = coalesce($catalogItemId, l.catalogItemId),
         m.catalogItemName = coalesce($catalogItemName, l.catalogItemName),
+        m.usedClaimIdsJson = $usedClaimIdsJson,
+        m.usedEvidenceIdsJson = $usedEvidenceIdsJson,
         m.createdByAttemptId = $attemptId,
         m.createdAt = localdatetime(),
         m.updatedAt = localdatetime(),
@@ -976,6 +990,8 @@ export async function createGeneratedOutreachMessage(
         linkedContentId: data.linkedContentId ?? null,
         linkedContentUrl: data.linkedContentUrl ?? null,
         status: data.status ?? 'draft',
+        usedClaimIdsJson: JSON.stringify(data.usedClaimIds ?? []),
+        usedEvidenceIdsJson: JSON.stringify(data.usedEvidenceIds ?? []),
       },
     );
     if (result.records.length === 0) throw new Error(`Prospect not found: ${data.prospectId}`);
@@ -1140,6 +1156,11 @@ export async function updateOutreachMessage(
         setClauses.push('m.sentAt = localdatetime()');
         params.recordSentActivity = true;
         params.sentActivityMetadata = JSON.stringify({ outreachMessageId: messageId });
+      } else {
+        // `sentAt` describes the current bookkeeping state. The immutable
+        // outreach_sent activity remains the historical record if a reviewer
+        // moves the message back to the draft queue.
+        setClauses.push('m.sentAt = null');
       }
     }
 
@@ -1209,6 +1230,14 @@ export async function deleteOutreachMessage(messageId: string): Promise<boolean>
     );
 
     const deleted = result.records[0]?.get('deleted')?.toNumber() ?? 0;
+    if (deleted > 0) {
+      // The generated follow-up is useful only while its triggering draft
+      // exists. Await the best-effort cross-store cleanup so a successful
+      // delete response never knowingly leaves an open orphaned action.
+      await dismissOpenGeneratedFollowUpForMessage(messageId).catch((error) => {
+        console.error('action_items.dismiss_on_message_delete_failed', error);
+      });
+    }
     return deleted > 0;
   } finally {
     await session.close();
@@ -1243,7 +1272,19 @@ function mapOutreachFromNeo4j(message: Record<string, unknown>): OutreachMessage
     promptContentHash: (message.promptContentHash as string | null) ?? undefined,
     catalogItemId: (message.catalogItemId as string | null) ?? undefined,
     catalogItemName: (message.catalogItemName as string | null) ?? undefined,
+    usedClaimIds: parseJsonArray(message.usedClaimIdsJson),
+    usedEvidenceIds: parseJsonArray(message.usedEvidenceIdsJson),
   };
+}
+
+function parseJsonArray(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 // ============= PROSPECT RESEARCH =============
@@ -1329,7 +1370,8 @@ export async function getProspectResearch(
 
 export async function createProspectNote(
   prospectId: string,
-  content: string
+  content: string,
+  options: { createdBy?: string } = {},
 ): Promise<ProspectNote> {
   const session = await getSession();
 
@@ -1339,20 +1381,82 @@ export async function createProspectNote(
       MATCH (l:Prospect {id: $prospectId})
       CREATE (n:ProspectNote {
         id: randomUUID(),
+        prospectId: $prospectId,
         content: $content,
+        revision: 1,
+        createdBy: $createdBy,
+        updatedBy: $createdBy,
         createdAt: localdatetime(),
         updatedAt: localdatetime()
       })
       CREATE (l)-[:HAS_NOTE]->(n)
       RETURN n
       `,
-      { prospectId, content }
+      { prospectId, content, createdBy: options.createdBy ?? null }
     );
 
     const record = result.records[0];
     const note = record.get('n').properties;
 
     return mapNoteFromNeo4j(note);
+  } finally {
+    await session.close();
+  }
+}
+
+export async function getProspectNoteById(
+  noteId: string,
+): Promise<{ note: ProspectNote; prospectId: string } | null> {
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `
+      MATCH (prospect:Prospect)-[:HAS_NOTE]->(note:ProspectNote {id: $noteId})
+      RETURN note, prospect.id AS prospectId
+      LIMIT 1
+      `,
+      { noteId },
+    );
+    const record = result.records[0];
+    if (!record) return null;
+    return {
+      note: mapNoteFromNeo4j(record.get('note').properties),
+      prospectId: record.get('prospectId') as string,
+    };
+  } finally {
+    await session.close();
+  }
+}
+
+export async function updateProspectNote(
+  noteId: string,
+  input: { content: string; expectedRevision: number; updatedBy?: string },
+): Promise<{ note: ProspectNote; prospectId: string } | null> {
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `
+      MATCH (prospect:Prospect)-[:HAS_NOTE]->(note:ProspectNote {id: $noteId})
+      WHERE coalesce(note.revision, 1) = $expectedRevision
+      SET note.content = $content,
+          note.revision = coalesce(note.revision, 1) + 1,
+          note.updatedBy = $updatedBy,
+          note.updatedAt = localdatetime()
+      RETURN note, prospect.id AS prospectId
+      `,
+      {
+        noteId,
+        content: input.content,
+        expectedRevision: input.expectedRevision,
+        updatedBy: input.updatedBy ?? null,
+      },
+    );
+    const record = result.records[0];
+    if (!record) return null;
+    return {
+      note: mapNoteFromNeo4j(record.get('note').properties),
+      prospectId: record.get('prospectId') as string,
+    };
   } finally {
     await session.close();
   }
@@ -1404,6 +1508,11 @@ function mapNoteFromNeo4j(note: Record<string, unknown>): ProspectNote {
   return {
     id: note.id as string,
     content: note.content as string,
+    revision: typeof note.revision === 'object' && note.revision !== null && 'toNumber' in note.revision
+      ? (note.revision as { toNumber: () => number }).toNumber()
+      : Number(note.revision ?? 1),
+    createdBy: note.createdBy as string | undefined,
+    updatedBy: note.updatedBy as string | undefined,
     createdAt: note.createdAt?.toString() ?? new Date().toISOString(),
     updatedAt: note.updatedAt?.toString(),
   };
@@ -1428,6 +1537,8 @@ export async function createProspectActivity(
         title: $title,
         notes: $notes,
         metadata: $metadata,
+        createdBy: $createdBy,
+        updatedBy: $createdBy,
         createdAt: localdatetime(),
         updatedAt: localdatetime()
       })
@@ -1443,6 +1554,7 @@ export async function createProspectActivity(
         title: data.title,
         notes: data.notes ?? null,
         metadata: data.metadata ? JSON.stringify(data.metadata) : null,
+        createdBy: data.createdBy ?? null,
         isContact: CONTACT_ACTIVITY_TYPES.has(data.type),
       }
     );
@@ -1462,6 +1574,117 @@ export async function createProspectActivity(
     }
 
     return mapActivityFromNeo4j(activity);
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Record an internal activity exactly once for a durable operation. The
+ * idempotency key is scoped to the prospect so a retry can recover the same
+ * activity without attaching it to a different person.
+ */
+export async function createProspectActivityOnce(
+  prospectId: string,
+  data: CreateActivityInput,
+  idempotencyKey: string,
+  options: { expectedResearchUpdatedAt?: string | null } = {},
+): Promise<{ activity: ProspectActivity; created: boolean } | null> {
+  const session = await getSession();
+  const creationMarker = crypto.randomUUID();
+  const enforceResearchSnapshot = Object.prototype.hasOwnProperty.call(
+    options,
+    'expectedResearchUpdatedAt',
+  );
+
+  try {
+    const result = await session.run(
+      `
+      MATCH (l:Prospect {id: $prospectId})
+      OPTIONAL MATCH (l)-[:HAS_RESEARCH]->(r:ProspectResearch)
+      WITH l, r
+      WHERE NOT $enforceResearchSnapshot
+        OR ($expectedResearchUpdatedAt IS NULL AND r IS NULL)
+        OR (
+          $expectedResearchUpdatedAt IS NOT NULL
+          AND r IS NOT NULL
+          AND toString(r.updatedAt) = $expectedResearchUpdatedAt
+        )
+      MERGE (a:ProspectActivity {
+        prospectId: $prospectId,
+        idempotencyKey: $idempotencyKey
+      })
+      ON CREATE SET
+        a.id = randomUUID(),
+        a.type = $type,
+        a.title = $title,
+        a.notes = $notes,
+        a.metadata = $metadata,
+        a.createdBy = $createdBy,
+        a.updatedBy = $createdBy,
+        a.createdAt = localdatetime(),
+        a.updatedAt = localdatetime(),
+        a._creationMarker = $creationMarker
+      WITH l, a, a._creationMarker = $creationMarker AS created
+      REMOVE a._creationMarker
+      MERGE (l)-[:HAS_ACTIVITY]->(a)
+      SET l.lastContactedAt = CASE
+        WHEN created AND $isContact AND (l.lastContactedAt IS NULL OR l.lastContactedAt < a.createdAt)
+        THEN a.createdAt ELSE l.lastContactedAt END
+      RETURN a, l.name AS prospectName, created
+      `,
+      {
+        prospectId,
+        idempotencyKey,
+        creationMarker,
+        enforceResearchSnapshot,
+        expectedResearchUpdatedAt: options.expectedResearchUpdatedAt ?? null,
+        type: data.type,
+        title: data.title,
+        notes: data.notes ?? null,
+        metadata: data.metadata ? JSON.stringify(data.metadata) : null,
+        createdBy: data.createdBy ?? null,
+        isContact: CONTACT_ACTIVITY_TYPES.has(data.type),
+      },
+    );
+
+    if (result.records.length === 0) return null;
+    const record = result.records[0]!;
+    const created = Boolean(record.get('created'));
+    const activity = mapActivityFromNeo4j(record.get('a').properties);
+
+    if (created && data.type === 'reply_received') {
+      emitProductEventFromContext({ name: 'prospect.replied', refs: { prospectId } });
+    }
+    if (created && CONTACT_ACTIVITY_TYPES.has(data.type)) {
+      scheduleFollowUp(prospectId, record.get('prospectName') as string);
+    }
+
+    return { activity, created };
+  } finally {
+    await session.close();
+  }
+}
+
+export async function getProspectActivityByIdempotencyKey(
+  prospectId: string,
+  idempotencyKey: string,
+): Promise<ProspectActivity | null> {
+  const session = await getSession();
+  try {
+    const result = await session.run(
+      `
+      MATCH (a:ProspectActivity {
+        prospectId: $prospectId,
+        idempotencyKey: $idempotencyKey
+      })
+      RETURN a
+      LIMIT 1
+      `,
+      { prospectId, idempotencyKey },
+    );
+    if (result.records.length === 0) return null;
+    return mapActivityFromNeo4j(result.records[0]!.get('a').properties);
   } finally {
     await session.close();
   }
@@ -1526,6 +1749,10 @@ export async function updateProspectActivity(
       setClauses.push('a.title = $title');
       params.title = data.title;
     }
+    if (data.type !== undefined) {
+      setClauses.push('a.type = $type');
+      params.type = data.type;
+    }
     if (data.notes !== undefined) {
       setClauses.push('a.notes = $notes');
       params.notes = data.notes;
@@ -1533,6 +1760,10 @@ export async function updateProspectActivity(
     if (data.metadata !== undefined) {
       setClauses.push('a.metadata = $metadata');
       params.metadata = JSON.stringify(data.metadata);
+    }
+    if (data.updatedBy !== undefined) {
+      setClauses.push('a.updatedBy = $updatedBy');
+      params.updatedBy = data.updatedBy;
     }
 
     const result = await session.run(
@@ -1594,6 +1825,8 @@ function mapActivityFromNeo4j(activity: Record<string, unknown>): ProspectActivi
     title: activity.title as string,
     notes: activity.notes as string | undefined,
     metadata,
+    createdBy: activity.createdBy as string | undefined,
+    updatedBy: activity.updatedBy as string | undefined,
     createdAt: activity.createdAt?.toString() ?? new Date().toISOString(),
     updatedAt: activity.updatedAt?.toString(),
   };

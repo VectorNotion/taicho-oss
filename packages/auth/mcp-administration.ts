@@ -7,7 +7,7 @@ import {
   teamMember as teamMemberTable,
   user as userTable,
 } from "@content-automation/database";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { authDatabase } from "./database";
 import {
   API_RESOURCE_URL,
@@ -29,6 +29,17 @@ const servicePrincipalRoles = new Set<RoleName>([
   "content_editor",
   "viewer",
 ]);
+
+export class AdministrationServiceError extends Error {
+  constructor(
+    readonly code: "INVALID_INPUT" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT",
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "AdministrationServiceError";
+  }
+}
 
 type MemberRow = {
   id: string;
@@ -53,7 +64,9 @@ async function hashOAuthSecret(value: string) {
 }
 
 function assertRole(role: string): asserts role is RoleName {
-  if (!roleDefinitions.some((definition) => definition.id === role)) throw new Error("Unknown organization role.");
+  if (!roleDefinitions.some((definition) => definition.id === role)) {
+    throw new AdministrationServiceError("INVALID_INPUT", "Unknown organization role.", 400);
+  }
 }
 
 function assertServicePrincipalRole(role: string): asserts role is RoleName {
@@ -150,26 +163,38 @@ export async function getMcpActorEmail(userId: string) {
 
 export async function addMcpOrganizationMember(input: { organizationId: string; email: string; role: RoleName }) {
   assertRole(input.role);
-  if (input.role === "owner" || input.role === "team_admin") throw new Error("That role cannot be assigned while adding a member.");
+  if (input.role === "owner" || input.role === "team_admin") {
+    throw new AdministrationServiceError("INVALID_INPUT", "That role cannot be assigned while adding a member.", 400);
+  }
   const [user] = await authDatabase.select({ id: userTable.id }).from(userTable)
     .where(sql`lower(${userTable.email}) = lower(${input.email})`).limit(1);
-  if (!user) throw new Error("No account exists for that email. The user must create an account first.");
+  if (!user) {
+    throw new AdministrationServiceError("NOT_FOUND", "No account exists for that email. The user must create an account first.", 404);
+  }
   const [created] = await authDatabase.insert(memberTable).values({
     id: crypto.randomUUID(), organizationId: input.organizationId, userId: user.id,
     role: input.role, createdAt: sql`now()`,
   }).onConflictDoNothing().returning({ id: memberTable.id });
-  if (!created) throw new Error("This user is already an organization member.");
+  if (!created) {
+    throw new AdministrationServiceError("CONFLICT", "This user is already a member.", 409);
+  }
   return { memberId: created.id, userId: user.id };
 }
 
 export async function updateMcpOrganizationMemberRole(input: { organizationId: string; memberId: string; role: RoleName }) {
   assertRole(input.role);
-  if (input.role === "owner" || input.role === "team_admin") throw new Error("That role cannot be assigned through this operation.");
+  if (input.role === "owner" || input.role === "team_admin") {
+    throw new AdministrationServiceError("INVALID_INPUT", "That role cannot be assigned through this operation.", 400);
+  }
   const [target] = await authDatabase.select({ role: memberTable.role }).from(memberTable).where(and(
     eq(memberTable.id, input.memberId), eq(memberTable.organizationId, input.organizationId),
   )).limit(1);
-  if (!target) throw new Error("Organization member not found.");
-  if (target.role.split(",").includes("owner")) throw new Error("The owner role cannot be changed.");
+  if (!target) {
+    throw new AdministrationServiceError("NOT_FOUND", "Organization member not found.", 404);
+  }
+  if (target.role.split(",").includes("owner")) {
+    throw new AdministrationServiceError("FORBIDDEN", "The owner role cannot be changed.", 403);
+  }
   const [teamAdmin] = await authDatabase.select({ memberId: teamAdministratorTable.member_id })
     .from(teamAdministratorTable).where(eq(teamAdministratorTable.member_id, input.memberId)).limit(1);
   const role = teamAdmin ? `${input.role},team_admin` : input.role;
@@ -183,8 +208,12 @@ export async function removeMcpOrganizationMember(input: { organizationId: strin
   const [target] = await authDatabase.select({ role: memberTable.role }).from(memberTable).where(and(
     eq(memberTable.id, input.memberId), eq(memberTable.organizationId, input.organizationId),
   )).limit(1);
-  if (!target) throw new Error("Organization member not found.");
-  if (target.role.split(",").includes("owner")) throw new Error("The organization owner cannot be removed.");
+  if (!target) {
+    throw new AdministrationServiceError("NOT_FOUND", "Organization member not found.", 404);
+  }
+  if (target.role.split(",").includes("owner")) {
+    throw new AdministrationServiceError("FORBIDDEN", "The organization owner cannot be removed.", 403);
+  }
   await authDatabase.delete(memberTable).where(and(
     eq(memberTable.id, input.memberId), eq(memberTable.organizationId, input.organizationId),
   ));
@@ -192,19 +221,85 @@ export async function removeMcpOrganizationMember(input: { organizationId: strin
 }
 
 export async function createMcpOrganizationTeam(input: { organizationId: string; name: string }) {
-  const [created] = await authDatabase.insert(teamTable).values({
-    id: crypto.randomUUID(), name: input.name, organizationId: input.organizationId,
-    createdAt: sql`now()`, updatedAt: sql`now()`,
-  }).returning({ id: teamTable.id, name: teamTable.name, createdAt: teamTable.createdAt });
-  return { ...created, createdAt: new Date(created.createdAt) };
+  const name = input.name.trim();
+  if (name.length < 2) {
+    throw new AdministrationServiceError("INVALID_INPUT", "Team names must contain at least two characters.", 400);
+  }
+  return authDatabase.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`content_automation_team_names:${input.organizationId}`}))`);
+    const [existing] = await tx.select({ id: teamTable.id }).from(teamTable).where(and(
+      eq(teamTable.organizationId, input.organizationId),
+      sql`lower(${teamTable.name}) = lower(${name})`,
+    )).limit(1);
+    if (existing) {
+      throw new AdministrationServiceError("CONFLICT", "A team with this name already exists.", 409);
+    }
+    const [created] = await tx.insert(teamTable).values({
+      id: crypto.randomUUID(), name, organizationId: input.organizationId,
+      createdAt: sql`now()`, updatedAt: sql`now()`,
+    }).returning({ id: teamTable.id, name: teamTable.name, createdAt: teamTable.createdAt });
+    return { ...created, createdAt: new Date(created.createdAt) };
+  });
+}
+
+export async function updateMcpOrganizationTeam(input: { organizationId: string; teamId: string; name: string }) {
+  const name = input.name.trim();
+  if (name.length < 2) {
+    throw new AdministrationServiceError("INVALID_INPUT", "Team names must contain at least two characters.", 400);
+  }
+  return authDatabase.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`content_automation_team_names:${input.organizationId}`}))`);
+    const [team] = await tx.select({ id: teamTable.id }).from(teamTable).where(and(
+      eq(teamTable.id, input.teamId),
+      eq(teamTable.organizationId, input.organizationId),
+    )).limit(1);
+    if (!team) {
+      throw new AdministrationServiceError("NOT_FOUND", "Organization team not found.", 404);
+    }
+    const [existing] = await tx.select({ id: teamTable.id }).from(teamTable).where(and(
+      eq(teamTable.organizationId, input.organizationId),
+      ne(teamTable.id, input.teamId),
+      sql`lower(${teamTable.name}) = lower(${name})`,
+    )).limit(1);
+    if (existing) {
+      throw new AdministrationServiceError("CONFLICT", "A team with this name already exists.", 409);
+    }
+    const [updated] = await tx.update(teamTable).set({ name, updatedAt: sql`now()` }).where(and(
+      eq(teamTable.id, input.teamId),
+      eq(teamTable.organizationId, input.organizationId),
+    )).returning({ id: teamTable.id, name: teamTable.name, createdAt: teamTable.createdAt });
+    return { ...updated, createdAt: new Date(updated.createdAt) };
+  });
 }
 
 export async function removeMcpOrganizationTeam(input: { organizationId: string; teamId: string }) {
-  const [deleted] = await authDatabase.delete(teamTable).where(and(
-    eq(teamTable.id, input.teamId), eq(teamTable.organizationId, input.organizationId),
-  )).returning({ id: teamTable.id });
-  if (!deleted) throw new Error("Organization team not found.");
-  return { deleted: true };
+  return authDatabase.transaction(async (tx) => {
+    const administrators = await tx.select({
+      memberId: memberTable.id,
+      role: memberTable.role,
+    }).from(teamAdministratorTable).innerJoin(
+      memberTable,
+      eq(memberTable.id, teamAdministratorTable.member_id),
+    ).where(and(
+      eq(teamAdministratorTable.team_id, input.teamId),
+      eq(memberTable.organizationId, input.organizationId),
+    ));
+    const [deleted] = await tx.delete(teamTable).where(and(
+      eq(teamTable.id, input.teamId), eq(teamTable.organizationId, input.organizationId),
+    )).returning({ id: teamTable.id });
+    if (!deleted) throw new AdministrationServiceError("NOT_FOUND", "Organization team not found.", 404);
+    for (const administrator of administrators) {
+      const [remaining] = await tx.select({ memberId: teamAdministratorTable.member_id })
+        .from(teamAdministratorTable)
+        .where(eq(teamAdministratorTable.member_id, administrator.memberId))
+        .limit(1);
+      if (!remaining) {
+        const role = administrator.role.split(",").filter((value) => value !== "team_admin").join(",") || "member";
+        await tx.update(memberTable).set({ role }).where(eq(memberTable.id, administrator.memberId));
+      }
+    }
+    return { deleted: true };
+  });
 }
 
 export async function setMcpTeamMembership(input: { organizationId: string; teamId: string; userId: string; enabled: boolean }) {
@@ -428,6 +523,12 @@ export async function rotateExternalServicePrincipalSecret(input: { organization
       eq(oauthClientTable.clientId, input.clientId),
       eq(oauthClientTable.referenceId, input.organizationId),
     )).returning({ clientId: oauthClientTable.clientId });
+    if (client) {
+      await tx.update(servicePrincipalTable).set({ updated_at: sql`now()` }).where(and(
+        eq(servicePrincipalTable.oauth_client_id, input.clientId),
+        eq(servicePrincipalTable.organization_id, input.organizationId),
+      ));
+    }
     return Boolean(client);
   });
   if (!rotated) throw new Error("OAuth service principal not found.");

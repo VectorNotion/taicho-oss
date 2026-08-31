@@ -24,6 +24,7 @@ const openCoreWorkspaces = [
   'products/content-generator',
   'products/outreach',
   'products/cascade',
+  'packages/knowledge',
   'packages/platform',
   'packages/ui',
   'packages/atlas',
@@ -109,4 +110,52 @@ test('platform seams keep their self-hosted defaults exported', async () => {
   const resonanceSeam = await readFile(path.join(root, 'packages/platform/resonance/provider.ts'), 'utf8');
   assert.match(resonanceSeam, /setResonanceRunsProvider/);
   assert.match(resonanceSeam, /501/);
+});
+
+test('the mirror sync allowlist covers every open-core workspace', async () => {
+  const workflowPath = path.join(root, '.github/workflows/sync-mirror.yml');
+  let workflow;
+  try {
+    workflow = await readFile(workflowPath, 'utf8');
+  } catch {
+    return; // The public mirror does not carry the sync workflow.
+  }
+
+  const match = workflow.match(/ALLOWLIST=\(([^)]*)\)/);
+  assert.ok(match, 'sync-mirror.yml no longer contains an ALLOWLIST block');
+  const allowlist = match[1].split('\n').map((line) => line.trim()).filter(Boolean);
+  const uncovered = openCoreWorkspaces.filter(
+    (workspace) => !allowlist.some((entry) => workspace === entry || workspace.startsWith(`${entry}/`)),
+  );
+
+  // A workspace in the open-core contract that the sync never exports leaves
+  // the mirror unable to install: exported apps depend on it by workspace
+  // protocol, so the standalone verify fails and no sync ships.
+  assert.deepEqual(uncovered, [], 'open-core workspaces missing from the sync-mirror allowlist');
+});
+
+// The standalone v1 catch-all is sanctioned: it is stripped from the mirror
+// export by sync-mirror.yml, so it may dispatch through the private unified
+// app in this repository while never reaching the open-core tree.
+const sanctionedPrivatePathImports = new Set([
+  "apps/content-generator/app/api/v1/[...path]/route.ts",
+]);
+
+test("open-core workspaces do not path-import private workspaces", async () => {
+  const privatePathImport = /(?:from\s+|import\s*\(\s*|require\(\s*)['"]@\/(?:apps\/(?:unified|cms)|ops|docker|extension-react|services)\//;
+  const violations = [];
+
+  for (const workspace of openCoreWorkspaces) {
+    for (const file of await filesUnder(workspace)) {
+      if (sanctionedPrivatePathImports.has(path.relative(root, file))) continue;
+      const content = await readFile(file, "utf8");
+      content.split("\n").forEach((line, index) => {
+        if (privatePathImport.test(line)) {
+          violations.push(`${path.relative(root, file)}:${index + 1}: ${line.trim()}`);
+        }
+      });
+    }
+  }
+
+  assert.deepEqual(violations, []);
 });

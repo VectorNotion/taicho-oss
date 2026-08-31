@@ -1,5 +1,5 @@
 import { createLogger, runWithExecutionContext } from '@content-automation/observability';
-import { emitProductEvent } from '@content-automation/platform/events/emit';
+import { emitProductEvent, recordProductEvent } from '@content-automation/platform/events/emit';
 import { runWithGraphOrganization } from '@content-automation/platform/data/organization-context';
 import { generateProspectInsights } from '../agent/prospect-insights';
 import {
@@ -25,8 +25,44 @@ import {
   type RecallWebhookPayload,
 } from '../integrations/recall';
 import { getProspectById } from '../data/prospect-repository';
+import { OUTREACH_TRANSCRIPT_KNOWLEDGE_EVENT } from '../knowledge-events';
 
 const log = createLogger('outreach.prospect-meeting');
+
+async function recordTranscriptKnowledgeEvent(input: {
+  organizationId: string;
+  prospect: { id: string; name: string };
+  sourceId: string;
+  provider: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  utterances: Array<{
+    sourceKey: string;
+    content: string;
+    speakerName?: string | null;
+    speakerExternalId?: string | null;
+    speakerIsHost?: boolean | null;
+    offsetMs?: number | null;
+    confidence?: number | null;
+  }>;
+}) {
+  if (input.utterances.length === 0) return null;
+  return recordProductEvent({
+    organizationId: input.organizationId,
+    name: OUTREACH_TRANSCRIPT_KNOWLEDGE_EVENT,
+    origin: 'internal',
+    idempotencyKey: `${input.provider}:${input.sourceId}`,
+    refs: { prospectId: input.prospect.id },
+    payload: {
+      prospect: input.prospect,
+      sourceId: input.sourceId,
+      provider: input.provider,
+      startedAt: input.startedAt ?? null,
+      endedAt: input.endedAt ?? null,
+      utterances: input.utterances,
+    },
+  });
+}
 
 export function validateMeetingUrl(value: string): string {
   const trimmed = value.trim();
@@ -191,6 +227,18 @@ export async function finalizeRecallMeetingCapture(input: {
       meetingEventId: input.meetingEventId,
       utterances,
     });
+    const prospect = await getProspectById(meeting.prospectId);
+    if (prospect && utterances.length > 0) {
+      await recordTranscriptKnowledgeEvent({
+        organizationId: input.organizationId,
+        prospect,
+        sourceId: input.transcriptId,
+        provider: 'recall',
+        startedAt: meeting.startedAt,
+        endedAt: meeting.endedAt,
+        utterances,
+      });
+    }
     await setProspectMeetingStatus({
       organizationId: input.organizationId,
       meetingId: input.meetingId,
@@ -304,6 +352,18 @@ export async function receiveAttendeeWebhook(input: {
       });
     }
   } else {
+    if (utterance?.transcription?.transcript.trim()) {
+      const prospect = await getProspectById(received.meeting.prospectId);
+      if (prospect) {
+        await recordTranscriptKnowledgeEvent({
+          organizationId: input.organizationId,
+          prospect,
+          sourceId: payload.idempotency_key,
+          provider: 'attendee-live',
+          utterances: [transcriptInput(utterance, `webhook:${payload.idempotency_key}`)],
+        });
+      }
+    }
     emitProductEvent({
       organizationId: input.organizationId,
       name: 'prospect.transcript.updated',
@@ -341,6 +401,19 @@ export async function finalizeMeetingCapture(input: {
       utterances: validUtterances.map((utterance) =>
         transcriptInput(utterance, attendeeUtteranceSourceKey(utterance))),
     });
+    const prospect = await getProspectById(meeting.prospectId);
+    if (prospect && validUtterances.length > 0) {
+      await recordTranscriptKnowledgeEvent({
+        organizationId: input.organizationId,
+        prospect,
+        sourceId: meeting.providerBotId,
+        provider: 'attendee',
+        startedAt: meeting.startedAt,
+        endedAt: meeting.endedAt,
+        utterances: validUtterances.map((utterance) =>
+          transcriptInput(utterance, attendeeUtteranceSourceKey(utterance))),
+      });
+    }
     await setProspectMeetingStatus({
       organizationId: input.organizationId,
       meetingId: input.meetingId,
@@ -412,6 +485,23 @@ export async function updateProspectTranscript(input: {
           confidence: utterance.confidence ?? null,
           words: utterance.words ?? null,
         },
+      })),
+    });
+    await recordTranscriptKnowledgeEvent({
+      organizationId: input.organizationId,
+      prospect,
+      sourceId: input.externalRecordingId,
+      provider: 'call_recording',
+      startedAt: input.startedAt,
+      endedAt: input.endedAt,
+      utterances: input.utterances.map((utterance) => ({
+        sourceKey: `call_recording:${input.externalRecordingId}:${utterance.sourceKey}`,
+        content: utterance.content,
+        speakerName: utterance.speakerName,
+        speakerExternalId: utterance.speakerExternalId,
+        speakerIsHost: utterance.speakerIsHost,
+        offsetMs: utterance.offsetMs,
+        confidence: utterance.confidence,
       })),
     });
     emitProductEvent({

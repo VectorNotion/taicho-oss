@@ -6,7 +6,9 @@ import {
   completeActionItem,
   createActionItem,
   deleteActionItem,
+  dismissOpenGeneratedFollowUpForMessage,
   dismissActionItem,
+  ensureGeneratedFollowUp,
   ensureFollowUpForProspect,
   getOpenActionItemsForProspects,
   listOpenActionItems,
@@ -92,4 +94,27 @@ test('ensureFollowUpForProspect preserves manual items and creates the automatic
   assert.equal(items.length, 2);
   assert.ok(items.some((item) => item.title === 'Deliberate plan' && item.source === 'manual'));
   assert.ok(items.some((item) => item.title === 'Follow up with Grace Hopper' && item.source === 'auto_followup'));
+});
+
+test('a deleted generated draft dismisses only its open automatic follow-up', async () => {
+  const prospectId = `deleted-prospect-${process.pid}`;
+  const messageId = `deleted-message-${process.pid}`;
+  const generated = await ensureGeneratedFollowUp({
+    prospectId,
+    prospectName: 'Deleted Draft Prospect',
+    messageId,
+    medium: 'email',
+    generationType: 'initial',
+  });
+  const manual = await createActionItem({
+    title: 'Keep this manual task',
+    dueAt: inDays(2),
+    prospectId,
+  });
+
+  await dismissOpenGeneratedFollowUpForMessage(messageId);
+
+  const open = await listOpenActionItems();
+  assert.ok(!open.some(({ id }) => id === generated.id));
+  assert.ok(open.some(({ id }) => id === manual.id));
 });

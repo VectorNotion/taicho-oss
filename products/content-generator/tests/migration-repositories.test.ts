@@ -13,7 +13,9 @@ import {
   runWithGraphOrganization,
 } from "@content-automation/platform/data/graph";
 import {
+  applyContentResonanceCandidate,
   createContentDraft,
+  getContentDraftById,
   getScheduledContentDrafts,
   queryContentGaps,
   queryHighPerformingContent,
@@ -23,6 +25,7 @@ import {
 } from "../data/content-repository";
 import {
   getEntitiesByProjectCount,
+  getProjectEntities,
   getProjectProcessingState,
   markProjectProcessed,
   storeProjectEntity,
@@ -34,8 +37,12 @@ import {
   linkResearchToMatchingTopics,
 } from "../data/research-repository";
 import {
+  createTopic,
+  dismissTopic,
+  getTopicById,
   linkTopicToEntities,
   linkTopicToResearch,
+  restoreTopic,
 } from "../data/topic-repository";
 
 const ORGANIZATION_ID = `content-migration-test-organization-${process.pid}`;
@@ -98,71 +105,103 @@ test("getProjectProcessingState reflects markProjectProcessed and is null for un
 });
 
 // ---------------------------------------------------------------------------
-// project-repository: storeProjectEntity dedup + typed relationship
+// project-repository: legacy piecemeal graph writes are blocked
 // ---------------------------------------------------------------------------
 
-test("storeProjectEntity dedupes by (label, name) and writes the mapped typed rel", async () => {
-  await run(
-    `CREATE (p:Project {id: 'migtest-proj-ent', title: 'migtest-Ent', description: 'd'})`,
-  );
-
-  // Two calls with the same entity must reuse one node (dedup), not duplicate.
-  await storeProjectEntity("migtest-proj-ent", { name: "migtest-React", type: "Framework" });
-  await storeProjectEntity("migtest-proj-ent", { name: "migtest-React", type: "Framework" });
-
-  const nodes = await run(
-    `MATCH (e:Framework {name: 'migtest-React'}) RETURN count(e) as c, collect(e.id)[0] as id`,
-  );
-  assert.equal(nodes.records[0].get("c").toNumber(), 1);
-  // Id follows the "{type_lower}-<uuid>" convention.
-  assert.match(nodes.records[0].get("id"), /^framework-/);
-
-  // Framework -> USES_FRAMEWORK, single MERGE'd edge.
-  const rel = await run(
-    `MATCH (:Project {id: 'migtest-proj-ent'})-[r:USES_FRAMEWORK]->(:Framework {name: 'migtest-React'})
-     RETURN count(r) as c`,
-  );
-  assert.equal(rel.records[0].get("c").toNumber(), 1);
-
-  // A different type maps to its own relationship (AIComponent -> IMPLEMENTS).
-  await storeProjectEntity("migtest-proj-ent", { name: "migtest-RAG", type: "AIComponent" });
-  const implemented = await run(
-    `MATCH (:Project {id: 'migtest-proj-ent'})-[r:IMPLEMENTS]->(:AIComponent {name: 'migtest-RAG'})
-     RETURN count(r) as c`,
-  );
-  assert.equal(implemented.records[0].get("c").toNumber(), 1);
-
-  // Unknown entity types are rejected (no dynamic-label injection).
+test("storeProjectEntity rejects legacy piecemeal writes", async () => {
   await assert.rejects(
-    storeProjectEntity("migtest-proj-ent", { name: "migtest-X", type: "Bogus" }),
-    /Unknown project entity type/,
+    storeProjectEntity("migtest-proj-ent", { name: "migtest-React", type: "content.framework" }),
+    /reconcile the complete content\.project_extraction profile/,
   );
+});
+
+test("getProjectEntities returns stable claim and source evidence provenance", async () => {
+  const claim = {
+    id: "migtest-claim-project-next",
+    statement: "migtest-Project uses or provides Next.js.",
+  };
+  const evidence = {
+    id: "migtest-evidence-project-description",
+    excerpt: "migtest-Project\n\nA Next.js application.",
+  };
+  const source = {
+    id: "migtest-source-project",
+    kind: "product",
+    canonicalUri: "content-project:migtest-proj-evidence",
+    title: "migtest-Project",
+  };
+
+  await run(
+    `CREATE (project:Project {id: 'migtest-proj-evidence', title: 'migtest-Project', description: 'A Next.js application.'})
+     CREATE (entity:CanonicalEntity {id: 'migtest-entity-next', schemaVersion: 'knowledge.v1', name: 'Next.js'})
+     CREATE (claim:Claim {id: $claimId, schemaVersion: 'knowledge.v1', json: $claimJson})
+     CREATE (evidence:Evidence {id: $evidenceId, schemaVersion: 'knowledge.v1', revisionId: $revisionId, json: $evidenceJson})
+     CREATE (:SourceRevision {id: $revisionId, schemaVersion: 'knowledge.v1', sourceId: $sourceId})
+     CREATE (:KnowledgeSource {id: $sourceId, schemaVersion: 'knowledge.v1', json: $sourceJson})
+     CREATE (project)-[:KNOWLEDGE_HAS {claimId: $claimId, name: 'Next.js', typeKey: 'content.framework'}]->(entity)
+     CREATE (claim)-[:SUPPORTED_BY]->(evidence)`,
+    {
+      claimId: claim.id,
+      claimJson: JSON.stringify(claim),
+      evidenceId: evidence.id,
+      evidenceJson: JSON.stringify(evidence),
+      revisionId: "migtest-revision-project-description",
+      sourceId: source.id,
+      sourceJson: JSON.stringify(source),
+    },
+  );
+
+  assert.deepEqual(await getProjectEntities("migtest-proj-evidence"), [{
+    entityId: "migtest-entity-next",
+    claimId: claim.id,
+    relationship: "KNOWLEDGE_HAS",
+    name: "Next.js",
+    type: "content.framework",
+    statement: claim.statement,
+    evidence: {
+      id: evidence.id,
+      excerpt: evidence.excerpt,
+      source: {
+        id: source.id,
+        kind: source.kind,
+        canonicalUri: source.canonicalUri,
+        title: source.title,
+      },
+    },
+  }]);
 });
 
 // ---------------------------------------------------------------------------
 // project-repository: getEntitiesByProjectCount aggregation
 // ---------------------------------------------------------------------------
 
-test("getEntitiesByProjectCount aggregates project counts for topic-bearing types only", async () => {
+test("getEntitiesByProjectCount aggregates canonical knowledge connections", async () => {
   await run(
     `CREATE (:Project {id: 'migtest-proj-a', title: 'migtest-Project A', description: 'd'})
-     CREATE (:Project {id: 'migtest-proj-b', title: 'migtest-Project B', description: 'd'})`,
+     CREATE (:Project {id: 'migtest-proj-b', title: 'migtest-Project B', description: 'd'})
+     CREATE (:CanonicalEntity {id: 'migtest-vector', schemaVersion: 'knowledge.v1', name: 'migtest-VectorSearch'})
+     CREATE (:CanonicalEntity {id: 'migtest-auth', schemaVersion: 'knowledge.v1', name: 'migtest-Auth'})
+     CREATE (:CanonicalEntity {id: 'migtest-postgres', schemaVersion: 'knowledge.v1', name: 'migtest-Postgres'})`,
   );
 
-  // Same AIComponent referenced by two projects.
-  await storeProjectEntity("migtest-proj-a", { name: "migtest-VectorSearch", type: "AIComponent" });
-  await storeProjectEntity("migtest-proj-b", { name: "migtest-VectorSearch", type: "AIComponent" });
-  // A Feature on one project.
-  await storeProjectEntity("migtest-proj-a", { name: "migtest-Auth", type: "Feature" });
-  // A Database — must be excluded from the aggregation.
-  await storeProjectEntity("migtest-proj-a", { name: "migtest-Postgres", type: "Database" });
+  await run(
+    `MATCH (a:Project {id: 'migtest-proj-a'}),
+           (b:Project {id: 'migtest-proj-b'}),
+           (vector:CanonicalEntity {id: 'migtest-vector'}),
+           (auth:CanonicalEntity {id: 'migtest-auth'}),
+           (postgres:CanonicalEntity {id: 'migtest-postgres'})
+     CREATE (a)-[:KNOWLEDGE_HAS {name: vector.name, typeKey: 'content.ai_component'}]->(vector)
+     CREATE (b)-[:KNOWLEDGE_HAS {name: vector.name, typeKey: 'content.ai_component'}]->(vector)
+     CREATE (a)-[:KNOWLEDGE_HAS {name: auth.name, typeKey: 'content.feature'}]->(auth)
+     CREATE (a)-[:KNOWLEDGE_HAS {name: postgres.name, typeKey: 'content.database'}]->(postgres)`,
+  );
 
   const rows = await getEntitiesByProjectCount();
   const byName = new Map(rows.map((r) => [r.name, r]));
 
   const vector = byName.get("migtest-VectorSearch");
   assert.ok(vector, "AIComponent entity present");
-  assert.equal(vector!.entityType, "AIComponent");
+  assert.equal(vector!.entityType, "content.ai_component");
   assert.equal(vector!.projectCount, 2);
   assert.deepEqual([...vector!.projectNames].sort(), ["migtest-Project A", "migtest-Project B"]);
 
@@ -170,7 +209,7 @@ test("getEntitiesByProjectCount aggregates project counts for topic-bearing type
   assert.ok(auth, "Feature entity present");
   assert.equal(auth!.projectCount, 1);
 
-  assert.equal(byName.has("migtest-Postgres"), false, "Database type excluded");
+  assert.equal(byName.get("migtest-Postgres")?.entityType, "content.database");
 });
 
 // ---------------------------------------------------------------------------
@@ -326,6 +365,37 @@ test("getRecentResearchItems windows by age; getResearchItemsByTopicIds joins vi
 // topic-repository: linkTopicToEntities (DERIVED_FROM) + linkTopicToResearch
 // ---------------------------------------------------------------------------
 
+test("createTopic is atomic under concurrency and stores UTC lifecycle timestamps", async () => {
+  const before = Date.now();
+  const attempts = await Promise.all(
+    Array.from({ length: 8 }, () => createTopic({
+      name: "migtest-atomic-topic",
+      displayName: "migtest Atomic Topic",
+      description: "A concurrent topic fixture.",
+      source: "manual",
+    })),
+  );
+  assert.equal(attempts.filter(Boolean).length, 1);
+
+  const winner = attempts.find((topic) => topic !== null);
+  assert.ok(winner);
+  const count = await run(
+    "MATCH (t:Topic {name: 'migtest-atomic-topic'}) RETURN count(t) AS count",
+  );
+  assert.equal(count.records[0].get("count").toInt(), 1);
+  const stored = await getTopicById(winner.id);
+  assert.ok(stored);
+  assert.ok(Date.parse(stored.createdAt) >= before);
+  assert.ok(stored.createdAt.endsWith("Z"));
+
+  const dismissed = await dismissTopic(stored.id);
+  assert.equal(dismissed?.status, "dismissed");
+  assert.ok(dismissed?.dismissedAt?.endsWith("Z"));
+  const restored = await restoreTopic(stored.id);
+  assert.equal(restored?.status, "active");
+  assert.equal(restored?.dismissedAt, null);
+});
+
 test("linkTopicToEntities links DERIVED_FROM for eligible types only", async () => {
   await run(
     `CREATE (:Topic {id: 'migtest-topic-de', name: 'migtest-de', displayName: 'migtest-DE', status: 'active'})
@@ -464,6 +534,51 @@ test("posting reminders are timezone-aware, ordered, and clearable", async () =>
       .some((draft) => draft.id === "migtest-draft-reminder"),
     false,
   );
+});
+
+test("applying a Resonance candidate compares the source revision and preserves unrelated draft fields", async () => {
+  await run(
+    `
+    CREATE (:ContentDraft {
+      id: 'migtest-draft-resonance',
+      ideaId: 'migtest-idea-resonance',
+      title: 'migtest-Control title',
+      type: 'linkedin_post',
+      content: 'migtest-Control content',
+      status: 'ready',
+      performanceInsights: 'migtest-Keep this field',
+      createdAt: localdatetime(),
+      updatedAt: localdatetime()
+    })
+    `,
+  );
+  const source = await getContentDraftById("migtest-draft-resonance");
+  assert.ok(source);
+
+  const applied = await applyContentResonanceCandidate("migtest-draft-resonance", {
+    expectedUpdatedAt: source.updatedAt,
+    title: "migtest-Winner title",
+    content: "migtest-Winner content",
+    resonanceJobId: "migtest-resonance-job",
+    candidateId: "variation-1",
+  });
+  assert.equal(applied?.title, "migtest-Winner title");
+  assert.equal(applied?.content, "migtest-Winner content");
+  assert.equal(applied?.status, "ready");
+  assert.equal(applied?.performanceInsights, "migtest-Keep this field");
+  assert.equal(applied?.resonanceAppliedJobId, "migtest-resonance-job");
+  assert.equal(applied?.resonanceAppliedCandidateId, "variation-1");
+  assert.ok(applied?.resonanceAppliedAt);
+
+  const staleReplay = await applyContentResonanceCandidate("migtest-draft-resonance", {
+    expectedUpdatedAt: source.updatedAt,
+    title: "migtest-Stale overwrite",
+    content: "migtest-Stale overwrite",
+    resonanceJobId: "migtest-other-job",
+    candidateId: "variation-2",
+  });
+  assert.equal(staleReplay, null);
+  assert.equal((await getContentDraftById("migtest-draft-resonance"))?.title, "migtest-Winner title");
 });
 
 test("queryContentGaps returns researched-but-idealess topics with a scaled priority", async () => {

@@ -197,6 +197,132 @@
       "when": 1786925500000,
       "tag": "0027_drop_rate_limit_oauth_client_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786925600000,
+      "tag": "0028_grant_cascade_admin_missing_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787168130586,
+      "tag": "0029_durable_knowledge_event_projection",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787168963468,
+      "tag": "0030_intelligence_artifact_lineage",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787169498109,
+      "tag": "0031_organization_knowledge_module_overlays",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787170000000,
+      "tag": "0032_restore_knowledge_module_runtime_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787226081806,
+      "tag": "0033_workspace_calendar_projection",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787364157095,
+      "tag": "0034_drop_orphaned_cascade_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787511386827,
+      "tag": "0035_parallel_wolfpack",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787556051428,
+      "tag": "0036_even_sugar_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787561806583,
+      "tag": "0037_cold_miss_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787568109365,
+      "tag": "0038_funnel_run_enabled",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1787735400000,
+      "tag": "0039_restore_automation_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787846453781,
+      "tag": "0040_wonderful_puppet_master",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1787934264774,
+      "tag": "0041_durable_page_guide_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1787960717529,
+      "tag": "0042_global_page_guide_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1787987413690,
+      "tag": "0043_sticky_iron_lad",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788023034362,
+      "tag": "0044_content_base_media",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788064068633,
+      "tag": "0045_pretty_gauntlet",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { ContentDraft } from "@/products/content-generator/domain/content";
+import { MediaPreview } from "./MediaPreview";
+import type { CreativeAssetView } from "./media-types";
 
 function SurfaceHeader({
   label,
@@ -372,24 +374,25 @@ function PreviewFallback({ children }: { children: ReactNode }) {
   );
 }
 
-export function PostContentPreview({ post }: { post: ContentDraft }) {
+export function PostContentPreview({ post, media = [] }: { post: ContentDraft; media?: CreativeAssetView[] }) {
+  let preview: ReactNode;
   if (post.type === "x_post" || post.type === "tweet_thread") {
-    return <XPreview post={post} />;
-  }
-  if (post.type === "linkedin_post") {
-    return <LinkedInPreview post={post} />;
-  }
-  if (post.type === "video_script") {
-    return <YouTubePreview post={post} />;
-  }
-  if (post.type === "blog_post") {
-    return <BlogPreview post={post} />;
-  }
-  if (post.type === "social_post") {
-    return <SocialPreview post={post} />;
-  }
-  if (post.type === "ad_campaign") {
-    return <AdPreview post={post} />;
-  }
-  return <PreviewFallback>{post.content}</PreviewFallback>;
+    preview = <XPreview post={post} />;
+  } else if (post.type === "linkedin_post") preview = <LinkedInPreview post={post} />;
+  else if (post.type === "video_script") preview = <YouTubePreview post={post} />;
+  else if (post.type === "blog_post") preview = <BlogPreview post={post} />;
+  else if (post.type === "social_post") preview = <SocialPreview post={post} />;
+  else if (post.type === "ad_campaign") preview = <AdPreview post={post} />;
+  else preview = <PreviewFallback>{post.content}</PreviewFallback>;
+  return (
+    <div className="space-y-3">
+      {media.map((asset) => (
+        <Card className="gap-0 overflow-hidden py-0" data-testid="post-preview-media" key={asset.id}>
+          <SurfaceHeader description={asset.description} label="Attached media" />
+          <div className="mx-auto aspect-video w-full max-w-3xl bg-muted/20"><MediaPreview asset={asset} /></div>
+        </Card>
+      ))}
+      {preview}
+    </div>
+  );
 }

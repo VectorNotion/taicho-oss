@@ -21,7 +21,12 @@ import {
   or,
   sql,
 } from 'drizzle-orm'
-import type { ChatSurface, Citation, ProspectState } from './contracts'
+import type {
+  ChatSurface,
+  Citation,
+  ProspectState,
+  SupportEscalationOffer,
+} from './contracts'
 
 export type ConversationActor = {
   tenantId: string
@@ -78,8 +83,12 @@ export interface AssistantRepository {
   resetFailedAnswers(conversationId: string): Promise<void>
   recordSupportFeedback(
     conversationId: string,
-    input: { helpful: boolean; note?: string; createdAt: string },
+    input: { helpful: boolean; responseRequestId?: string; note?: string; createdAt: string },
   ): Promise<number>
+  setSupportEscalationOffer(
+    conversationId: string,
+    offer: SupportEscalationOffer | null,
+  ): Promise<void>
   markEscalated(conversationId: string, ticket: Record<string, unknown>): Promise<void>
   searchKnowledge(query: string, kind: KnowledgeDocument['kind'], limit?: number, pagePath?: string): Promise<KnowledgeDocument[]>
   replaceKnowledge(kind: KnowledgeDocument['kind'], documents: KnowledgeDocument[]): Promise<void>
@@ -149,7 +158,7 @@ function messageFromRow(row: MessageRow): StoredMessage {
     content: row.content,
     citations: row.citations,
     metadata: row.metadata,
-    createdAt: row.created_at,
+    createdAt: new Date(row.created_at).toISOString(),
   }
 }
 
@@ -342,7 +351,7 @@ export class PostgresAssistantRepository implements AssistantRepository {
 
   async recordSupportFeedback(
     conversationId: string,
-    input: { helpful: boolean; note?: string; createdAt: string },
+    input: { helpful: boolean; responseRequestId?: string; note?: string; createdAt: string },
   ): Promise<number> {
     const increment = input.helpful
       ? sql<number>`0`
@@ -368,12 +377,31 @@ export class PostgresAssistantRepository implements AssistantRepository {
     return row.count
   }
 
+  async setSupportEscalationOffer(
+    conversationId: string,
+    offer: SupportEscalationOffer | null,
+  ): Promise<void> {
+    await this.db
+      .update(conversationsTable)
+      .set({
+        metadata: offer
+          ? sql`${conversationsTable.metadata} || jsonb_build_object('escalationOffer', ${JSON.stringify(offer)}::jsonb)`
+          : sql`${conversationsTable.metadata} - 'escalationOffer'`,
+        updated_at: new Date().toISOString(),
+      })
+      .where(and(
+        eq(conversationsTable.tenant_id, this.tenantId),
+        eq(conversationsTable.id, conversationId),
+        eq(conversationsTable.surface, 'support'),
+      ))
+  }
+
   async markEscalated(conversationId: string, ticket: Record<string, unknown>): Promise<void> {
     await this.db
       .update(conversationsTable)
       .set({
         status: 'escalated',
-        metadata: sql`${conversationsTable.metadata} || jsonb_build_object('ticket', ${JSON.stringify(ticket)}::jsonb)`,
+        metadata: sql`(${conversationsTable.metadata} - 'escalationOffer') || jsonb_build_object('ticket', ${JSON.stringify(ticket)}::jsonb)`,
         updated_at: new Date().toISOString(),
       })
       .where(and(
@@ -719,7 +747,7 @@ export class InMemoryAssistantRepository implements AssistantRepository {
 
   async recordSupportFeedback(
     conversationId: string,
-    input: { helpful: boolean; note?: string; createdAt: string },
+    input: { helpful: boolean; responseRequestId?: string; note?: string; createdAt: string },
   ): Promise<number> {
     const conversation = this.requireConversation(conversationId)
     const previous = Number(conversation.metadata.unhelpfulFeedbackCount ?? 0)
@@ -729,10 +757,20 @@ export class InMemoryAssistantRepository implements AssistantRepository {
     return unhelpfulFeedbackCount
   }
 
+  async setSupportEscalationOffer(
+    conversationId: string,
+    offer: SupportEscalationOffer | null,
+  ): Promise<void> {
+    const conversation = this.requireConversation(conversationId)
+    if (offer) conversation.metadata.escalationOffer = structuredClone(offer)
+    else delete conversation.metadata.escalationOffer
+  }
+
   async markEscalated(conversationId: string, ticket: Record<string, unknown>): Promise<void> {
     const conversation = this.requireConversation(conversationId)
     conversation.status = 'escalated'
     conversation.metadata.ticket = structuredClone(ticket)
+    delete conversation.metadata.escalationOffer
   }
 
   async searchKnowledge(query: string, kind: KnowledgeDocument['kind'], limit = 5, pagePath?: string): Promise<KnowledgeDocument[]> {

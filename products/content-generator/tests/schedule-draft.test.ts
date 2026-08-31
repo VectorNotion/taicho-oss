@@ -63,12 +63,18 @@ test("resolvePublishAt mirrors the route's `when` semantics", () => {
   const immediate = resolvePublishAt(undefined).getTime();
   assert.ok(immediate >= before && immediate <= Date.now() + 1000);
   assert.equal(
-    resolvePublishAt("2026-08-01T12:00:00.000Z").toISOString(),
-    "2026-08-01T12:00:00.000Z",
+    resolvePublishAt("2030-08-01T12:00:00.000Z").toISOString(),
+    "2030-08-01T12:00:00.000Z",
   );
   assert.throws(
     () => resolvePublishAt("not-a-date"),
     (error: unknown) => error instanceof ScheduleDraftError && error.code === "INVALID_WHEN",
+  );
+  assert.throws(
+    () => resolvePublishAt(new Date(Date.now() - 60_000).toISOString()),
+    (error: unknown) => error instanceof ScheduleDraftError
+      && error.code === "INVALID_WHEN"
+      && error.message === "Schedule time must be in the future.",
   );
   // Empty string → immediate, exactly like the route treated "".
   assert.ok(resolvePublishAt("").getTime() >= before);
@@ -109,12 +115,12 @@ test("scheduleDraftPost resolves the only enabled channel when channelId is omit
   const post = await scheduleDraftPost(pool, {
     draftId: "draft-1",
     destination: "cms",
-    when: "2026-08-01T12:00:00.000Z",
+    when: "2030-08-01T12:00:00.000Z",
     draft: draft(),
   });
   assert.equal(post.channelId, channelId);
   assert.equal(post.destination, "cms");
-  assert.equal(post.publishAt.toISOString(), "2026-08-01T12:00:00.000Z");
+  assert.equal(post.publishAt.toISOString(), "2030-08-01T12:00:00.000Z");
   assert.deepEqual(post.copy, { title: "Durable queues", body: "Body of the post", tags: [] });
   assert.equal(post.idempotencyKey, `draft-1:cms:${channelId}`);
   assert.equal((await getPost(pool, post.id))?.status, "scheduled");

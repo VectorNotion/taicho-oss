@@ -7,6 +7,7 @@ import {
   BranchPickerPrimitive,
   ErrorPrimitive,
   MessagePrimitive,
+  useAssistantState,
   type ToolCallMessagePartComponent,
   type ToolCallMessagePartStatus,
 } from "@assistant-ui/react";
@@ -15,6 +16,7 @@ import { TooltipIconButton } from "@/components/chat/tooltip-icon-button";
 import { MarkdownText } from "@/components/chat/markdown-text";
 import { ToolFallback } from "@/components/chat/tool-fallback";
 import { cn } from "@/lib/utils";
+import { useChatConversationError, useChatToolApproval } from "@/components/chat/chat-runtime-provider";
 
 // Import existing tool UI components
 import { SearchResultsCard } from "@/components/chat/tool-parts/search-results-card";
@@ -25,7 +27,6 @@ import { TopicCloud } from "@/components/chat/tool-parts/topic-cloud";
 import { ToolProgress } from "@/components/chat/tool-parts/tool-progress";
 import { EmptyState } from "@/components/chat/tool-parts/empty-state";
 import { AnimatedTool, AnimatedList, AnimatedProgress } from "@/components/chat/tool-parts/animated-tool";
-import { TopicMapResult } from "@/components/chat/tool-parts/topic-map-result";
 import { ArticleResults } from "@/components/chat/tool-parts/article-results";
 import { ToolRecoveryCard } from "@/components/chat/tool-parts/tool-recovery-card";
 import {
@@ -42,8 +43,32 @@ function renderToolRecovery(
   result: unknown,
   isError?: boolean,
 ) {
-  if (!isError && status.type !== "incomplete") return null;
-  return <ToolRecoveryCard toolName={toolName} status={status} isError={isError} partialResult={isError ? undefined : result} />;
+  const output = result && typeof result === "object" && !Array.isArray(result)
+    ? result as { error?: unknown; streamError?: unknown; effectState?: unknown }
+    : null;
+  const resultError = typeof output?.streamError === "string"
+    ? output.streamError
+    : typeof output?.error === "string"
+      ? output.error
+      : null;
+  const statusError = status.type === "incomplete"
+    ? typeof status.error === "string"
+      ? status.error
+      : status.error && typeof status.error === "object" && "message" in status.error && typeof status.error.message === "string"
+        ? status.error.message
+        : null
+    : null;
+  if (!isError && status.type !== "incomplete" && !resultError) return null;
+  return (
+    <ToolRecoveryCard
+      toolName={toolName}
+      status={status}
+      isError={isError}
+      partialResult={isError ? undefined : result}
+      errorMessage={resultError ?? statusError ?? undefined}
+      effectState={output?.effectState === "committed" ? "committed" : "none"}
+    />
+  );
 }
 
 const SearchKnowledgeTool: ToolCallMessagePartComponent = ({ result, status, toolName, isError }) => {
@@ -227,16 +252,6 @@ const ListTopicsTool: ToolCallMessagePartComponent = ({ result, status, toolName
   );
 };
 
-const GetTopicMapTool: ToolCallMessagePartComponent = ({ result, status, toolName, isError }) => {
-  const recovery = renderToolRecovery(toolName, status, result, isError);
-  if (recovery) return recovery;
-  if (status.type === "running" || status.type === "requires-action") {
-    return <AnimatedProgress><ToolProgress tool={toolName} status="searching" message="Mapping Brain connections..." /></AnimatedProgress>;
-  }
-  if (!result) return null;
-  return <AnimatedTool><TopicMapResult data={result as Parameters<typeof TopicMapResult>[0]["data"]} /></AnimatedTool>;
-};
-
 const TavilySearchTool: ToolCallMessagePartComponent = ({ args, result, status, toolName, isError }) => {
   const recovery = renderToolRecovery(toolName, status, result, isError);
   if (recovery) return recovery;
@@ -293,6 +308,12 @@ const WorkflowArtifactTool: ToolCallMessagePartComponent = ({ result, status, to
 };
 
 export const AssistantMessage: FC = () => {
+  const status = useAssistantState(({ message }) => message.status?.type);
+  const { conversationError } = useChatConversationError();
+  const interrupted = conversationError?.startsWith(
+    'Taicho stopped before completing this response.',
+  ) === true && status !== 'complete';
+
   return (
     <MessagePrimitive.Root asChild>
       <div
@@ -300,31 +321,32 @@ export const AssistantMessage: FC = () => {
         data-role="assistant"
       >
         <div className="mx-2 text-sm leading-relaxed wrap-break-word text-foreground">
-          <GenerativeMessageSurface />
-          <MessagePrimitive.Parts
-            components={{
-              Empty: AssistantStartingState,
-              Text: MarkdownText,
-              Reasoning: HiddenReasoning,
-              tools: {
-                by_name: {
-                  searchKnowledgeTool: SearchKnowledgeTool,
-                  getProjectTool: GetProjectTool,
-                  listProjectsTool: ListProjectsTool,
-                  getProspectTool: GetProspectTool,
-                  findProspectContextTool: FindProspectContextTool,
-                  listProspectsTool: ListProspectsTool,
-                  getResearchTool: GetResearchTool,
-                  listTopicsTool: ListTopicsTool,
-                  getTopicMapTool: GetTopicMapTool,
-                  tavilySearchTool: TavilySearchTool,
-                  runProspectIntelligenceTool: WorkflowArtifactTool,
-                  runOutreachIntelligenceTool: WorkflowArtifactTool,
+          <GenerativeMessageSurface interrupted={interrupted} />
+          {interrupted ? null : (
+            <MessagePrimitive.Parts
+              components={{
+                Empty: AssistantStartingState,
+                Text: MarkdownText,
+                Reasoning: HiddenReasoning,
+                tools: {
+                  by_name: {
+                    searchKnowledgeTool: SearchKnowledgeTool,
+                    getProjectTool: GetProjectTool,
+                    listProjectsTool: ListProjectsTool,
+                    getProspectTool: GetProspectTool,
+                    findProspectContextTool: FindProspectContextTool,
+                    listProspectsTool: ListProspectsTool,
+                    getResearchTool: GetResearchTool,
+                    listTopicsTool: ListTopicsTool,
+                    tavilySearchTool: TavilySearchTool,
+                    runProspectIntelligenceTool: WorkflowArtifactTool,
+                    runOutreachIntelligenceTool: WorkflowArtifactTool,
+                  },
+                  Fallback: ToolFallback,
                 },
-                Fallback: ToolFallback,
-              },
-            }}
-          />
+              }}
+            />
+          )}
           <MessageError />
         </div>
 
@@ -338,6 +360,8 @@ export const AssistantMessage: FC = () => {
 };
 
 const MessageError: FC = () => {
+  const { pendingApproval, committedRecovery } = useChatToolApproval();
+  if (pendingApproval || committedRecovery) return null;
   return (
     <MessagePrimitive.Error>
       <ErrorPrimitive.Root className="mt-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive dark:bg-destructive/5 dark:text-red-200">

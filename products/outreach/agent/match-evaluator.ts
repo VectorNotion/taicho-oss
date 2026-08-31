@@ -16,21 +16,21 @@ import type {
   ObservationRecord,
 } from '../domain/qualification';
 import {
-  DEFAULT_RESEARCH_MODEL,
   defaultCompleteJson,
   type DimensionResearchDeps,
 } from './dimension-research';
+import { modelSlug } from '@content-automation/platform/agents/model';
+
+export const matchEvaluationItemSchema = z.object({
+  dimensionKey: z.string(),
+  matchScore: z.number().min(0).max(1),
+  classification: z.enum(['strong_match', 'partial_match', 'weak_match', 'mismatch']),
+  hardExclusionTriggered: z.boolean(),
+  rationale: z.string(),
+});
 
 export const matchEvaluationSchema = z.object({
-  matches: z.array(
-    z.object({
-      dimensionKey: z.string(),
-      matchScore: z.number().min(0).max(1),
-      classification: z.enum(['strong_match', 'partial_match', 'weak_match', 'mismatch']),
-      hardExclusionTriggered: z.boolean(),
-      rationale: z.string(),
-    }),
-  ),
+  matches: z.array(matchEvaluationItemSchema),
 });
 
 export function buildEvaluationPrompt(
@@ -49,7 +49,7 @@ Observation: ${obs.observedValue ?? '(none)'}`;
     })
     .join('\n\n');
 
-  return `Compare each observation against its dimension's ideal value.
+  return `Compare each observation against its dimension's ideal value. Return exactly one match for every dimension block and copy each dimension key verbatim.
 
 For every dimension return:
 - matchScore (0-1): how closely the observation matches the ideal value. Semantic comparison only — judge the substance, not the wording.
@@ -63,8 +63,9 @@ ${blocks}`;
 }
 
 /**
- * Evaluate fit matches for the given dimensions and observations.
- * Dimensions without an observation are skipped (not zero-scored).
+ * Evaluate fit matches for every fit dimension. Missing or unsupported
+ * observations are retained explicitly as insufficient evidence rather than
+ * being confused with a factual mismatch or disappearing from the scorecard.
  */
 export async function evaluateFitMatches(
   dims: DimensionDefinition[],
@@ -74,15 +75,19 @@ export async function evaluateFitMatches(
 ): Promise<DimensionMatch[]> {
   const fitDims = dims.filter((d) => d.dimensionType === 'fit');
   const obsByKey = new Map(observations.map((o) => [o.dimensionKey, o]));
-  const evaluable = fitDims.filter((d) => obsByKey.has(d.key));
-  if (evaluable.length === 0) return [];
+  const hasUsableEvidence = (dimension: DimensionDefinition) => {
+    const observation = obsByKey.get(dimension.key);
+    if (!observation || observation.confidence <= 0) return false;
+    return !/^no evidence found\b/i.test(observation.observedValue?.trim() ?? '');
+  };
+  const evaluable = fitDims.filter(hasUsableEvidence);
 
   const completeJson = deps.completeJson ?? defaultCompleteJson;
 
   const system =
     'You compare research observations against ideal values. Semantic evaluation only; policy, recency and confidence are handled deterministically elsewhere. Return only JSON.';
   const prompt = buildEvaluationPrompt(evaluable, observations);
-  const model = process.env.OUTREACH_RESEARCH_MODEL?.trim() || DEFAULT_RESEARCH_MODEL;
+  const model = modelSlug();
   const tracedCompletion = traceable(completeJson, {
     name: 'research.match_evaluation',
     kind: 'generation',
@@ -100,20 +105,57 @@ export async function evaluateFitMatches(
       schema: input.schemaName,
     }),
   });
-  const raw = await tracedCompletion({
-    schemaName: 'match_evaluation',
-    schema: matchEvaluationSchema,
-    system,
-    prompt,
-  });
-  const parsed = matchEvaluationSchema.parse(raw);
-  const evaluated = new Map(parsed.matches.map((m) => [m.dimensionKey, m]));
+  const evaluated = new Map<string, z.infer<typeof matchEvaluationItemSchema>>();
+  if (evaluable.length > 0) {
+    const raw = await tracedCompletion({
+      schemaName: 'match_evaluation',
+      schema: matchEvaluationSchema,
+      system,
+      prompt,
+    });
+    const rawMatches = raw && typeof raw === 'object' && Array.isArray((raw as { matches?: unknown }).matches)
+      ? (raw as { matches: unknown[] }).matches
+      : [];
+    const normalizedKey = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+    for (const candidate of rawMatches) {
+      const parsed = matchEvaluationItemSchema.safeParse(candidate);
+      if (!parsed.success) continue;
+      const evaluation = parsed.data;
+      const dimension = evaluable.find((candidate) => (
+        candidate.key === evaluation.dimensionKey
+        || normalizedKey(candidate.key) === normalizedKey(evaluation.dimensionKey)
+        || normalizedKey(candidate.name) === normalizedKey(evaluation.dimensionKey)
+      ));
+      if (dimension && !evaluated.has(dimension.key)) evaluated.set(dimension.key, evaluation);
+    }
+  }
 
   const matches: DimensionMatch[] = [];
-  for (const dim of evaluable) {
+  for (const dim of fitDims) {
+    const obs = obsByKey.get(dim.key);
+    if (!obs || !hasUsableEvidence(dim)) {
+      matches.push({
+        dimensionKey: dim.key,
+        matchScore: 0,
+        effectiveMatch: 0,
+        classification: 'insufficient_evidence',
+        hardExclusion: false,
+        confidence: 0,
+      });
+      continue;
+    }
     const evaluation = evaluated.get(dim.key);
-    if (!evaluation) continue;
-    const obs = obsByKey.get(dim.key)!;
+    if (!evaluation) {
+      matches.push({
+        dimensionKey: dim.key,
+        matchScore: 0,
+        effectiveMatch: 0,
+        classification: 'insufficient_evidence',
+        hardExclusion: false,
+        confidence: effectiveConfidence(obs.confidence, obs.researchedAt, dim.freshnessWindowDays, now),
+      });
+      continue;
+    }
     const confidence = effectiveConfidence(
       obs.confidence,
       obs.researchedAt,
@@ -121,6 +163,8 @@ export async function evaluateFitMatches(
       now,
     );
     const matchScore = Math.min(1, Math.max(0, evaluation.matchScore));
+    const claimIds = obs.claimIds ?? [];
+    const isMismatch = evaluation.classification === 'mismatch';
     matches.push({
       dimensionKey: dim.key,
       matchScore,
@@ -128,6 +172,8 @@ export async function evaluateFitMatches(
       classification: evaluation.classification,
       hardExclusion: evaluation.hardExclusionTriggered && dim.hardExclusionRule != null,
       confidence,
+      supportingClaimIds: isMismatch ? [] : claimIds,
+      contradictingClaimIds: isMismatch ? claimIds : [],
     });
   }
   return matches;

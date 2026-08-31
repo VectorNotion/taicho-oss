@@ -219,7 +219,7 @@ test("publishing tables are owned by the canonical migration", async () => {
   );
   assert.deepEqual(
     tables.rows.map((r: { table_name: string }) => r.table_name),
-    ["channels", "posts"],
+    ["channels", "content_assets", "content_generation_runs", "content_post_media", "posts"],
   );
 
   // And the tables are usable after the re-run.
@@ -626,8 +626,9 @@ test("runPublishPass publishes due posts through the registered adapter", async 
   assert.equal(seen[0].channel.id, "stub-ch");
 
   for (const id of [p1.id, p2.id]) {
-    const row = (await pool.query(`SELECT status, result_url, claimed_at FROM posts WHERE id = $1`, [id])).rows[0];
+    const row = (await pool.query(`SELECT status, attempts, result_url, claimed_at FROM posts WHERE id = $1`, [id])).rows[0];
     assert.equal(row.status, "published");
+    assert.equal(Number(row.attempts), 1);
     assert.equal(row.result_url, `https://stub.example/${id}`);
     assert.equal(row.claimed_at, null);
   }
@@ -639,8 +640,14 @@ test("runPublishPass publishes due posts through the registered adapter", async 
   assert.equal(outcomes.find((o) => o.post.id === p1.id)?.resultUrl, `https://stub.example/${p1.id}`);
 });
 
-test("runPublishPass failure path: requeue with backoff, then terminal failure", async () => {
+test("runPublishPass failure path emits every calendar transition through terminal failure", async (context) => {
   const pool = await freshSchema();
+  const recorded: ProductEventInsert[] = [];
+  setProductEventSinkForTests(async (event) => {
+    recorded.push(event);
+    return { id: randomUUID() };
+  });
+  context.after(() => setProductEventSinkForTests(null));
   registerAdapter({
     destination: "stub-fail",
     credentialKind: "none",
@@ -691,6 +698,13 @@ test("runPublishPass failure path: requeue with backoff, then terminal failure",
   assert.equal(outcomes.length, 1);
   assert.equal(outcomes[0].status, "failed");
   assert.equal(outcomes[0].error, "platform says no");
+  await drainProductEvents();
+  assert.deepEqual(
+    recorded
+      .filter((event) => event.name === "calendar.entry.changed")
+      .map((event) => (event.payload.entry as { state?: string }).state),
+    ["scheduled", "in_progress", "scheduled", "in_progress", "failed"],
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -915,13 +929,21 @@ test("schedulePost emits post.scheduled with post refs when an organization is r
       }),
     );
     await drainProductEvents();
-    assert.equal(recorded.length, 1);
-    assert.equal(recorded[0].name, "post.scheduled");
-    assert.equal(recorded[0].organizationId, "org-pub-events");
-    assert.equal(recorded[0].postId, post.id);
-    assert.equal(recorded[0].payload.draftId, "draft-s");
-    assert.equal(recorded[0].payload.destination, "events-sched");
-    assert.equal(recorded[0].payload.channelId, "sched-ch");
+    const scheduled = recorded.find((event) => event.name === "post.scheduled");
+    const knowledge = recorded.find((event) => event.name === "knowledge.publishing.post.changed");
+    const calendar = recorded.find((event) => event.name === "calendar.entry.changed");
+    assert.ok(scheduled);
+    assert.ok(knowledge);
+    assert.ok(calendar);
+    assert.equal(scheduled.organizationId, "org-pub-events");
+    assert.equal(scheduled.postId, post.id);
+    assert.equal(scheduled.payload.draftId, "draft-s");
+    assert.equal(scheduled.payload.destination, "events-sched");
+    assert.equal(scheduled.payload.channelId, "sched-ch");
+    assert.equal(knowledge.payload.status, "scheduled");
+    assert.equal(calendar.payload.kindKey, "publishing.post");
+    assert.equal(calendar.payload.sourceId, post.id);
+    assert.equal((calendar.payload.entry as { state?: string }).state, "scheduled");
   } finally {
     setProductEventSinkForTests(null);
   }
@@ -973,7 +995,13 @@ test("runPublishPass emits post.published and post.failed for terminal outcomes"
     assert.equal(published.payload.resultUrl, `https://stub.example/${good.id}`);
     assert.equal(failed.postId, bad.id);
     assert.equal(failed.payload.error, "permanently rejected");
-    assert.equal(recorded.length, 2);
+    assert.equal(recorded.filter((event) => event.name === "knowledge.publishing.post.changed").length, 2);
+    const calendarEvents = recorded.filter((event) => event.name === "calendar.entry.changed");
+    assert.equal(calendarEvents.length, 4);
+    assert.deepEqual(
+      calendarEvents.map((event) => (event.payload.entry as { state?: string }).state).sort(),
+      ["completed", "failed", "in_progress", "in_progress"],
+    );
   } finally {
     setProductEventSinkForTests(null);
   }

@@ -16,9 +16,33 @@ export const ToolFallback: ToolCallMessagePartComponent = ({
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const isRunning = status.type === "running" || status.type === "requires-action";
+  const output = result && typeof result === "object" && !Array.isArray(result)
+    ? result as { error?: unknown; streamError?: unknown; effectState?: unknown }
+    : null;
+  const resultError = typeof output?.streamError === "string"
+    ? output.streamError
+    : typeof output?.error === "string"
+      ? output.error
+      : null;
+  const statusError = status.type === "incomplete"
+    ? typeof status.error === "string"
+      ? status.error
+      : status.error && typeof status.error === "object" && "message" in status.error && typeof status.error.message === "string"
+        ? status.error.message
+        : null
+    : null;
 
-  if (isError || status.type === "incomplete") {
-    return <ToolRecoveryCard toolName={toolName} status={status} isError={isError} partialResult={isError ? undefined : result} />;
+  if (isError || status.type === "incomplete" || resultError) {
+    return (
+      <ToolRecoveryCard
+        toolName={toolName}
+        status={status}
+        isError={isError}
+        partialResult={isError ? undefined : result}
+        errorMessage={resultError ?? statusError ?? undefined}
+        effectState={output?.effectState === "committed" ? "committed" : "none"}
+      />
+    );
   }
 
   return (

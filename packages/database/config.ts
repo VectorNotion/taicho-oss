@@ -9,14 +9,7 @@ export function dedicatedDatabaseRolesRequired(): boolean {
     || process.env.DATABASE_ROLE_MODE?.trim().toLowerCase() === "strict";
 }
 
-export function adminPoolConfig(): PoolConfig {
-  const connectionString =
-    process.env.DRIZZLE_DATABASE_URL ??
-    process.env.DATABASE_ADMIN_URL ??
-    process.env.DATABASE_URL;
-
-  if (connectionString) return { connectionString };
-
+function localDatabaseConfig(): PoolConfig {
   return {
     host: process.env.POSTGRES_HOST ?? "localhost",
     port: Number(process.env.POSTGRES_PORT ?? 5432),
@@ -25,3 +18,40 @@ export function adminPoolConfig(): PoolConfig {
     database: process.env.POSTGRES_DB ?? "langgraph",
   };
 }
+
+function requiredDatabaseUrl(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  if (value) return value;
+  if (dedicatedDatabaseRolesRequired()) {
+    throw new Error(`${name} is required in production or strict database-role mode.`);
+  }
+  return undefined;
+}
+
+/** The single NOBYPASSRLS identity used by every long-running application. */
+export function runtimePoolConfig(): PoolConfig {
+  const connectionString = requiredDatabaseUrl("DATABASE_URL");
+  return connectionString ? { connectionString } : localDatabaseConfig();
+}
+
+/** The single BYPASSRLS identity used only for bounded work discovery. */
+export function controlPoolConfig(): PoolConfig {
+  const connectionString = requiredDatabaseUrl("DATABASE_CONTROL_URL");
+  return connectionString ? { connectionString } : localDatabaseConfig();
+}
+
+/** The short-lived release identity that owns every schema object and runs DDL. */
+export function migrationPoolConfig(): PoolConfig {
+  const connectionString = process.env.DATABASE_MIGRATION_URL?.trim();
+
+  if (connectionString) return { connectionString };
+  if (dedicatedDatabaseRolesRequired()) {
+    throw new Error(
+      "DATABASE_MIGRATION_URL is required for production or strict database migrations.",
+    );
+  }
+  return localDatabaseConfig();
+}
+
+/** @deprecated Migration callers should use migrationPoolConfig. */
+export const adminPoolConfig = migrationPoolConfig;

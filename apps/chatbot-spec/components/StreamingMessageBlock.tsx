@@ -51,16 +51,16 @@ export function StreamingMessageBlock({ looping, paused }: { looping: boolean; p
     }
     if (phase === 'thinking') {
       if (thinkStep >= THINKING_STEPS.length) {
-        setPhase('streaming');
-        return;
+        const t = setTimeout(() => setPhase('streaming'), 0);
+        return () => clearTimeout(t);
       }
       const t = setTimeout(() => setThinkStep((step) => step + 1), 850);
       return () => clearTimeout(t);
     }
     if (phase === 'streaming') {
       if (wordCount >= WORDS.length) {
-        setPhase('complete');
-        return;
+        const t = setTimeout(() => setPhase('complete'), 0);
+        return () => clearTimeout(t);
       }
       const t = setTimeout(() => setWordCount((count) => count + 1), 60);
       return () => clearTimeout(t);

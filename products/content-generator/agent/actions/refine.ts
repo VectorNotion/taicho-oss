@@ -21,6 +21,7 @@ import {
   queryRelatedPublishedContent,
 } from '../../data/content-repository';
 import { getResearchItemsByTopicIds } from '../../data/research-repository';
+import { recordContentKnowledgeArtifact } from '../../knowledge-service';
 
 // --------------------------------------------------------------------------
 // Structured-output primitive (see ideas.ts for rationale).
@@ -70,24 +71,143 @@ const defaultGenerate: StructuredGenerate = async ({
 // Schema (ported from RefinedIdeaOutput Pydantic model).
 // --------------------------------------------------------------------------
 
+const refinementText = z.string().trim().min(1).max(2_000);
+
 const refinedIdeaSchema = z.object({
   outline: z
-    .array(z.string())
+    .array(refinementText)
+    .min(5)
+    .max(10)
     .describe('Detailed outline with 5-10 main points/sections'),
   key_points: z
-    .array(z.string())
+    .array(refinementText)
+    .min(3)
+    .max(5)
     .describe('3-5 key takeaways the audience should learn'),
   suggested_citations: z
-    .array(z.string())
+    .array(refinementText)
     .describe('Research items to cite (by title)'),
   inner_link_suggestions: z
-    .array(z.string())
+    .array(refinementText)
     .describe('Titles of related content to link to'),
-  hook: z.string().describe('Compelling opening hook or angle for the content'),
-  call_to_action: z
-    .string()
+  hook: refinementText.describe('Compelling opening hook or angle for the content'),
+  call_to_action: refinementText
     .describe('What action should the audience take after consuming this'),
 });
+
+export type ContentRefinementMode = 'live' | 'local';
+
+export function contentRefinementMode(): ContentRefinementMode {
+  return process.env.NODE_ENV !== 'production'
+    && process.env.CONTENT_REFINEMENT_MODE?.trim().toLowerCase() === 'stub'
+    ? 'local'
+    : 'live';
+}
+
+function concise(value: string, maxLength = 240): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function unique(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  return values.flatMap((value) => {
+    const normalized = value?.replace(/\s+/g, ' ').trim();
+    if (!normalized) return [];
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [normalized];
+  });
+}
+
+function cleanGeneratedLine(value: string): string {
+  return value
+    .replace(/\[\^\d+\]/g, '')
+    .trim()
+    .replace(/^>\s*/, '')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^(?:[-*+–—]|\d+[.)])\s+/, '')
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanGeneratedList(values: string[], maxItems: number): string[] {
+  return unique(values.flatMap((value) => value.split(/\r?\n/).map(cleanGeneratedLine)))
+    .slice(0, maxItems);
+}
+
+function isCitationPlaceholder(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/[.!]+$/, '').trim();
+  return normalized === 'none'
+    || normalized === 'n/a'
+    || /^no (?:related )?(?:research|citations?|sources?)(?: (?:available|provided|found|yet))?$/.test(normalized);
+}
+
+function normalizeRefinement(value: z.infer<typeof refinedIdeaSchema>): z.infer<typeof refinedIdeaSchema> {
+  return refinedIdeaSchema.parse({
+    ...value,
+    outline: cleanGeneratedList(value.outline, 10),
+    key_points: cleanGeneratedList(value.key_points, 5),
+    suggested_citations: cleanGeneratedList(value.suggested_citations, 10)
+      .filter((citation) => !isCitationPlaceholder(citation)),
+    inner_link_suggestions: cleanGeneratedList(value.inner_link_suggestions, 10),
+    hook: cleanGeneratedLine(value.hook),
+    call_to_action: cleanGeneratedLine(value.call_to_action),
+  });
+}
+
+function buildLocalRefinement(input: {
+  title: string;
+  description: string;
+  rationale: string;
+  sourceTopics: string[];
+  researchTitles: string[];
+  relatedContentTitles: string[];
+}): z.infer<typeof refinedIdeaSchema> {
+  const description = concise(input.description);
+  const rationale = concise(input.rationale);
+  const distinctRationale = rationale.toLowerCase() === description.toLowerCase()
+    ? null
+    : rationale;
+  const topicSummary = input.sourceTopics.length
+    ? concise(input.sourceTopics.join(', '), 180)
+    : null;
+  const researchSummary = input.researchTitles.length
+    ? concise(input.researchTitles.join('; '), 220)
+    : null;
+
+  return refinedIdeaSchema.parse({
+    outline: unique([
+      `Frame the central question: ${concise(input.title, 180)}`,
+      `Establish the starting context: ${description}`,
+      distinctRationale ? `Explain why this matters: ${distinctRationale}` : null,
+      topicSummary ? `Define the key concepts and boundaries: ${topicSummary}` : null,
+      researchSummary
+        ? `Examine the available evidence from: ${researchSummary}`
+        : 'Identify the evidence that would validate or challenge the central argument.',
+      'Make the core case, connecting each claim to the available evidence.',
+      'Address the strongest counterargument, limitations, and trade-offs.',
+      'Turn the conclusion into a practical decision framework and next steps.',
+    ]).slice(0, 10),
+    key_points: unique([
+      description,
+      distinctRationale,
+      topicSummary ? `The argument is anchored in ${topicSummary}.` : null,
+      researchSummary
+        ? `The evidence base starts with ${researchSummary}.`
+        : 'Claims that need evidence should remain explicit until research is attached.',
+      'A useful Content Base separates the core claim, supporting evidence, trade-offs, and practical next step.',
+    ]).slice(0, 5),
+    suggested_citations: unique(input.researchTitles).slice(0, 10),
+    inner_link_suggestions: unique(input.relatedContentTitles).slice(0, 10),
+    hook: `Start with the tension behind “${concise(input.title, 180)}”.`,
+    call_to_action: 'Choose one practical next step and identify the evidence needed to support it.',
+  });
+}
 
 // --------------------------------------------------------------------------
 // Prompts (ported verbatim from REFINE_IDEA_PROMPT).
@@ -169,6 +289,7 @@ export interface RefineDeps {
   queryRelatedPublishedContent: typeof queryRelatedPublishedContent;
   getResearchItemsByTopicIds: typeof getResearchItemsByTopicIds;
   updateContentIdea: typeof updateContentIdea;
+  recordKnowledgeArtifact: typeof recordContentKnowledgeArtifact;
   generate: StructuredGenerate;
 }
 
@@ -178,13 +299,14 @@ const defaultDeps: RefineDeps = {
   queryRelatedPublishedContent,
   getResearchItemsByTopicIds,
   updateContentIdea,
+  recordKnowledgeArtifact: recordContentKnowledgeArtifact,
   generate: defaultGenerate,
 };
 
 async function runRefineContentIdeaInternal(
   payload: { ideaId: string },
-  options: { deps?: Partial<RefineDeps> } = {},
-): Promise<{ refined: true }> {
+  options: { deps?: Partial<RefineDeps>; mode?: ContentRefinementMode } = {},
+): Promise<{ refined: true; mode: ContentRefinementMode }> {
   const deps = { ...defaultDeps, ...options.deps };
   const { ideaId } = payload;
 
@@ -270,23 +392,33 @@ async function runRefineContentIdeaInternal(
   const contentType = (idea as { type?: string }).type ?? 'blog_post';
   const targetPlatform = (idea as { targetPlatform?: string }).targetPlatform ?? 'blog';
 
-  const refined = await deps.generate({
-    agentId: 'refine-idea-agent',
-    agentName: 'Refine Content Idea Agent',
-    instructions: refineSystemPrompt(mission, identity, voice),
-    prompt: refineUserPrompt({
-      title: idea.title,
-      contentType,
-      description: idea.description,
-      targetPlatform,
-      rationale: idea.rationale,
-      researchContext,
-      relatedContent: relatedContentText,
-      sourceTopics: sourceTopicsText,
-    }),
-    schema: refinedIdeaSchema,
-    temperature: 0.7,
-  });
+  const mode = options.mode ?? contentRefinementMode();
+  const refined = normalizeRefinement(refinedIdeaSchema.parse(mode === 'local'
+    ? buildLocalRefinement({
+        title: idea.title,
+        description: idea.description,
+        rationale: idea.rationale,
+        sourceTopics: sourceTopics.map((topic) => topic.name),
+        researchTitles: combinedResearch.map((research) => research.title),
+        relatedContentTitles: relatedContent.map((content) => content.title),
+      })
+    : await deps.generate({
+        agentId: 'refine-idea-agent',
+        agentName: 'Refine Content Idea Agent',
+        instructions: refineSystemPrompt(mission, identity, voice),
+        prompt: refineUserPrompt({
+          title: idea.title,
+          contentType,
+          description: idea.description,
+          targetPlatform,
+          rationale: idea.rationale,
+          researchContext,
+          relatedContent: relatedContentText,
+          sourceTopics: sourceTopicsText,
+        }),
+        schema: refinedIdeaSchema,
+        temperature: 0.7,
+      })));
 
   await observeWorkflowStep('content.idea.persist_refinement', {
     kind: 'persistence',
@@ -299,7 +431,20 @@ async function runRefineContentIdeaInternal(
       suggestedCitations: refined.suggested_citations,
     }));
 
-  return { refined: true };
+  await deps.recordKnowledgeArtifact({
+    kind: 'content.idea',
+    externalId: idea.id,
+    usedClaimIds: idea.sourceClaimIds ?? [],
+    usedEvidenceIds: idea.sourceEvidenceIds ?? [],
+    metadata: {
+      title: idea.title,
+      status: 'refined',
+      priority: idea.priority,
+      sourceTopicIds,
+    },
+  });
+
+  return { refined: true, mode };
 }
 
 export const runRefineContentIdea = traceable(runRefineContentIdeaInternal, {

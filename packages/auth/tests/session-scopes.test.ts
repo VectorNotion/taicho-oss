@@ -12,7 +12,7 @@ test("owner and admin sessions receive the full workspace scope set", () => {
   for (const role of ["owner", "admin"]) {
     const scopes = new Set(sessionScopesForRole(role));
     for (const scope of [
-      "vn:read", "vn:workspace:read", "vn:operations:read",
+      "vn:read", "vn:workspace:read", "vn:operations:read", "vn:user:write",
       "vn:outreach:read", "vn:outreach:write",
       "vn:content:read", "vn:content:write", "vn:content:publish",
       "vn:cascade:read", "vn:cascade:write",
@@ -26,12 +26,13 @@ test("owner and admin sessions receive the full workspace scope set", () => {
   }
 });
 
-test("viewer sessions are read-only", () => {
+test("viewer sessions can only mutate their own user preferences", () => {
   const scopes = sessionScopesForRole("viewer");
   assert.ok(scopes.includes("vn:read"));
   assert.ok(scopes.includes("vn:outreach:read"));
+  assert.ok(scopes.includes("vn:user:write"));
   for (const scope of scopes) {
-    assert.ok(!scope.endsWith(":write") && scope !== "vn:content:publish" && scope !== "vn:ai:execute" && scope !== "vn:workspace:admin", `viewer must not receive ${scope}`);
+    assert.ok((!scope.endsWith(":write") || scope === "vn:user:write") && scope !== "vn:content:publish" && scope !== "vn:ai:execute" && scope !== "vn:workspace:admin", `viewer must not receive ${scope}`);
   }
 });
 

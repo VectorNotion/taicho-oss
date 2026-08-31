@@ -35,6 +35,9 @@ export interface ProspectPipelineState {
 export interface ProspectNote {
   id: string;
   content: string; // Rich text HTML from TipTap
+  revision: number;
+  createdBy?: string;
+  updatedBy?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -73,6 +76,7 @@ export interface Prospect {
   catalogItemId?: string;
   catalogItemName?: string;
   pipeline?: ProspectPipelineState;
+  qualificationStatus?: import("./qualification").QualificationStatus | null;
 
   // Context
   about?: string; // LinkedIn bio (from Sales Navigator capture)
@@ -174,7 +178,7 @@ export const PROSPECT_SOURCE_CONFIG: Record<ProspectSource, { label: string }> =
 };
 
 // Outreach message types
-export type OutreachMedium = "inmail" | "inmail_traditional" | "email" | "content_comment";
+export type OutreachMedium = "inmail" | "inmail_traditional" | "email" | "content_comment" | "connection_note";
 
 export type OutreachStatus = "draft" | "sent";
 
@@ -203,6 +207,8 @@ export interface OutreachMessage {
   promptContentHash?: string;
   catalogItemId?: string;
   catalogItemName?: string;
+  usedClaimIds?: string[];
+  usedEvidenceIds?: string[];
 }
 
 export interface OutreachMessageWithProspect {
@@ -229,6 +235,8 @@ export interface CreateOutreachInput {
   promptContentHash?: string;
   catalogItemId?: string;
   catalogItemName?: string;
+  usedClaimIds?: string[];
+  usedEvidenceIds?: string[];
 }
 
 export interface UpdateOutreachInput {
@@ -247,6 +255,7 @@ export const OUTREACH_MEDIUM_CONFIG: Record<
   inmail_traditional: { label: "Traditional InMail", icon: "Linkedin" },
   email: { label: "Email", icon: "Mail" },
   content_comment: { label: "Content comment", icon: "MessageSquare" },
+  connection_note: { label: "Connection note", icon: "UserPlus" },
 };
 
 export const OUTREACH_STATUS_CONFIG: Record<
@@ -337,6 +346,8 @@ export interface ProspectActivity {
     funnelId?: string;
     funnelName?: string;
   };
+  createdBy?: string;
+  updatedBy?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -356,9 +367,11 @@ export interface CreateActivityInput {
     funnelId?: string;
     funnelName?: string;
   };
+  createdBy?: string;
 }
 
 export interface UpdateActivityInput {
+  type?: ProspectActivityType;
   title?: string;
   notes?: string;
   metadata?: {
@@ -372,6 +385,7 @@ export interface UpdateActivityInput {
     funnelId?: string;
     funnelName?: string;
   };
+  updatedBy?: string;
 }
 
 export const ACTIVITY_TYPE_CONFIG: Record<
@@ -417,6 +431,7 @@ export interface Persona {
   targetDomains?: string[]; // ["SaaS", "FinTech"]
   signals: string[]; // ["AI interest", "scaling challenges"]
   isActive: boolean;
+  revision: number;
   createdAt: string;
   updatedAt?: string;
 }
@@ -443,6 +458,7 @@ export interface UpdatePersonaInput {
   targetDomains?: string[];
   signals?: string[];
   isActive?: boolean;
+  expectedRevision?: number;
 }
 
 // ============= PROSPECT QUALIFICATION =============

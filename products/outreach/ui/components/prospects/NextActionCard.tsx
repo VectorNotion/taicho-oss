@@ -282,6 +282,15 @@ export function NextActionCard({
             <Pencil className="size-3.5" />
             Edit
           </Button>
+          <Button
+            aria-label={`Remove ${next.title}`}
+            className="text-muted-foreground hover:text-destructive"
+            onClick={() => onDelete(next.id)}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
         </div>
       </div>
       {items.length > 1 && (

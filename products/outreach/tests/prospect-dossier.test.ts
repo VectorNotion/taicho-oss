@@ -92,3 +92,24 @@ test("a decision is stale when either independent score is newer", () => {
   assert.equal(qualificationIsStale("2026-08-10T00:00:00.000Z", ["2026-08-11T00:00:00.000Z"]), true);
   assert.equal(qualificationIsStale("2026-08-12T00:00:00.000Z", ["2026-08-11T00:00:00.000Z"]), false);
 });
+
+test("a targeting-policy edit stays stale until the affected research score is refreshed", () => {
+  assert.equal(qualificationIsStale(
+    "2026-08-12T00:00:00.000Z",
+    ["2026-08-10T00:00:00.000Z", "2026-08-10T00:00:00.000Z"],
+    ["2026-08-11T00:00:00.000Z"],
+  ), true);
+  assert.equal(qualificationIsStale(
+    "2026-08-13T00:00:00.000Z",
+    ["2026-08-12T00:00:00.000Z", "2026-08-12T00:00:00.000Z"],
+    ["2026-08-11T00:00:00.000Z"],
+  ), false);
+});
+
+test("timezone-less graph policy timestamps are compared as UTC", () => {
+  assert.equal(qualificationIsStale(
+    "2026-08-27T10:47:42.000Z",
+    ["2026-08-27T10:47:42.000Z"],
+    ["2026-08-27T10:47:45.000000000"],
+  ), true);
+});

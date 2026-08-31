@@ -4,7 +4,7 @@
  * stays knowledge-only.
  */
 import { action_items as actionItemsTable, databaseFor } from '@content-automation/database';
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { getJobPool, validateJobOrganizationId } from '@content-automation/platform/jobs/pool';
 import { currentGraphOrganizationId } from '@content-automation/platform/data/organization-context';
 import {
@@ -17,6 +17,7 @@ import {
   type UpdateActionItemInput,
   type FollowUpGenerationType,
 } from '../domain/action-items';
+import { recordActionItemCalendarChange } from '../calendar-events';
 
 function organizationId(): string {
   const current = currentGraphOrganizationId();
@@ -61,7 +62,9 @@ export async function createActionItem(input: CreateActionItemInput): Promise<Ac
       payload: input.payload ?? null,
     })
     .returning();
-  return mapRow(row);
+  const item = mapRow(row);
+  await recordActionItemCalendarChange(item);
+  return item;
 }
 
 /** RLS scopes every query already; the explicit predicate is defense-in-depth
@@ -84,7 +87,9 @@ export async function updateActionItem(
     })
     .where(and(eq(actionItemsTable.id, id), inOrganization()))
     .returning();
-  return row ? mapRow(row) : null;
+  const item = row ? mapRow(row) : null;
+  if (item) await recordActionItemCalendarChange(item);
+  return item;
 }
 
 async function transition(id: string, status: 'done' | 'dismissed'): Promise<ActionItem | null> {
@@ -94,7 +99,9 @@ async function transition(id: string, status: 'done' | 'dismissed'): Promise<Act
     .set({ status, completed_at: now, updated_at: now })
     .where(and(eq(actionItemsTable.id, id), eq(actionItemsTable.status, 'open'), inOrganization()))
     .returning();
-  return row ? mapRow(row) : null;
+  const item = row ? mapRow(row) : null;
+  if (item) await recordActionItemCalendarChange(item);
+  return item;
 }
 
 export function completeActionItem(id: string): Promise<ActionItem | null> {
@@ -109,7 +116,8 @@ export async function deleteActionItem(id: string): Promise<boolean> {
   const rows = await database()
     .delete(actionItemsTable)
     .where(and(eq(actionItemsTable.id, id), inOrganization()))
-    .returning({ id: actionItemsTable.id });
+    .returning();
+  if (rows[0]) await recordActionItemCalendarChange(mapRow(rows[0]), 'remove');
   return rows.length > 0;
 }
 
@@ -183,7 +191,11 @@ export async function ensureFollowUpForProspect(
     })
     .onConflictDoNothing()
     .returning();
-  if (created) return mapRow(created);
+  if (created) {
+    const item = mapRow(created);
+    await recordActionItemCalendarChange(item);
+    return item;
+  }
   const [raced] = await database()
     .select()
     .from(actionItemsTable)
@@ -195,7 +207,9 @@ export async function ensureFollowUpForProspect(
     ))
     .limit(1);
   if (!raced) throw new Error(`Could not ensure a follow-up for prospect ${prospectId}.`);
-  return mapRow(raced);
+  const item = mapRow(raced);
+  await recordActionItemCalendarChange(item);
+  return item;
 }
 
 /**
@@ -215,7 +229,7 @@ export async function ensureGeneratedFollowUp(input: {
 }): Promise<ActionItem> {
   const payload = generatedFollowUpPayload(input);
   const now = input.now ?? new Date();
-  return database().transaction(async (transaction) => {
+  const result = await database().transaction(async (transaction) => {
     const [existing] = await transaction
       .select()
       .from(actionItemsTable)
@@ -229,10 +243,11 @@ export async function ensureGeneratedFollowUp(input: {
     const existingPayload = existing?.payload as Record<string, unknown> | null | undefined;
     if (existing && existingPayload?.triggerMessageId === input.messageId
       && existingPayload?.cadenceKey === payload.cadenceKey) {
-      return mapRow(existing);
+      return { item: mapRow(existing), superseded: null };
     }
+    let superseded: ActionItem | null = null;
     if (existing) {
-      await transaction
+      const [updated] = await transaction
         .update(actionItemsTable)
         .set({
           status: 'done',
@@ -243,7 +258,9 @@ export async function ensureGeneratedFollowUp(input: {
             supersededByMessageId: input.messageId,
           },
         })
-        .where(and(eq(actionItemsTable.id, existing.id), inOrganization()));
+        .where(and(eq(actionItemsTable.id, existing.id), inOrganization()))
+        .returning();
+      superseded = updated ? mapRow(updated) : null;
     }
     const [created] = await transaction
       .insert(actionItemsTable)
@@ -256,19 +273,42 @@ export async function ensureGeneratedFollowUp(input: {
         payload,
       })
       .returning();
-    return mapRow(created);
+    return { item: mapRow(created), superseded };
   });
+  await Promise.all([
+    recordActionItemCalendarChange(result.item),
+    ...(result.superseded ? [recordActionItemCalendarChange(result.superseded)] : []),
+  ]);
+  return result.item;
 }
 
 /** Cross-store cleanup for prospect deletion: open items lose their target. */
 export async function dismissOpenActionItemsForProspect(prospectId: string): Promise<void> {
   const now = new Date().toISOString();
-  await database()
+  const rows = await database()
     .update(actionItemsTable)
     .set({ status: 'dismissed', completed_at: now, updated_at: now })
     .where(and(
       eq(actionItemsTable.prospect_id, prospectId),
       eq(actionItemsTable.status, 'open'),
       inOrganization(),
-    ));
+    ))
+    .returning();
+  await Promise.all(rows.map((row) => recordActionItemCalendarChange(mapRow(row))));
+}
+
+/** A deleted generated draft cannot retain an actionable automatic follow-up. */
+export async function dismissOpenGeneratedFollowUpForMessage(messageId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const rows = await database()
+    .update(actionItemsTable)
+    .set({ status: 'dismissed', completed_at: now, updated_at: now })
+    .where(and(
+      eq(actionItemsTable.source, 'auto_followup'),
+      eq(actionItemsTable.status, 'open'),
+      sql`${actionItemsTable.payload}->>'triggerMessageId' = ${messageId}`,
+      inOrganization(),
+    ))
+    .returning();
+  await Promise.all(rows.map((row) => recordActionItemCalendarChange(mapRow(row))));
 }

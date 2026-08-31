@@ -2,5 +2,5 @@
 @source "../../../packages/ui";
 @source "../components";
 
-html { scroll-behavior: smooth; }
+html { overflow-x: hidden; scroll-behavior: smooth; }
 body { overflow-x: hidden; }

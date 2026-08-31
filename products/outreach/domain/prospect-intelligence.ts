@@ -57,6 +57,7 @@ export interface ProspectEvidence {
 export interface InsightClaim {
   text: string;
   sourceIds: string[];
+  claimIds?: string[];
   owner?: string | null;
   dueDate?: string | null;
 }
@@ -82,6 +83,7 @@ export interface ProspectTimelineItem {
   title: string;
   detail: string;
   sourceIds: string[];
+  claimIds?: string[];
   significance: 'milestone' | 'standard';
 }
 

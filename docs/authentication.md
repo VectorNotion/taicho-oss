@@ -54,31 +54,19 @@ The shared console is available at `/admin` in the unified, Outreach, and Conten
   handling OAuth callbacks.
 - `BETTER_AUTH_TRUSTED_ORIGINS`: `https://cloud.taicho.ai`. Add another origin
   only when that deployment is intentionally supported and reviewed.
-- PostgreSQL: configure `DATABASE_URL` or the existing `POSTGRES_*` variables.
+- PostgreSQL uses exactly three identities against one database: `DATABASE_URL`
+  is the `NOBYPASSRLS` identity shared by every long-running app and worker;
+  `DATABASE_CONTROL_URL` is a `BYPASSRLS` identity with an explicit allowlist
+  for bounded cross-tenant work discovery; and `DATABASE_MIGRATION_URL` is the
+  short-lived release identity that owns every schema object and never enters a
+  long-running application pod.
 
-Tenant-owned Cascade and publishing records use separate runtime and
-control-plane DSNs:
-
-- `CASCADE_DATABASE_URL` / `CASCADE_DATABASE_ROLE` and
-  `PUBLISHING_DATABASE_URL` / `PUBLISHING_DATABASE_ROLE` must identify
-  `NOSUPERUSER NOBYPASSRLS` roles.
-- `CASCADE_ADMIN_DATABASE_URL` and `PUBLISHING_ADMIN_DATABASE_URL` are reserved
-  for migrations and organization-ID-only queue discovery. Request payload
-  reads and worker execution always use an organization-fixed runtime pool.
-- Generic content/outreach jobs follow the same boundary:
-  `JOBS_DATABASE_URL` / `JOBS_DATABASE_ROLE` identify the scoped
-  `NOSUPERUSER NOBYPASSRLS` runtime, while `JOBS_ADMIN_DATABASE_URL` is limited
-  to migrations, maintenance, and organization-ID-only queue discovery.
-- MCP audit, idempotency, operation, connection, and staged-media records use
-  `MCP_DATABASE_URL` / `MCP_DATABASE_ROLE` for tenant payloads.
-  `MCP_ADMIN_DATABASE_URL` is restricted to migration and ID-only
-  operation/upload discovery before the runtime re-enters the tenant pool.
-
-Database roles are provisioned outside the application. Deployment
-infrastructure owns role creation, passwords, and the grants required by each
-configured DSN. Drizzle migrations own schemas, tables, indexes, constraints,
-and row-level-security policies; application startup never creates roles or
+Database roles are provisioned by the environment bootstrap. Every schema,
+table, sequence, function, and migration is owned by the release-only migrator.
+The release audit centrally applies the runtime and control grants, including
+default privileges for future tables. Application startup never creates roles or
 changes privileges.
+
 ## Browser and session security
 
 - The database-backed session expires after seven days and rotates its expiry

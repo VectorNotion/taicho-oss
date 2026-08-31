@@ -5,6 +5,10 @@
   "type": "module",
   "exports": {
     ".": "./index.ts",
+    "./calendar-manifest": "./calendar-manifest.ts",
+    "./calendar-events": "./calendar-events.ts",
+    "./knowledge-manifest": "./knowledge-manifest.ts",
+    "./knowledge-service": "./knowledge-service.ts",
     "./data/content-repository": "./data/content-repository.ts",
     "./data/project-repository": "./data/project-repository.ts",
     "./data/research-repository": "./data/research-repository.ts",
@@ -17,7 +21,7 @@
     "./domain/resonance-experiment": "./domain/resonance-experiment.ts",
     "./domain/research": "./domain/research.ts",
     "./domain/topic": "./domain/topic.ts",
-    "./media/fal-provider": "./media/fal-provider.ts",
+    "./media/openrouter-provider": "./media/openrouter-provider.ts",
     "./media/repository": "./media/repository.ts",
     "./media/service": "./media/service.ts",
     "./media/templates": "./media/templates.ts",
@@ -28,8 +32,10 @@
     "./agent/actions/refine": "./agent/actions/refine.ts",
     "./agent/actions/research": "./agent/actions/research.ts",
     "./agent/actions/topics": "./agent/actions/topics.ts",
-    "./agent/knowledge-graph-tools": "./agent/knowledge-graph-tools.ts",
     "./publishing/channel-repository": "./publishing/channel-repository.ts",
+    "./publishing/channel-config": "./publishing/channel-config.ts",
+    "./publishing/calendar-events": "./publishing/calendar-events.ts",
+    "./publishing/knowledge-events": "./publishing/knowledge-events.ts",
     "./publishing/post-repository": "./publishing/post-repository.ts",
     "./publishing/pool": "./publishing/pool.ts",
     "./publishing/schema": "./publishing/schema.ts",
@@ -41,6 +47,7 @@
   },
   "dependencies": {
     "@content-automation/database": "workspace:*",
+    "@content-automation/knowledge": "workspace:*",
     "@content-automation/auth": "workspace:*",
     "@ai-sdk/react": "3.0.41",
     "@assistant-ui/react": "0.11.54",
@@ -62,6 +69,7 @@
     "react-markdown": "^10.1.0",
     "recharts": "2.15.4",
     "remark-gfm": "^4.0.1",
+    "sharp": "0.35.3",
     "tsx": "^4.20.6",
     "zod": "^4.3.5"
   },
@@ -72,7 +80,8 @@
     "publishing:worker": "tsx publishing/worker.ts",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:assign-legacy-publishing": "tsx scripts/assign-legacy-publishing.ts"
+    "db:assign-legacy-publishing": "tsx scripts/assign-legacy-publishing.ts",
+    "db:backfill-content-base-media": "tsx scripts/backfill-content-base-media.ts"
   },
   "license": "AGPL-3.0-only"
 }

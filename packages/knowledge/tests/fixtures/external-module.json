@@ -1,0 +1,12 @@
+{
+  "moduleKey": "partner",
+  "version": 1,
+  "knowledge": "contributes",
+  "entityTypes": [{ "key": "partner.signal", "name": "Partner signal", "description": "A signal supplied by a trusted partner module.", "baseKind": "event", "extends": "core.event", "sensitivity": "workspace", "allowedUses": ["research", "internal"] }],
+  "predicates": [{ "key": "partner.signal_about", "name": "Signal about", "description": "A partner signal concerns a canonical organization.", "subjectTypes": ["partner.signal"], "objectTypes": ["core.organization"], "objectKind": "entity", "sensitivity": "workspace", "allowedUses": ["research", "internal"] }],
+  "extractionProfiles": [{ "key": "partner.research", "name": "Partner research", "description": "Extract trusted partner signals.", "entityTypes": ["partner.signal", "core.organization"], "predicates": ["partner.signal_about"], "instructions": ["Require an exact partner evidence span."] }],
+  "readProjections": [{ "key": "partner.context", "name": "Partner context", "description": "Read authorized partner signals.", "entityTypes": ["partner.signal", "core.organization"], "predicates": ["partner.signal_about"], "allowedUses": ["research"], "defaultLimit": 20 }],
+  "capabilityIds": ["partner.signals.get"],
+  "aliases": [],
+  "migrations": []
+}

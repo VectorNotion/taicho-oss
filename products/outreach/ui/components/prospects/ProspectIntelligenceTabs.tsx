@@ -4,13 +4,16 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
 import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
+import { useDurableOperation } from "@content-automation/ui/hooks/use-durable-operation";
 import {
+  AlertCircle,
   Bot,
   CalendarDays,
   CheckCircle2,
@@ -38,6 +41,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -65,6 +69,7 @@ type ProspectIntelligenceTabsProps = {
   prospectId: string;
   prospectName: string;
   notesVersion: string;
+  availableSourceIds: string[];
   overview: ReactNode;
   notes: ReactNode;
 };
@@ -113,7 +118,7 @@ function TranscriptRow({ item, speakerLabel }: { item: ProspectEvidence; speaker
     : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   return (
     <div
-      className="grid scroll-mt-24 gap-1 border-b py-4 transition-colors last:border-b-0 target:rounded-md target:bg-primary/10 target:px-3 target:ring-2 target:ring-primary/30 sm:grid-cols-[180px_1fr] sm:gap-5"
+      className="grid scroll-mt-24 gap-1 border-b py-4 transition-colors last:border-b-0 target:rounded-md target:bg-primary/10 target:px-3 target:ring-2 target:ring-primary/30 data-[prospect-source-target=true]:rounded-md data-[prospect-source-target=true]:bg-primary/10 data-[prospect-source-target=true]:px-3 data-[prospect-source-target=true]:ring-2 data-[prospect-source-target=true]:ring-primary/30 sm:grid-cols-[180px_1fr] sm:gap-5"
       id={`evidence-${item.id}`}
     >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -185,12 +190,26 @@ function sourceLinkLabel(source: ProspectInsightSourceRef) {
 }
 
 function SourceLink({
+  available,
   source,
   onNavigate,
 }: {
+  available: boolean;
   source: ProspectInsightSourceRef;
   onNavigate: (source: ProspectInsightSourceRef, event: ReactMouseEvent<HTMLAnchorElement>) => void;
 }) {
+  if (!available) {
+    return (
+      <span
+        className="inline-flex max-w-full items-center gap-1 rounded-sm font-medium text-destructive"
+        data-testid="deleted-prospect-source"
+        title={`The cited ${source.type.replaceAll("_", " ")} source ${source.id} was deleted`}
+      >
+        <AlertCircle className="h-3 w-3 shrink-0" />
+        <span className="truncate">Deleted source · {sourceLinkLabel(source)}</span>
+      </span>
+    );
+  }
   return (
     <a
       className="inline-flex max-w-full items-center gap-1 rounded-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -207,11 +226,13 @@ function SourceLink({
 function ClaimList({
   title,
   claims,
+  availableSourceIds,
   sources,
   onNavigate,
 }: {
   title: string;
   claims: InsightClaim[];
+  availableSourceIds: ReadonlySet<string> | null;
   sources: Map<string, ProspectInsightSourceRef>;
   onNavigate: (source: ProspectInsightSourceRef, event: ReactMouseEvent<HTMLAnchorElement>) => void;
 }) {
@@ -232,7 +253,7 @@ function ClaimList({
               {claim.sourceIds.map((sourceId) => {
                 const source = sources.get(sourceId);
                 return source
-                  ? <SourceLink key={sourceId} onNavigate={onNavigate} source={source} />
+                  ? <SourceLink available={availableSourceIds?.has(source.id) ?? true} key={sourceId} onNavigate={onNavigate} source={source} />
                   : <span className="text-destructive" key={sourceId}>Missing source · {sourceId}</span>;
               })}
             </div>
@@ -261,10 +282,12 @@ const TIMELINE_KIND = {
 
 function RelationshipTimeline({
   items,
+  availableSourceIds,
   sources,
   onNavigate,
 }: {
   items: ProspectTimelineItem[];
+  availableSourceIds: ReadonlySet<string> | null;
   sources: Map<string, ProspectInsightSourceRef>;
   onNavigate: (source: ProspectInsightSourceRef, event: ReactMouseEvent<HTMLAnchorElement>) => void;
 }) {
@@ -302,7 +325,7 @@ function RelationshipTimeline({
                   {item.sourceIds.map((sourceId) => {
                     const source = sources.get(sourceId);
                     return source
-                      ? <SourceLink key={sourceId} onNavigate={onNavigate} source={source} />
+                      ? <SourceLink available={availableSourceIds?.has(source.id) ?? true} key={sourceId} onNavigate={onNavigate} source={source} />
                       : <span className="text-destructive" key={sourceId}>Missing source · {sourceId}</span>;
                   })}
                 </div>
@@ -343,10 +366,12 @@ function OpportunitySnapshot({ insight }: { insight: ProspectInsightSnapshot }) 
 }
 
 function InsightCard({
+  availableSourceIds,
   insight,
   current,
   onNavigate,
 }: {
+  availableSourceIds: ReadonlySet<string> | null;
   insight: ProspectInsightSnapshot;
   current?: boolean;
   onNavigate: (source: ProspectInsightSourceRef, event: ReactMouseEvent<HTMLAnchorElement>) => void;
@@ -376,12 +401,12 @@ function InsightCard({
           <p className="text-base font-medium leading-7 tracking-tight">{insight.summary}</p>
         </div>
         <div className="grid gap-5 md:grid-cols-2">
-          <ClaimList title="Key points" claims={insight.content.keyPoints} onNavigate={onNavigate} sources={sources} />
-          <ClaimList title="Pain points" claims={insight.content.painPoints} onNavigate={onNavigate} sources={sources} />
-          <ClaimList title="Objections" claims={insight.content.objections} onNavigate={onNavigate} sources={sources} />
-          <ClaimList title="Commitments" claims={insight.content.commitments} onNavigate={onNavigate} sources={sources} />
-          <ClaimList title="Next steps" claims={insight.content.nextSteps} onNavigate={onNavigate} sources={sources} />
-          <ClaimList title="Open questions" claims={insight.content.openQuestions} onNavigate={onNavigate} sources={sources} />
+          <ClaimList availableSourceIds={availableSourceIds} title="Key points" claims={insight.content.keyPoints} onNavigate={onNavigate} sources={sources} />
+          <ClaimList availableSourceIds={availableSourceIds} title="Pain points" claims={insight.content.painPoints} onNavigate={onNavigate} sources={sources} />
+          <ClaimList availableSourceIds={availableSourceIds} title="Objections" claims={insight.content.objections} onNavigate={onNavigate} sources={sources} />
+          <ClaimList availableSourceIds={availableSourceIds} title="Commitments" claims={insight.content.commitments} onNavigate={onNavigate} sources={sources} />
+          <ClaimList availableSourceIds={availableSourceIds} title="Next steps" claims={insight.content.nextSteps} onNavigate={onNavigate} sources={sources} />
+          <ClaimList availableSourceIds={availableSourceIds} title="Open questions" claims={insight.content.openQuestions} onNavigate={onNavigate} sources={sources} />
         </div>
         <details className="rounded-md border bg-muted/20 px-3 py-2 text-xs">
           <summary className="cursor-pointer font-medium">Evidence and provenance</summary>
@@ -389,7 +414,7 @@ function InsightCard({
             <p>Generated because: {insight.generatedReason.replaceAll("_", " ")}</p>
             {insight.sourceRefs.map((source) => (
               <div className="flex items-center justify-between gap-3" key={source.id}>
-                <SourceLink onNavigate={onNavigate} source={source} />
+                <SourceLink available={availableSourceIds?.has(source.id) ?? true} onNavigate={onNavigate} source={source} />
                 <code className="shrink-0 text-[10px]">{source.id}</code>
               </div>
             ))}
@@ -400,7 +425,7 @@ function InsightCard({
   );
 }
 
-export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersion, overview, notes }: ProspectIntelligenceTabsProps) {
+export function ProspectIntelligenceTabs({ availableSourceIds, prospectId, prospectName, notesVersion, overview, notes }: ProspectIntelligenceTabsProps) {
   const [activeTab, setActiveTab] = useState<ProspectTab>("overview");
   const [workspace, setWorkspace] = useState<ProspectIntelligenceWorkspace | null>(null);
   const [loading, setLoading] = useState(true);
@@ -408,12 +433,38 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
   const [manualUpdate, setManualUpdate] = useState("");
   const [startingMeeting, setStartingMeeting] = useState(false);
   const [savingUpdate, setSavingUpdate] = useState(false);
-  const [refreshingInsights, setRefreshingInsights] = useState(false);
   const [semanticQuery, setSemanticQuery] = useState("");
   const [semanticResults, setSemanticResults] = useState<ProspectSemanticSearchResponse | null>(null);
   const [searchingProspect, setSearchingProspect] = useState(false);
+  const refreshRequestedRef = useRef(false);
+  const handledRefreshRef = useRef<string | null>(null);
+  const sourceTargetRequestRef = useRef(0);
+  const insightRefresh = useDurableOperation<{
+    insightId: string;
+    prospectId: string;
+    revision: number;
+    summary: string;
+    insight: ProspectInsightSnapshot;
+  }, {
+    kind: "prospect-insights";
+    phase: "evidence" | "generate" | "persisted";
+    label: string;
+    updatedAt: string;
+  }>({
+    action: "refresh_prospect_insights",
+    entityId: prospectId,
+    startApi: "/outreach/operations/prospect-insights",
+    body: { prospectId },
+  });
 
   const scrollToLocationSource = useCallback(() => {
+    const request = ++sourceTargetRequestRef.current;
+    const clearPreviousTarget = () => {
+      document.querySelectorAll("[data-prospect-source-target]").forEach((element) => {
+        element.removeAttribute("data-prospect-source-target");
+      });
+    };
+    clearPreviousTarget();
     if (!window.location.hash) return;
     let anchorId = window.location.hash.slice(1);
     try {
@@ -421,9 +472,19 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
     } catch {
       return;
     }
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      document.getElementById(anchorId)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }));
+    const revealTarget = () => {
+      if (sourceTargetRequestRef.current !== request) return;
+      clearPreviousTarget();
+      const target = document.getElementById(anchorId);
+      if (!target) return;
+      target.setAttribute("data-prospect-source-target", "true");
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    window.requestAnimationFrame(() => window.requestAnimationFrame(revealTarget));
+    // Radix tab content and the client-fetched workspace can replace the first
+    // matching node during hydration. Re-apply briefly to the final DOM node.
+    window.setTimeout(revealTarget, 120);
+    window.setTimeout(revealTarget, 400);
   }, []);
 
   const syncTabFromLocation = useCallback(() => {
@@ -453,7 +514,7 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
     const url = new URL(window.location.href);
     url.searchParams.set("tab", tab);
     url.hash = "";
-    window.history.replaceState(null, "", url);
+    window.history.replaceState(window.history.state, "", url);
   }, []);
 
   const navigateToSource = useCallback((
@@ -465,10 +526,16 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
     setActiveTab(source.target.tab);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", source.target.tab);
-    url.hash = source.target.anchorId;
-    window.history.pushState(null, "", url);
-    scrollToLocationSource();
-  }, [scrollToLocationSource]);
+    url.hash = "";
+    window.history.pushState(window.history.state, "", url);
+    // A fragment written only through pushState changes the displayed URL but
+    // does not establish the document's :target element. Wait for the target
+    // tab to render, then perform a real same-document fragment navigation and
+    // replace the just-pushed entry so Back still returns to the prior tab.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      window.location.replace(`#${encodeURIComponent(source.target.anchorId)}`);
+    }));
+  }, []);
 
   const refresh = useCallback(async () => {
     const data = await apiGet<{ workspace: ProspectIntelligenceWorkspace }>(`/outreach/prospects/${prospectId}/intelligence`);
@@ -481,6 +548,21 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
       .catch((error) => toast.error(error instanceof Error ? error.message : "Could not load prospect intelligence."))
       .finally(() => setLoading(false));
   }, [notesVersion, refresh]);
+
+  useEffect(() => {
+    const operation = insightRefresh.operation;
+    if (!operation || (operation.status !== "succeeded" && operation.status !== "failed")) return;
+    const handledKey = `${operation.id}:${operation.status}:${operation.updatedAt}`;
+    if (handledRefreshRef.current === handledKey) return;
+    handledRefreshRef.current = handledKey;
+    if (operation.status === "failed") return;
+    void refresh().then(() => {
+      if (refreshRequestedRef.current) toast.success("Insights refreshed from all current evidence");
+      refreshRequestedRef.current = false;
+    }).catch((error) => {
+      toast.error(error instanceof Error ? error.message : "The insight completed, but the view could not be refreshed.");
+    });
+  }, [insightRefresh.operation, refresh]);
 
   const transcripts = useMemo(
     () => workspace?.evidence.filter((item) => item.kind === "transcript_utterance") ?? [],
@@ -502,6 +584,12 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
     () => new Map(workspace?.timeline?.sourceRefs.map((source) => [source.id, source]) ?? []),
     [workspace],
   );
+  const availableSources = useMemo(
+    () => workspace
+      ? new Set([...availableSourceIds, ...workspace.evidence.map((item) => item.id)])
+      : null,
+    [availableSourceIds, workspace],
+  );
 
   const startMeeting = async () => {
     if (!meetingUrl.trim()) return;
@@ -512,6 +600,12 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
       await refresh();
       toast.success("Taicho is joining the meeting");
     } catch (error) {
+      // The meeting row is created before the provider is contacted so a
+      // provider rejection is durable and auditable. Refresh the workspace on
+      // failure as well as success so that failed capture appears immediately
+      // without requiring a page reload; keep the URL intact for correction
+      // or a safe retry.
+      await refresh().catch(() => undefined);
       toast.error(error instanceof Error ? error.message : "Could not start the meeting bot.");
     } finally {
       setStartingMeeting(false);
@@ -539,16 +633,13 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
   };
 
   const regenerateInsights = async () => {
-    setRefreshingInsights(true);
-    try {
-      await apiMutate("POST", `/outreach/prospects/${prospectId}/insights`, {});
-      await refresh();
-      toast.success("Insights refreshed from all current evidence");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not refresh insights.");
-    } finally {
-      setRefreshingInsights(false);
-    }
+    refreshRequestedRef.current = true;
+    await insightRefresh.start();
+  };
+
+  const retryInsightRefresh = async () => {
+    refreshRequestedRef.current = true;
+    await insightRefresh.retry();
   };
 
   const searchProspect = async (requestedQuery = semanticQuery) => {
@@ -582,7 +673,7 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
       </div>
 
       <TabsContent value="overview">
-        <div className="scroll-mt-24 rounded-xl target:ring-2 target:ring-primary/30" id={`prospect-created-${prospectId}`}>
+        <div className="scroll-mt-24 rounded-xl target:ring-2 target:ring-primary/30 data-[prospect-source-target=true]:ring-2 data-[prospect-source-target=true]:ring-primary/30" id={`prospect-created-${prospectId}`}>
           {overview}
         </div>
       </TabsContent>
@@ -594,6 +685,7 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
           <>
             <OpportunitySnapshot insight={currentInsight} />
             <RelationshipTimeline
+              availableSourceIds={availableSources}
               items={workspace.timeline.events}
               onNavigate={navigateToSource}
               sources={timelineSources}
@@ -692,7 +784,7 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
           <Card>
             <CardHeader><CardTitle>AI evidence updates</CardTitle><CardDescription>Manual additions with explicit provenance.</CardDescription></CardHeader>
             <CardContent className="space-y-3">
-              {manualUpdates.map((item) => <div className="scroll-mt-24 rounded-md border p-3 transition-colors target:bg-primary/10 target:ring-2 target:ring-primary/30" id={`evidence-${item.id}`} key={item.id}><p className="whitespace-pre-wrap text-sm">{item.content}</p><p className="mt-2 text-xs text-muted-foreground"><Clock3 className="mr-1 inline h-3.5 w-3.5" />{dateTime(item.createdAt)} · {item.sourceLabel} · {item.id}</p></div>)}
+              {manualUpdates.map((item) => <div className="scroll-mt-24 rounded-md border p-3 transition-colors target:bg-primary/10 target:ring-2 target:ring-primary/30 data-[prospect-source-target=true]:bg-primary/10 data-[prospect-source-target=true]:ring-2 data-[prospect-source-target=true]:ring-primary/30" id={`evidence-${item.id}`} key={item.id}><p className="whitespace-pre-wrap text-sm">{item.content}</p><p className="mt-2 text-xs text-muted-foreground"><Clock3 className="mr-1 inline h-3.5 w-3.5" />{dateTime(item.createdAt)} · {item.sourceLabel} · {item.id}</p></div>)}
             </CardContent>
           </Card>
         )}
@@ -762,7 +854,7 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
                     {semanticResults.results.map((result, index) => (
                       <div className="rounded-xl border bg-background/80 p-4 shadow-sm" key={`${result.source.id}-${index}`}>
                         <div className="flex items-start justify-between gap-3">
-                          <SourceLink onNavigate={navigateToSource} source={result.source} />
+                          <SourceLink available={availableSources?.has(result.source.id) ?? true} onNavigate={navigateToSource} source={result.source} />
                           <Badge className="shrink-0 tabular-nums" variant="secondary">{Math.max(0, Math.round(result.score * 100))}% match</Badge>
                         </div>
                         <p className="mt-3 line-clamp-5 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{result.content}</p>
@@ -777,9 +869,40 @@ export function ProspectIntelligenceTabs({ prospectId, prospectName, notesVersio
         </Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><h2 className="text-lg font-semibold">Prospect insights</h2><p className="text-sm text-muted-foreground">Versioned, source-linked interpretation of notes, updates, and transcripts.</p></div>
-          <Button disabled={refreshingInsights} onClick={regenerateInsights} variant="outline">{refreshingInsights ? <Loader2 className="animate-spin" /> : <RefreshCw />}Refresh from evidence</Button>
+          <Button disabled={insightRefresh.isRunning} onClick={regenerateInsights} variant="outline">{insightRefresh.isRunning ? <Loader2 className="animate-spin" /> : <RefreshCw />}{insightRefresh.isRunning ? "Refreshing…" : "Refresh from evidence"}</Button>
         </div>
-        {loading ? <Skeleton className="h-80 w-full" /> : workspace?.insights.length ? workspace.insights.map((item, index) => <InsightCard current={index === 0 && item.status === "current"} insight={item} key={item.id} onNavigate={navigateToSource} />) : <EmptyState icon={Sparkles}>No insight snapshot yet. Add a note or update, or complete a transcribed meeting, then refresh insights.</EmptyState>}
+        {insightRefresh.operation && (insightRefresh.isRunning || insightRefresh.operation.status === "failed") && (
+          <Card className={insightRefresh.operation.status === "failed" ? "border-destructive/30" : "border-primary/20"} data-testid="prospect-insight-refresh-panel">
+            <CardContent className="space-y-3 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 gap-3">
+                  {insightRefresh.operation.status === "failed"
+                    ? <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+                    : <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-primary" />}
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">{insightRefresh.operation.status === "failed" ? "Insight refresh needs attention" : "Refreshing prospect insights"}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {insightRefresh.operation.status === "failed"
+                        ? insightRefresh.error
+                        : insightRefresh.progressSnapshot?.label ?? "Preparing the durable operation"}
+                    </p>
+                    <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">Operation {insightRefresh.operation.id} · attempt {insightRefresh.operation.attempt} of {insightRefresh.operation.maxAttempts}</p>
+                  </div>
+                </div>
+                {insightRefresh.operation.status === "failed" && (
+                  <Button disabled={insightRefresh.isRetrying} onClick={retryInsightRefresh} size="sm" variant="outline">
+                    {insightRefresh.isRetrying ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                    {insightRefresh.isRetrying ? "Retrying…" : "Retry same operation"}
+                  </Button>
+                )}
+              </div>
+              {insightRefresh.operation.status !== "failed" && (
+                <Progress aria-label="Prospect insight refresh progress" className="h-1.5" value={insightRefresh.operation.progress} />
+              )}
+            </CardContent>
+          </Card>
+        )}
+        {loading ? <Skeleton className="h-80 w-full" /> : workspace?.insights.length ? workspace.insights.map((item, index) => <InsightCard availableSourceIds={availableSources} current={index === 0 && item.status === "current"} insight={item} key={item.id} onNavigate={navigateToSource} />) : <EmptyState icon={Sparkles}>No insight snapshot yet. Add a note or update, or complete a transcribed meeting, then refresh insights.</EmptyState>}
       </TabsContent>
     </Tabs>
   );

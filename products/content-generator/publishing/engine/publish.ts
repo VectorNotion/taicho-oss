@@ -5,9 +5,11 @@ import {
   currentExecutionContext,
   observeOperation,
 } from "@content-automation/observability";
-import { emitProductEvent } from "@content-automation/platform/events/emit";
+import { emitProductEvent, recordProductEvent } from "@content-automation/platform/events/emit";
 import { getChannel, updateChannelTokens } from "../channel-repository";
-import { claimDuePost, recordFailure, recordPublished, recoverOrphaned } from "../post-repository";
+import { claimDuePost, MAX_ATTEMPTS, recordFailure, recordPublished, recoverOrphaned } from "../post-repository";
+import { PUBLISHING_POST_KNOWLEDGE_EVENT } from "../knowledge-events";
+import { recordPublishingCalendarChange } from "../calendar-events";
 import { getAdapter } from "../registry";
 import { isR2Key, R2Media } from "../r2";
 import { publishingRequest } from "../safe-network";
@@ -61,6 +63,7 @@ export async function runPublishPass(
   for (let i = 0; i < batchSize; i += 1) {
     const post = await databaseFor(pool).transaction((tx) => claimDuePost(tx as Database));
     if (!post) break;
+    await recordPublishingCalendarChange(post);
 
     const outcome = await publishOne(pool, post, media);
     if (outcome.status === "published") published += 1;
@@ -202,10 +205,61 @@ async function publishOne(pool: Pool, post: PostRecord, media: R2Media | null): 
           }
 
           const { url } = await adapter.publish({ post, channel, mediaUrl, mediaBytes });
+          const organizationId = post.organizationId ?? currentExecutionContext()?.organizationId ?? null;
+          if (organizationId) {
+            // The provider has already accepted the post. A ledger outage
+            // must never turn that success into a retry and double-publish;
+            // the ordinary post.published event below remains a second
+            // reconciliation source while this error is made visible.
+            await recordProductEvent({
+              organizationId,
+              name: PUBLISHING_POST_KNOWLEDGE_EVENT,
+              origin: "internal",
+              idempotencyKey: `${post.id}:published`,
+              refs: { postId: post.id, ...(post.draftId ? { draftId: post.draftId } : {}) },
+              payload: {
+                postId: post.id,
+                draftId: post.draftId,
+                destination: post.destination,
+                channelId: post.channelId,
+                status: "published",
+                copy: post.copy,
+                publishAt: post.publishAt.toISOString(),
+                resultUrl: url,
+                occurredAt: new Date().toISOString(),
+              },
+            }).catch((error) => log.error("publishing.knowledge_event.failed", error, {
+              post_id: post.id,
+              destination: post.destination,
+            }));
+          }
           await recordPublished(pool, post.id, url);
           return { post, status: "published", resultUrl: url };
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : String(cause);
+          if (post.attempts + 1 >= MAX_ATTEMPTS) {
+            const organizationId = post.organizationId ?? currentExecutionContext()?.organizationId ?? null;
+            if (organizationId) {
+              await recordProductEvent({
+                organizationId,
+                name: PUBLISHING_POST_KNOWLEDGE_EVENT,
+                origin: "internal",
+                idempotencyKey: `${post.id}:failed`,
+                refs: { postId: post.id, ...(post.draftId ? { draftId: post.draftId } : {}) },
+                payload: {
+                  postId: post.id,
+                  draftId: post.draftId,
+                  destination: post.destination,
+                  channelId: post.channelId,
+                  status: "failed",
+                  copy: post.copy,
+                  publishAt: post.publishAt.toISOString(),
+                  error: message,
+                  occurredAt: new Date().toISOString(),
+                },
+              });
+            }
+          }
           const status = await recordFailure(pool, post.id, post.attempts, message);
           const outcome: PublishOutcome = status === "failed"
             ? { post, status: "failed", error: message }

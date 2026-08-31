@@ -25,17 +25,23 @@ describe('useCapabilityStream', () => {
   let handlers: Handlers;
   let settleDone: { resolve: (value: unknown) => void; reject: (cause: unknown) => void };
   const aborts: Array<ReturnType<typeof vi.fn>> = [];
+  const handlerRuns: Handlers[] = [];
+  const settleRuns: Array<{ resolve: (value: unknown) => void; reject: (cause: unknown) => void }> = [];
 
   beforeEach(() => {
     apiStream.mockReset();
     aborts.length = 0;
+    handlerRuns.length = 0;
+    settleRuns.length = 0;
     apiStream.mockImplementation((_path, _body, streamHandlers) => {
       handlers = streamHandlers as Handlers;
+      handlerRuns.push(handlers);
       const abort = vi.fn();
       aborts.push(abort);
       return {
         done: new Promise((resolve, reject) => {
           settleDone = { resolve, reject };
+          settleRuns.push(settleDone);
         }),
         abort,
       };
@@ -103,5 +109,32 @@ describe('useCapabilityStream', () => {
 
     act(() => result.current.abort());
     expect(aborts[1]).toHaveBeenCalled();
+  });
+
+  it('ignores an aborted superseded stream after its replacement starts', async () => {
+    const { result } = renderHook(() => useCapabilityStream<{ value: number }, { value: number }>({ api: '/content/projects/p1/ingest' }));
+
+    act(() => result.current.start({ attempt: 1 }));
+    act(() => result.current.start({ attempt: 2 }));
+    expect(aborts[0]).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      const aborted = new Error('signal is aborted without reason');
+      handlerRuns[0].onError?.(aborted as ApiError);
+      settleRuns[0].reject(aborted);
+      await Promise.resolve();
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.isStreaming).toBe(true);
+
+    const outcome = { data: { value: 2 }, meta: { requestId: 'second', replayed: false, summary: 'Done.' } };
+    await act(async () => {
+      handlerRuns[1].onResult?.(outcome);
+      settleRuns[1].resolve(outcome);
+      await Promise.resolve();
+    });
+    expect(result.current.final).toEqual({ value: 2 });
+    expect(result.current.error).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
   });
 });

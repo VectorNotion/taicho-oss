@@ -14,6 +14,8 @@ export type DimensionAppliesTo = 'account' | 'prospect';
 
 export interface DimensionDefinition {
   id: string;
+  /** Optimistic-concurrency version for safe browser edits and retries. */
+  revision: number;
   /** Null/absent dimensions are workspace defaults; scoped dimensions augment one Catalog item. */
   catalogItemId?: string;
   /** Stable snake_case key, e.g. 'internal_ai_capability'. */
@@ -38,8 +40,8 @@ export interface DimensionDefinition {
   updatedAt?: string;
 }
 
-export type CreateDimensionInput = Omit<DimensionDefinition, 'id' | 'createdAt' | 'updatedAt'>;
-export type UpdateDimensionInput = Partial<CreateDimensionInput>;
+export type CreateDimensionInput = Omit<DimensionDefinition, 'id' | 'revision' | 'createdAt' | 'updatedAt'>;
+export type UpdateDimensionInput = Partial<CreateDimensionInput> & { expectedRevision: number };
 
 /** A single dated event inside a timing Observation (spec §2, Shape B). */
 export interface TimingSignal {
@@ -48,6 +50,14 @@ export interface TimingSignal {
   date: string;
   evidence: string[];
   confidence: number;
+}
+
+/** Raw provider output retained so graph claims can cite the page, not an LLM summary. */
+export interface ResearchSourceDocument {
+  url: string;
+  title: string;
+  content: string;
+  publishedDate?: string | null;
 }
 
 /** What research found for one dimension of one entity (spec §2). */
@@ -60,12 +70,16 @@ export interface ObservationRecord {
   /** Shape B signal list. Timing dimensions. */
   signals?: TimingSignal[];
   evidence: string[];
+  /** Scraped source snapshots used to verify exact graph evidence spans. */
+  sourceDocuments?: ResearchSourceDocument[];
   confidence: number;
   researchedAt: string;
   runId: string;
+  claimIds?: string[];
+  evidenceIds?: string[];
 }
 
-export type MatchClassification = 'strong_match' | 'partial_match' | 'weak_match' | 'mismatch';
+export type MatchClassification = 'strong_match' | 'partial_match' | 'weak_match' | 'mismatch' | 'insufficient_evidence';
 
 /** How well an Observation matches a Dimension's ideal value (spec §2). */
 export interface DimensionMatch {
@@ -78,6 +92,8 @@ export interface DimensionMatch {
   hardExclusion: boolean;
   /** Freshness-decayed observation confidence at evaluation time. */
   confidence: number;
+  supportingClaimIds?: string[];
+  contradictingClaimIds?: string[];
 }
 
 export type QualificationStatus =

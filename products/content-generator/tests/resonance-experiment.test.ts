@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CONTENT_TYPES, isContentType } from "../domain/content";
+import {
+  canTransitionContentDraftStatus,
+  CONTENT_TYPES,
+  isContentType,
+} from "../domain/content";
 import {
   contentArtifactForResonance,
   contentForResonance,
@@ -10,6 +14,7 @@ import {
 import {
   buildContentResonanceRunRequest,
   CONTENT_RESONANCE_PROFILES,
+  contentResonanceExperimentResultSchema,
   estimateExperiment,
   resonanceProfileFor,
   resonanceExperimentRequestSchema,
@@ -21,6 +26,15 @@ test("content type registry includes the feed and campaign formats used by reson
     assert.equal(isContentType(canonical), true, canonical);
   }
   assert.equal(new Set(CONTENT_TYPES).size, CONTENT_TYPES.length);
+});
+
+test("content draft lifecycle permits only forward editorial transitions", () => {
+  assert.equal(canTransitionContentDraftStatus("draft", "draft"), true);
+  assert.equal(canTransitionContentDraftStatus("draft", "ready"), true);
+  assert.equal(canTransitionContentDraftStatus("ready", "published"), true);
+  assert.equal(canTransitionContentDraftStatus("draft", "published"), false);
+  assert.equal(canTransitionContentDraftStatus("ready", "draft"), false);
+  assert.equal(canTransitionContentDraftStatus("published", "ready"), false);
 });
 
 test("every generation template has a complete three-signal resonance profile", () => {
@@ -42,6 +56,25 @@ test("experiment request accepts only the supported variation and audience range
   assert.equal(resonanceExperimentRequestSchema.safeParse({ variationCount: 7, audienceSize: 5_000 }).success, false);
   assert.equal(resonanceExperimentRequestSchema.safeParse({ variationCount: 3, audienceSize: 99 }).success, false);
   assert.equal(resonanceExperimentRequestSchema.safeParse({ variationCount: 6, audienceSize: 2_000_000 }).success, false);
+});
+
+test("durable experiment results retain the exact source revision used for generation", () => {
+  const parsed = contentResonanceExperimentResultSchema.parse({
+    kind: "content_resonance_experiment",
+    resonanceJobId: "run-1",
+    surface: "linkedin_post",
+    frames: ["scroll_stop", "compelling", "share"],
+    candidates: [
+      { id: "original", label: "Original", title: "A", content: "A body", contentType: "linkedin_post", original: true },
+      { id: "variation-1", label: "Variation 1", title: "B", content: "B body", contentType: "linkedin_post", original: false },
+    ],
+    variationCount: 2,
+    audienceSize: 5_000,
+    estimatedCells: 45_000,
+    estimatedCredits: 45,
+    sourceUpdatedAt: "2026-08-27T15:30:04Z",
+  });
+  assert.equal(parsed.sourceUpdatedAt, "2026-08-27T15:30:04Z");
 });
 
 test("experiment estimate includes the original control, generation, and scoring", () => {

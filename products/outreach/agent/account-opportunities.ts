@@ -19,6 +19,7 @@ import {
   prospectSemanticSearchConfigFromEnvironment,
   type ProspectSemanticSearchConfig,
 } from "../services/prospect-semantic-search";
+import { recordOutreachKnowledgeArtifact } from "../knowledge-service";
 
 const log = createLogger("account-opportunities");
 
@@ -46,6 +47,7 @@ export interface AccountOpportunityDeps {
   embeddingConfig: () => ProspectSemanticSearchConfig | null;
   embed: typeof embedTexts;
   replace: typeof replaceAccountOpportunityAngles;
+  recordKnowledgeArtifact: typeof recordOutreachKnowledgeArtifact;
   id: () => string;
 }
 
@@ -72,6 +74,7 @@ const defaultDeps: AccountOpportunityDeps = {
   embeddingConfig: prospectSemanticSearchConfigFromEnvironment,
   embed: embedTexts,
   replace: replaceAccountOpportunityAngles,
+  recordKnowledgeArtifact: recordOutreachKnowledgeArtifact,
   id: randomUUID,
 };
 
@@ -125,6 +128,8 @@ function groundedOpportunities(
       ...item.evidence,
       ...(item.signals ?? []).flatMap((signal) => signal.evidence),
     ]))];
+    const sourceClaimIds = [...new Set(sources.flatMap((item) => item.claimIds ?? []))];
+    const sourceEvidenceIds = [...new Set(sources.flatMap((item) => item.evidenceIds ?? []))];
     const evidenceConfidence = sources.length > 0
       ? sources.reduce((sum, item) => sum + item.confidence, 0) / sources.length
       : 0;
@@ -132,6 +137,8 @@ function groundedOpportunities(
       id: "",
       angle: generated.angle.trim(),
       sourceDimensionKeys,
+      sourceClaimIds,
+      sourceEvidenceIds,
       evidence,
       evidenceConfidence,
       researchRunId: input.researchRunId,
@@ -165,6 +172,21 @@ export async function refreshAccountOpportunityAngles(
     embeddingDimensions: config.embeddingDimensions,
   }));
   await d.replace(input.account.id, stored);
+  for (const opportunity of stored) {
+    await d.recordKnowledgeArtifact({
+      kind: 'outreach.opportunity',
+      externalId: opportunity.id,
+      usedClaimIds: opportunity.sourceClaimIds ?? [],
+      usedEvidenceIds: opportunity.sourceEvidenceIds ?? [],
+      metadata: {
+        accountId: input.account.id,
+        angle: opportunity.angle,
+        sourceDimensionKeys: opportunity.sourceDimensionKeys,
+        evidenceConfidence: opportunity.evidenceConfidence,
+        generatedAt: opportunity.generatedAt,
+      },
+    });
+  }
   log.info("outreach.account_opportunities.refreshed", {
     account_id: input.account.id,
     opportunity_count: stored.length,

@@ -1,5 +1,5 @@
-import { getCascadeAdminPool, schemaName } from "../data/pool";
-import { contactsInCascade, databaseFor } from "@content-automation/database";
+import { schemaName } from "../data/pool";
+import { contactsInCascade, databaseFor, migrationPoolConfig } from "@content-automation/database";
 import { runMigrations } from "@content-automation/database/migrate";
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { closeDriver, runWithGraphOrganization } from "@content-automation/platform/data/graph";
@@ -7,9 +7,13 @@ import {
   addWorkspaceContactRole,
   ensureWorkspaceContact,
 } from "@content-automation/platform/workspace/contacts";
+import { Pool } from "pg";
 
 await runMigrations();
-const pool = getCascadeAdminPool();
+const pool = new Pool({
+  ...migrationPoolConfig(),
+  options: `-csearch_path=${schemaName()},public`,
+});
 const db = databaseFor(pool);
 const legacyContacts = await db
   .select({

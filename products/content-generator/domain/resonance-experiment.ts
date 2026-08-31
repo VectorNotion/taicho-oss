@@ -5,7 +5,7 @@ import type {
   ResonanceSurface,
   RunRequest,
 } from "@content-automation/platform/resonance/types";
-import type { ContentDraft, ContentType } from "./content";
+import { CONTENT_TYPES, type ContentDraft, type ContentType } from "./content";
 import { contentArtifactForResonance } from "./generated-content";
 
 export const MIN_RESONANCE_VARIATIONS = 2;
@@ -129,26 +129,40 @@ export const resonanceExperimentRequestSchema = z.object({
 
 export type ResonanceExperimentRequest = z.infer<typeof resonanceExperimentRequestSchema>;
 
-export interface ContentResonanceCandidate {
-  id: string;
-  label: string;
-  title: string;
-  content: string;
-  contentType: ContentType;
-  original: boolean;
-}
+export const contentResonanceCandidateSchema = z.object({
+  id: z.string().min(1).max(300),
+  label: z.string().min(1).max(300),
+  title: z.string().min(1).max(500),
+  content: z.string().min(1).max(500_000),
+  contentType: z.enum(CONTENT_TYPES),
+  original: z.boolean(),
+});
 
-export interface ContentResonanceExperimentResult {
-  kind: "content_resonance_experiment";
-  resonanceJobId: string;
-  surface: ResonanceSurface;
-  frames: ResonanceFrame[];
-  candidates: ContentResonanceCandidate[];
-  variationCount: number;
-  audienceSize: number;
-  estimatedCells: number;
-  estimatedCredits: number;
-}
+export type ContentResonanceCandidate = z.infer<typeof contentResonanceCandidateSchema>;
+
+export const contentResonanceExperimentResultSchema = z.object({
+  kind: z.literal("content_resonance_experiment"),
+  resonanceJobId: z.string().min(1),
+  surface: z.enum([
+    "generic",
+    "youtube_video",
+    "blog_article",
+    "x_post",
+    "x_thread",
+    "linkedin_post",
+    "social_post",
+    "ad_campaign",
+  ]),
+  frames: z.array(z.enum(["scroll_stop", "click", "share", "compelling"])),
+  candidates: z.array(contentResonanceCandidateSchema).min(2),
+  variationCount: z.number().int().min(MIN_RESONANCE_VARIATIONS).max(MAX_RESONANCE_VARIATIONS),
+  audienceSize: z.number().int().min(100).max(2_000_000),
+  estimatedCells: z.number().int().min(0),
+  estimatedCredits: z.number().int().min(0),
+  sourceUpdatedAt: z.string().datetime(),
+});
+
+export type ContentResonanceExperimentResult = z.infer<typeof contentResonanceExperimentResultSchema>;
 
 export function sourceCandidate(draft: ContentDraft): ContentResonanceCandidate {
   return {

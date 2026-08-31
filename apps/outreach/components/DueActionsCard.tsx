@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlarmClock, Check, CheckCircle2, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
@@ -35,26 +35,41 @@ function TabCount({ n }: { n: number }) {
 }
 
 export function DueActionsCard() {
+  const mounted = useRef(true);
   const [items, setItems] = useState<DueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
-      const data = await apiGet<{ items: DueItem[] }>("/outreach/action-items", { horizonDays: 90 });
+      const data = await apiGet<{ items: DueItem[] }>("/outreach/action-items", { horizonDays: 90 }, { signal });
+      if (!mounted.current) return;
       setItems(data.items);
       setFailed(false);
+      setErrorMessage(null);
     } catch (error) {
+      if (!mounted.current || signal?.aborted) return;
       console.error("Error loading due actions:", error);
+      const message = error instanceof Error
+        ? error.message
+        : "Something went wrong while fetching your action items.";
       setFailed(true);
-      toast.error("Could not load due actions — refresh to try again");
+      setErrorMessage(message);
+      toast.error(message);
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
+    const controller = new AbortController();
+    mounted.current = true;
+    void refresh(controller.signal);
+    return () => {
+      mounted.current = false;
+      controller.abort();
+    };
   }, [refresh]);
 
   const complete = async (id: string) => {
@@ -158,12 +173,14 @@ export function DueActionsCard() {
           <div className="max-w-sm">
             <p className="font-medium">Due actions didn&apos;t load</p>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Something went wrong while fetching your action items.
+              {errorMessage ?? "Something went wrong while fetching your action items."}
             </p>
             <Button
               className="mt-4"
               onClick={() => {
                 setLoading(true);
+                setFailed(false);
+                setErrorMessage(null);
                 void refresh();
               }}
               size="sm"

@@ -40,6 +40,7 @@ function formatDimensionKey(key: string): string {
 }
 
 function MatchRow({ match }: { match: DimensionMatch }) {
+  const insufficientEvidence = match.classification === "insufficient_evidence";
   const percent = Math.round(match.effectiveMatch * 100);
   return (
     <div className="flex items-center justify-between gap-3">
@@ -49,8 +50,14 @@ function MatchRow({ match }: { match: DimensionMatch }) {
           <AlertTriangle className="ml-1 inline h-3 w-3 text-destructive" />
         )}
       </span>
-      <SegmentMeter excluded={match.hardExclusion} fraction={match.effectiveMatch} />
-      <span className="w-6 text-right text-xs font-semibold tabular-nums">{percent}</span>
+      {insufficientEvidence
+        ? <Badge variant="outline">Insufficient evidence</Badge>
+        : (
+            <>
+              <SegmentMeter excluded={match.hardExclusion} fraction={match.effectiveMatch} />
+              <span className="w-6 text-right text-xs font-semibold tabular-nums">{percent}</span>
+            </>
+          )}
     </div>
   );
 }
@@ -93,10 +100,16 @@ function DimensionBreakdown({ qualification }: { qualification: ProspectQualific
                   <span className="min-w-0 flex-1 truncate text-xs capitalize text-muted-foreground">
                     {formatDimensionKey(entry.dimensionKey)}
                   </span>
-                  <SegmentMeter fraction={entry.dimensionValue} />
-                  <span className="w-16 text-right text-xs font-medium tabular-nums text-muted-foreground">
-                    {entry.signalCount} signal{entry.signalCount === 1 ? "" : "s"}
-                  </span>
+                  {entry.signalCount === 0
+                    ? <Badge variant="outline">Insufficient evidence</Badge>
+                    : (
+                        <>
+                          <SegmentMeter fraction={entry.dimensionValue} />
+                          <span className="w-16 text-right text-xs font-medium tabular-nums text-muted-foreground">
+                            {entry.signalCount} signal{entry.signalCount === 1 ? "" : "s"}
+                          </span>
+                        </>
+                      )}
                 </div>
               ))}
             </div>

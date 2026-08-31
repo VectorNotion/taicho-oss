@@ -1,5 +1,5 @@
 import { Client, Pool, type ClientConfig, type PoolConfig } from 'pg';
-import { dedicatedDatabaseRolesRequired } from '@content-automation/database';
+import { controlPoolConfig, runtimePoolConfig } from '@content-automation/database';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -16,40 +16,13 @@ export function validateJobOrganizationId(organizationId: string): string {
   return value;
 }
 
-function baseConfig(): PoolConfig {
-  if (process.env.DATABASE_URL) return { connectionString: process.env.DATABASE_URL };
-  return {
-    host: process.env.POSTGRES_HOST || 'localhost',
-    port: Number(process.env.POSTGRES_PORT || 5432),
-    database: process.env.POSTGRES_DB || 'langgraph',
-    user: process.env.POSTGRES_USER || 'postgres',
-    password: process.env.POSTGRES_PASSWORD || 'postgres',
-  };
-}
-
 function runtimeConfig(organizationId: string): PoolConfig {
   const options = `-capp.organization_id=${validateJobOrganizationId(organizationId)}`;
-  if (process.env.JOBS_DATABASE_URL) {
-    return { connectionString: process.env.JOBS_DATABASE_URL, options };
-  }
-  if (dedicatedDatabaseRolesRequired()) {
-    throw new Error(
-      'JOBS_DATABASE_URL is required in production or strict database-role mode and must use a non-superuser, non-BYPASSRLS role.',
-    );
-  }
-  return { ...baseConfig(), options };
+  return { ...runtimePoolConfig(), options };
 }
 
 function adminConfig(): PoolConfig {
-  if (process.env.JOBS_ADMIN_DATABASE_URL) {
-    return { connectionString: process.env.JOBS_ADMIN_DATABASE_URL };
-  }
-  if (dedicatedDatabaseRolesRequired()) {
-    throw new Error(
-      'JOBS_ADMIN_DATABASE_URL is required in production or strict database-role mode and must use the dedicated migration/control-plane role.',
-    );
-  }
-  return baseConfig();
+  return controlPoolConfig();
 }
 
 export function getJobPool(organizationId: string): Pool {
@@ -68,7 +41,7 @@ export function getJobPool(organizationId: string): Pool {
   return pool;
 }
 
-/** Migration and ID-only queue-discovery pool. Never use it for tenant payload work. */
+/** ID-only queue-discovery pool. It never has schema ownership or DDL access. */
 export function getJobAdminPool(): Pool {
   if (!globalThis.__platformJobAdminPool) {
     globalThis.__platformJobAdminPool = new Pool({

@@ -79,8 +79,12 @@ Repeat for any worker deployment included in the release.
 ## Reproducing the release checks locally
 
 Node 24 and pnpm 10.34.5 are the supported release toolchain (`.node-version`
-and `packageManager` are the machine-readable pins). On an 8 GB development
-machine, run the canonical checks sequentially:
+and `packageManager` are the machine-readable pins). During routine development,
+run the focused automated checks appropriate to the change; a full browser run
+is not required for each feature commit or staging deployment.
+
+The agent preparing a production release runs the canonical checks sequentially
+on an 8 GB development machine:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -111,11 +115,13 @@ The CI test job records the Node and pnpm versions in its normal setup logs,
 runs both canonical commands against the checked-out commit, and only then
 allows the image job to publish immutable `${GITHUB_SHA}` tags.
 
-The live OpenRouter workflow smoke is deliberately separate from the
-deterministic release gate. Run it locally with `pnpm test:e2e:provider`, or
-dispatch the `docker` workflow manually; the job runs only when the repository
-has an `OPENROUTER_API_KEY` secret. `E2E_OPENROUTER_MODEL` defaults to
-`openrouter/free` and can be overridden for a compatibility check.
+The live OpenRouter workflow smoke is deliberately separate from development
+and staging CI. The production-release agent runs it locally with
+`pnpm test:e2e:provider` when the affected release flows require provider
+coverage, then records the browser evidence under `tests/browser-qa/`.
+`E2E_OPENROUTER_MODEL` defaults to `openrouter/free` and can be overridden for a
+compatibility check. CI validates the committed evidence but does not run this
+browser smoke or spend provider credits.
 
 ## Production configuration preflight
 

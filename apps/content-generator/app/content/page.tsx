@@ -20,20 +20,44 @@ import {
   ArrowRight,
   ExternalLink,
   Lightbulb,
+  Loader2,
+  Plus,
   RefreshCw,
 } from "lucide-react";
 
 import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/PageHeader";
 import { ListRow, ListRows } from "@/components/ListRow";
 import { FilterSelect, ListSurface } from "@/components/ListSurface";
 import { StatRow } from "@/components/StatRow";
+import { ReasoningTicker, StreamSection } from "@/components/genui";
+import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
 import type {
   ContentIdea,
   ContentDraft,
+  ContentPriority,
   ContentType,
 } from "@/products/content-generator/domain/content";
 import type {
@@ -82,6 +106,14 @@ const performanceConfig = {
   low: { label: "Low performance", variant: "outline" as const },
 };
 
+type ContentTab = "insights" | "ideas" | "drafts" | "published";
+
+function streamErrorMessage(error: string, action: string): string {
+  return /failed to fetch|networkerror/i.test(error)
+    ? `${action} was interrupted before completion. Check your connection and try again.`
+    : error;
+}
+
 export default function ContentPage() {
   const router = useRouter();
   const [ideas, setIdeas] = useState<ContentIdea[]>([]);
@@ -91,6 +123,16 @@ export default function ContentPage() {
   const [creatingInsightId, setCreatingInsightId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [insightState, setInsightState] = useState<ContentInsightState | "all">("content_gap");
+  const [activeTab, setActiveTab] = useState<ContentTab>("insights");
+  const [newIdeaOpen, setNewIdeaOpen] = useState(false);
+  const [newIdeaTitle, setNewIdeaTitle] = useState("");
+  const [newIdeaNotes, setNewIdeaNotes] = useState("");
+  const [newIdeaRationale, setNewIdeaRationale] = useState("");
+  const [newIdeaPriority, setNewIdeaPriority] = useState<ContentPriority>("medium");
+  const [creatingIdea, setCreatingIdea] = useState(false);
+  const ideasStream = useCapabilityStream<{
+    ideas?: Array<{ title?: string; description?: string; priority?: ContentPriority }>;
+  }, { ideasCreated: number }>({ api: "/content/ideas/generate" });
 
   const fetchData = async (signal?: AbortSignal) => {
     setLoading(true);
@@ -145,6 +187,58 @@ export default function ContentPage() {
       setCreatingInsightId(null);
     }
   };
+
+  const resetNewIdea = () => {
+    setNewIdeaTitle("");
+    setNewIdeaNotes("");
+    setNewIdeaRationale("");
+    setNewIdeaPriority("medium");
+  };
+
+  const createManualIdea = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const title = newIdeaTitle.trim();
+    const description = newIdeaNotes.trim();
+    if (!title || !description) return;
+
+    setCreatingIdea(true);
+    try {
+      const { data } = await apiMutate<{ idea: ContentIdea }>("POST", "/content/ideas", {
+        title,
+        description,
+        rationale: newIdeaRationale.trim() || description,
+        priority: newIdeaPriority,
+        sourceTopicIds: [],
+        sourceResearchIds: [],
+      });
+      const idea = data.idea;
+      setIdeas((current) => [idea, ...current.filter((item) => item.id !== idea.id)]);
+      setNewIdeaOpen(false);
+      resetNewIdea();
+      toast.success("Idea captured. Build it into a Content Base when you are ready.");
+      router.push(`/content/${idea.id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not create the idea.");
+    } finally {
+      setCreatingIdea(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!ideasStream.final) return;
+    const count = ideasStream.final.ideasCreated;
+    if (count > 0) {
+      toast.success(`Generated ${count} ${count === 1 ? "idea" : "ideas"}`);
+    } else {
+      toast.message("No ideas were generated. Add Projects, Research, or Topics and try again.");
+    }
+    setActiveTab("ideas");
+    void fetchData();
+  }, [ideasStream.final]);
+
+  useEffect(() => {
+    if (ideasStream.error) toast.error(streamErrorMessage(ideasStream.error, "Idea generation"));
+  }, [ideasStream.error]);
 
   const publishedDrafts = drafts.filter((d) => d.status === "published");
   const activeDrafts = drafts.filter((d) => d.status !== "published");
@@ -206,26 +300,164 @@ export default function ContentPage() {
     <div className="w-full min-w-0">
       <PageHeader
         title="Content"
-        description="Demand insights, Content Bases, and the Posts created from them"
+        description="Capture ideas, build grounded Content Bases, and turn them into Posts"
         actions={(
-          <Button disabled={loading} onClick={() => void fetchData()} variant="outline">
-            <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-            Refresh insights
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Dialog
+              open={newIdeaOpen}
+              onOpenChange={(open) => {
+                setNewIdeaOpen(open);
+                if (!open && !creatingIdea) resetNewIdea();
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Plus className="h-4 w-4" />
+                  New idea
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card">
+                <DialogHeader>
+                  <DialogTitle>Capture a rough idea</DialogTitle>
+                  <DialogDescription>
+                    Save the angle now. You can refine it into an evidence-backed Content Base next.
+                  </DialogDescription>
+                </DialogHeader>
+                <form className="space-y-4" onSubmit={createManualIdea}>
+                  <div className="grid gap-2">
+                    <Label htmlFor="idea-title">Working title</Label>
+                    <Input
+                      autoFocus
+                      id="idea-title"
+                      maxLength={500}
+                      onChange={(event) => setNewIdeaTitle(event.target.value)}
+                      placeholder="The angle you want to explore"
+                      required
+                      value={newIdeaTitle}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="idea-notes">Rough notes</Label>
+                    <Textarea
+                      id="idea-notes"
+                      maxLength={20_000}
+                      onChange={(event) => setNewIdeaNotes(event.target.value)}
+                      placeholder="Fragments, claims, examples, questions, or anything worth assimilating…"
+                      required
+                      rows={5}
+                      value={newIdeaNotes}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="idea-rationale">
+                      Why it matters <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Textarea
+                      id="idea-rationale"
+                      maxLength={20_000}
+                      onChange={(event) => setNewIdeaRationale(event.target.value)}
+                      placeholder="Who needs this and why now?"
+                      rows={3}
+                      value={newIdeaRationale}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="idea-priority">Priority</Label>
+                    <Select
+                      onValueChange={(value) => setNewIdeaPriority(value as ContentPriority)}
+                      value={newIdeaPriority}
+                    >
+                      <SelectTrigger className="w-full" id="idea-priority">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      disabled={creatingIdea}
+                      onClick={() => {
+                        setNewIdeaOpen(false);
+                        resetNewIdea();
+                      }}
+                      type="button"
+                      variant="outline"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      disabled={creatingIdea || !newIdeaTitle.trim() || !newIdeaNotes.trim()}
+                      type="submit"
+                    >
+                      {creatingIdea ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                      Capture idea
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+            <Button
+              disabled={ideasStream.isStreaming}
+              onClick={() => ideasStream.start({ count: 5 })}
+            >
+              {ideasStream.isStreaming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Generate ideas
+            </Button>
+            <Button disabled={loading} onClick={() => void fetchData()} variant="outline">
+              <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              Refresh
+            </Button>
+          </div>
         )}
       />
       <div className="space-y-8">
+        {ideasStream.isStreaming ? (
+          <div aria-live="polite" className="space-y-4" data-testid="ideas-stream">
+            <ReasoningTicker active text={ideasStream.reasoning} />
+            <StreamSection state="streaming" title="Assimilating Projects, Research, and Topics">
+              <div className="grid gap-3">
+                {(ideasStream.partial?.ideas ?? [])
+                  .filter((idea) => idea?.title)
+                  .map((idea, index) => (
+                    <div
+                      className="animate-in fade-in slide-in-from-bottom-2 rounded-lg border bg-card p-4 duration-300"
+                      key={`${idea.title}-${index}`}
+                    >
+                      <div className="font-medium">{idea.title}</div>
+                      {idea.description ? (
+                        <div className="mt-1 text-sm text-muted-foreground">{idea.description}</div>
+                      ) : null}
+                    </div>
+                  ))}
+              </div>
+            </StreamSection>
+          </div>
+        ) : null}
         <StatRow isLoading={loading} stats={stats} />
 
-        {/* Tabs */}
         <Tabs
           className="space-y-4"
-          defaultValue="insights"
-          onValueChange={() => setSearchQuery("")}
+          onValueChange={(value) => {
+            setActiveTab(value as ContentTab);
+            setSearchQuery("");
+          }}
+          value={activeTab}
         >
-          <TabsList>
+          <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
             <TabsTrigger value="insights">Insights ({insights.length})</TabsTrigger>
-            <TabsTrigger value="ideas">Content Bases ({ideas.length})</TabsTrigger>
+            <TabsTrigger value="ideas">Ideas &amp; Bases ({ideas.length})</TabsTrigger>
             <TabsTrigger value="drafts">Posts ({activeDrafts.length})</TabsTrigger>
             <TabsTrigger value="published">Published ({publishedDrafts.length})</TabsTrigger>
           </TabsList>
@@ -312,18 +544,17 @@ export default function ContentPage() {
             ) : null}
           </TabsContent>
 
-          {/* Ideas Tab */}
           <TabsContent value="ideas" className="space-y-4">
             <ListSurface
               count={filteredIdeas.length}
-              description="Ideas and the Content Bases built from them."
+              description="Capture a rough Idea, then refine it into a grounded Content Base."
               emptyState={
                 <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
                   <Sparkles className="mb-4 h-8 w-8 text-muted-foreground" />
                   <p className="mb-4 text-sm text-muted-foreground">
                     {searchQuery
-                      ? `No Content Bases match “${searchQuery}”.`
-                      : "Content ideas and refined Content Bases appear here."}
+                      ? `No Ideas or Content Bases match “${searchQuery}”.`
+                      : "Capture a rough idea or generate ideas from your Projects, Research, and Topics."}
                   </p>
                   {searchQuery ? (
                     <Button onClick={() => setSearchQuery("")} variant="outline">
@@ -334,9 +565,9 @@ export default function ContentPage() {
               }
               isLoading={loading}
               onSearchChange={setSearchQuery}
-              searchPlaceholder="Search Content Bases…"
+              searchPlaceholder="Search Ideas and Content Bases…"
               searchValue={searchQuery}
-              title="Content Bases"
+              title="Ideas & Content Bases"
             >
               {!loading && filteredIdeas.length > 0 ? (
                 <ListRows>

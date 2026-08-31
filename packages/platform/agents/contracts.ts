@@ -11,7 +11,12 @@ export type ContentAction =
   | 'generate_content_draft'
   | 'schedule_post';
 
-export type OutreachAction = 'research_account' | 'research_prospect' | 'qualify_prospect' | 'generate_outreach';
+export type OutreachAction =
+  | 'research_account'
+  | 'research_prospect'
+  | 'qualify_prospect'
+  | 'refresh_prospect_insights'
+  | 'generate_outreach';
 export type CascadeAction = 'add_to_funnel';
 export type ResonanceAction = 'resonance_run';
 export type BackgroundAction =

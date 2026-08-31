@@ -7,6 +7,7 @@
  *
  * Fit gates. Timing ranks.
  */
+import { VECTOR_THRESHOLDS } from './vector-research';
 import {
   createLogger,
   observeOperation,
@@ -22,15 +23,19 @@ import {
 import { resolveAccountForProspect as resolveAccountForProspectDefault } from '../data/account-repository';
 import {
   getAccountScore as getAccountScoreDefault,
+  getMatches as getMatchesDefault,
   getProspectScore as getProspectScoreDefault,
   saveProspectQualification as saveProspectQualificationDefault,
   type AccountScoreRecord,
   type ProspectScoreRecord,
 } from '../data/qualification-repository';
+import { getDimensionDefinitions as getDimensionDefinitionsDefault } from '../data/dimension-repository';
 import { decideStatus } from '../domain/scoring';
 import {
   DEFAULT_THRESHOLDS,
   type AccountRecord,
+  type DimensionDefinition,
+  type DimensionMatch,
   type ProspectQualificationResult,
   type QualificationThresholds,
 } from '../domain/qualification';
@@ -44,6 +49,8 @@ export interface QualifyProspectDeps {
   resolveAccountForProspect: (prospect: { id: string; company?: string }) => Promise<AccountRecord | null>;
   getAccountScore: (accountId: string, catalogItemId?: string) => Promise<AccountScoreRecord | null>;
   getProspectScore: (prospectId: string, catalogItemId?: string) => Promise<ProspectScoreRecord | null>;
+  getDimensionDefinitions: (opts?: { activeOnly?: boolean; seedIfEmpty?: boolean; catalogItemId?: string }) => Promise<DimensionDefinition[]>;
+  getMatches: (entity: { kind: 'account' | 'prospect'; id: string; catalogItemId?: string }) => Promise<DimensionMatch[]>;
   saveProspectQualification: (prospectId: string, result: ProspectQualificationResult, catalogItemId?: string) => Promise<void>;
   updateProspectPriorityByScore: (prospectId: string, score: number) => Promise<unknown>;
   now: () => Date;
@@ -61,10 +68,12 @@ const defaultDeps: QualifyProspectDeps = {
   resolveAccountForProspect: resolveAccountForProspectDefault,
   getAccountScore: getAccountScoreDefault,
   getProspectScore: getProspectScoreDefault,
+  getDimensionDefinitions: getDimensionDefinitionsDefault,
+  getMatches: getMatchesDefault,
   saveProspectQualification: saveProspectQualificationDefault,
   updateProspectPriorityByScore: updateProspectPriorityByScoreDefault,
   now: () => new Date(),
-  thresholds: DEFAULT_THRESHOLDS,
+  thresholds: (process.env.RESEARCH_SCORING?.trim() === 'vector' ? VECTOR_THRESHOLDS : DEFAULT_THRESHOLDS),
 };
 
 const loadQualificationContext = traceable(
@@ -72,9 +81,16 @@ const loadQualificationContext = traceable(
     const prospect = await deps.getProspectById(prospectId);
     if (!prospect) throw new Error(`Prospect not found: ${prospectId}`);
     const account = await deps.resolveAccountForProspect(prospect);
-    const accountScore = account ? await deps.getAccountScore(account.id, prospect.catalogItemId) : null;
-    const prospectScore = await deps.getProspectScore(prospectId, prospect.catalogItemId);
-    const loaded = { prospect, account, accountScore, prospectScore };
+    const [dimensions, accountScore, prospectScore, accountMatches, prospectMatches] = await Promise.all([
+      deps.getDimensionDefinitions({ activeOnly: true, seedIfEmpty: false, catalogItemId: prospect.catalogItemId }),
+      account ? deps.getAccountScore(account.id, prospect.catalogItemId) : Promise.resolve(null),
+      deps.getProspectScore(prospectId, prospect.catalogItemId),
+      account
+        ? deps.getMatches({ kind: 'account', id: account.id, catalogItemId: prospect.catalogItemId })
+        : Promise.resolve([]),
+      deps.getMatches({ kind: 'prospect', id: prospectId, catalogItemId: prospect.catalogItemId }),
+    ]);
+    const loaded = { prospect, account, dimensions, accountScore, prospectScore, accountMatches, prospectMatches };
     return {
       ...loaded,
       database: summarizeDatabaseRead('load_qualification_context', loaded, account ? 4 : 3, {
@@ -109,8 +125,30 @@ export async function runQualifyProspect(
       input: { prospectId },
       attributes: { 'taicho.research.entity_kind': 'prospect' },
     }, async (workflow) => {
-      const { prospect, account, accountScore, prospectScore } = await loadQualificationContext(prospectId, d);
+      const {
+        prospect,
+        account,
+        dimensions,
+        accountScore,
+        prospectScore,
+        accountMatches,
+        prospectMatches,
+      } = await loadQualificationContext(prospectId, d);
       const now = d.now();
+
+      const hasAccountFitPolicy = dimensions.some((dimension) => (
+        dimension.appliesTo === 'account' && dimension.dimensionType === 'fit'
+      ));
+      const hasPersonFitPolicy = dimensions.some((dimension) => (
+        dimension.appliesTo === 'prospect' && dimension.dimensionType === 'fit'
+      ));
+      if (!hasAccountFitPolicy || !hasPersonFitPolicy) {
+        const missing = [
+          !hasAccountFitPolicy ? 'company-fit' : null,
+          !hasPersonFitPolicy ? 'person-fit' : null,
+        ].filter(Boolean).join(' and ');
+        throw new Error(`Qualification needs an active ${missing} targeting dimension.`);
+      }
 
       const icpScore = accountScore?.icpScore ?? 0;
       const timingScore = accountScore?.timingScore ?? 0;
@@ -137,6 +175,18 @@ export async function runQualifyProspect(
         // No company → account fit is unknowable; a human decides (spec §3).
         status = 'REVIEW';
         reviewReason = 'prospect has no company; account fit is unknown';
+      } else if (!accountScore || !prospectScore) {
+        status = 'REVIEW';
+        const missing = [
+          !accountScore ? 'company research' : null,
+          !prospectScore ? 'person research' : null,
+        ].filter(Boolean).join(' and ');
+        reviewReason = `research incomplete: ${missing} has not been scored`;
+      } else if (accountScore.reviewReason || prospectScore.reviewReason) {
+        status = 'REVIEW';
+        reviewReason = [accountScore.reviewReason, prospectScore.reviewReason]
+          .filter((reason): reason is string => Boolean(reason))
+          .join('; ');
       } else {
         const baseline = decideStatus({ icpScore, personaScore, hardExcluded, thresholds: d.thresholds });
         const confident = decideStatus({
@@ -159,8 +209,8 @@ export async function runQualifyProspect(
         icpScore,
         personaScore,
         timingScore,
-        icpMatches: [],
-        personaMatches: [],
+        icpMatches: accountMatches,
+        personaMatches: prospectMatches,
         timingBreakdown: accountScore?.timingBreakdown ?? [],
         reviewReason,
         computedAt: now.toISOString(),

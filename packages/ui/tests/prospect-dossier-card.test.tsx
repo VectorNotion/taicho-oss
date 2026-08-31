@@ -64,6 +64,11 @@ describe("prospect dossier card", () => {
         isLoading={false}
         isRequalifying={false}
         onRequalify={vi.fn()}
+        onRetryQualification={vi.fn()}
+        qualificationError={null}
+        qualificationOperation={null}
+        qualificationProgress={null}
+        qualificationRetrying={false}
       />,
     );
 
@@ -75,5 +80,33 @@ describe("prospect dossier card", () => {
     expect(screen.queryByRole("button", { name: "Research person" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Research account" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Re-score" })).toBeVisible();
+  });
+
+  it("keeps a failed durable scoring operation visible and retryable", () => {
+    const retry = vi.fn();
+    render(
+      <ProspectDossierCard
+        dossier={dossier()}
+        isLoading={false}
+        isRequalifying={false}
+        onRequalify={vi.fn()}
+        onRetryQualification={retry}
+        qualificationError="Qualification needs an active company-fit targeting dimension."
+        qualificationOperation={{
+          id: "11111111-1111-4111-8111-111111111111",
+          status: "failed",
+          progress: 20,
+          attempt: 1,
+          maxAttempts: 3,
+        }}
+        qualificationProgress={{ phase: "loading", label: "Loading research scores and targeting policy" }}
+        qualificationRetrying={false}
+      />,
+    );
+
+    expect(screen.getByText("Scoring needs attention")).toBeVisible();
+    expect(screen.getByText(/Qualification needs an active company-fit/)).toBeVisible();
+    screen.getByRole("button", { name: "Retry same operation" }).click();
+    expect(retry).toHaveBeenCalledOnce();
   });
 });

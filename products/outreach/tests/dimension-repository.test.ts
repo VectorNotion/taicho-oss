@@ -18,6 +18,7 @@ import {
 
 const ORGANIZATION_ID = `outreach-dimension-test-organization-${process.pid}`;
 const SCOPED_SEED_ORGANIZATION_ID = `outreach-dimension-scoped-seed-${process.pid}`;
+const ATOMIC_INVARIANT_ORGANIZATION_ID = `outreach-dimension-atomic-${process.pid}`;
 
 function inOrganization<T>(callback: () => T): T {
   return runWithGraphOrganization(ORGANIZATION_ID, callback);
@@ -37,6 +38,7 @@ before(() => inOrganization(clearGraph));
 after(() => inOrganization(async () => {
   await clearGraph();
   await runWithGraphOrganization(SCOPED_SEED_ORGANIZATION_ID, clearGraph);
+  await runWithGraphOrganization(ATOMIC_INVARIANT_ORGANIZATION_ID, clearGraph);
   await closeDriver();
 }));
 
@@ -95,17 +97,80 @@ test('dimension CRUD round-trip', async () => {
     isActive: true,
   });
   assert.match(created.id, /.+/);
+  assert.equal(created.revision, 1);
   assert.equal(created.halfLifeDays, 30);
   assert.equal(created.idealValue, undefined);
 
-  const updated = await updateDimensionDefinition(created.id, { weight: 0.9, isActive: false });
+  const updated = await updateDimensionDefinition(created.id, {
+    expectedRevision: created.revision,
+    weight: 0.9,
+    isActive: false,
+  });
   assert.ok(Math.abs((updated?.weight ?? 0) - 0.9) < 1e-9);
   assert.equal(updated?.isActive, false);
   assert.equal(updated?.key, 'custom_dim', 'untouched fields survive');
+  assert.equal(updated?.revision, 2);
+
+  const stale = await updateDimensionDefinition(created.id, {
+    expectedRevision: created.revision,
+    weight: 0.1,
+  });
+  assert.equal(stale, null, 'stale edits do not overwrite a newer revision');
 
   const activeOnly = await getDimensionDefinitions({ activeOnly: true });
   assert.ok(!activeOnly.some((d) => d.key === 'custom_dim'), 'inactive filtered out');
 
   assert.equal(await deleteDimensionDefinition(created.id), true);
   assert.equal(await deleteDimensionDefinition(created.id), false);
+});
+
+nodeTest('simultaneous final-active updates preserve one enabled dimension atomically', async () => {
+  await runWithGraphOrganization(ATOMIC_INVARIANT_ORGANIZATION_ID, async () => {
+    await clearGraph();
+    const first = await createDimensionDefinition({
+      key: 'first_timing',
+      name: 'First timing',
+      dimensionType: 'timing',
+      appliesTo: 'account',
+      researchInstruction: 'first',
+      weight: 0.5,
+      halfLifeDays: 30,
+      freshnessWindowDays: 10,
+      isActive: true,
+    });
+    const second = await createDimensionDefinition({
+      key: 'second_timing',
+      name: 'Second timing',
+      dimensionType: 'timing',
+      appliesTo: 'account',
+      researchInstruction: 'second',
+      weight: 0.5,
+      halfLifeDays: 30,
+      freshnessWindowDays: 10,
+      isActive: true,
+    });
+
+    const updates = await Promise.all([first, second].map((dimension) =>
+      updateDimensionDefinition(
+        dimension.id,
+        { expectedRevision: dimension.revision, isActive: false },
+        { requireAnotherActiveInCurrentGroup: true },
+      )
+    ));
+    assert.equal(updates.filter(Boolean).length, 1, 'only one deactivation commits');
+    assert.equal(updates.filter((result) => result === null).length, 1, 'the final deactivation is rejected');
+
+    const all = await getDimensionDefinitions();
+    assert.equal(all.filter((dimension) => dimension.isActive).length, 1);
+    const active = all.find((dimension) => dimension.isActive)!;
+    const inactive = all.find((dimension) => !dimension.isActive)!;
+    assert.equal(await deleteDimensionDefinition(active.id, {
+      expectedRevision: active.revision,
+      requireAnotherActiveInCurrentGroup: true,
+    }), false, 'the final active definition cannot be deleted');
+    assert.equal(await deleteDimensionDefinition(inactive.id, {
+      expectedRevision: inactive.revision,
+      requireAnotherActiveInCurrentGroup: true,
+    }), true, 'an inactive peer remains safely deletable');
+  });
 });

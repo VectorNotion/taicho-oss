@@ -52,10 +52,14 @@ export async function proxy(request: NextRequest) {
     NextResponse.json({ error: decision.reason === "unauthenticated" ? "Unauthenticated" : "Forbidden" }, { status: decision.reason === "unauthenticated" ? 401 : 403 }),
     correlationHeaders,
   );
-  return withPublicCorrelation(
-    NextResponse.redirect(new URL(decision.reason === "unauthenticated" ? "/sign-in" : "/access-denied", request.url)),
-    correlationHeaders,
-  );
+  if (decision.reason === "unauthenticated") {
+    const signIn = new URL("/sign-in", request.url);
+    signIn.searchParams.set("returnTo", `${pathname}${request.nextUrl.search}`);
+    return withPublicCorrelation(NextResponse.redirect(signIn), correlationHeaders);
+  }
+  const denied = new URL("/access-denied", request.url);
+  denied.searchParams.set("from", pathname);
+  return withPublicCorrelation(NextResponse.redirect(denied), correlationHeaders);
 }
 
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg).*)"] };

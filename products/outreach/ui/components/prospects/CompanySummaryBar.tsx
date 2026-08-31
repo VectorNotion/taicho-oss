@@ -15,6 +15,7 @@ export interface CompanyResearchObservation {
   observedValue?: string;
   evidence: string[];
   effectiveMatch?: number;
+  classification?: string;
   hardExclusion?: boolean;
 }
 

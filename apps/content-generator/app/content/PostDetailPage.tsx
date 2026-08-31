@@ -28,10 +28,9 @@ import {
   ImageIcon,
   Music2,
   Sparkles,
-  Ban,
 } from "lucide-react";
 
-import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -76,6 +75,12 @@ import {
 } from "@/products/content-generator/domain/content-export";
 import type { ContentDraft, ContentType, PerformanceLevel } from "@/products/content-generator/domain/content";
 import { PostContentPreview } from "@/products/content-generator/ui/components/PostContentPreview";
+import { ContentResonanceExperience } from "@/products/content-generator/ui/components/resonance/ContentResonanceExperience";
+import { VisualBriefDialog } from "@/products/content-generator/ui/components/VisualBriefDialog";
+import { MediaGenerationCard } from "@/products/content-generator/ui/components/MediaGenerationCard";
+import { MediaPreview } from "@/products/content-generator/ui/components/MediaPreview";
+import { CopyablePrompt } from "@/products/content-generator/ui/components/CopyablePrompt";
+import type { CreativeAssetView, CreativeRunView, PostMediaUsageView, VisualBrief } from "@/products/content-generator/ui/components/media-types";
 
 const typeConfig: Record<ContentType, { icon: React.ElementType; label: string }> = {
   video_script: { icon: Video, label: "YouTube video script" },
@@ -119,56 +124,10 @@ interface PublishingPost {
   createdAt: string;
 }
 
-type CreativeMediaKind = "image" | "video" | "audio";
-type CreativeRunStatus = "queued" | "submitted" | "processing" | "succeeded" | "failed" | "cancelled";
-
-interface CreativeModelOption {
-  key: string;
-  name: string;
-  description: string;
-  recommended?: boolean;
-}
-
-interface CreativeTemplateOption {
-  key: string;
-  name: string;
-  description: string;
-  kind: CreativeMediaKind;
-  assetRole: string;
-  defaultAspectRatio?: string;
-  allowedAspectRatios: string[];
-  defaultDurationSeconds?: number;
-  defaultVariations: number;
-  models: CreativeModelOption[];
-}
-
-interface CreativeRun {
-  id: string;
-  templateKey: string;
-  mediaKind: CreativeMediaKind;
-  assetRole: string;
-  modelKey: string;
-  status: CreativeRunStatus;
-  progress: number;
-  error: string | null;
-  estimatedCredits: number;
-  createdAt: string;
-}
-
-interface CreativeAsset {
-  id: string;
-  generationRunId: string;
-  assetRole: string;
-  mediaKind: CreativeMediaKind;
-  fileName: string;
-  mimeType: string;
-  width: number | null;
-  height: number | null;
-  durationMs: number | null;
-  byteSize: number;
-  isSelected: boolean;
-  createdAt: string;
-  url: string;
+interface PerformanceMetricSummary {
+  metrics: Record<string, number>;
+  lastMeasuredAt: string | null;
+  sources: Array<{ key: string; label: string }>;
 }
 
 const postStatusConfig: Record<
@@ -203,6 +162,11 @@ function reminderInputValue(value?: string): string {
   return local.toISOString().slice(0, 16);
 }
 
+function localDateTimeInputValue(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 export default function PostDetailPage({
   params,
 }: {
@@ -214,6 +178,9 @@ export default function PostDetailPage({
   const [draft, setDraft] = useState<ContentDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
   const [publishedUrl, setPublishedUrl] = useState("");
   const [performanceLevel, setPerformanceLevel] = useState<PerformanceLevel | "">("");
   const [performanceInsights, setPerformanceInsights] = useState("");
@@ -228,6 +195,9 @@ export default function PostDetailPage({
   const [metricClicks, setMetricClicks] = useState("");
   const [metricsPostId, setMetricsPostId] = useState("");
   const [metricsFieldError, setMetricsFieldError] = useState<string | null>(null);
+  const [metricSummary, setMetricSummary] = useState<PerformanceMetricSummary | null>(null);
+  const [metricSummaryError, setMetricSummaryError] = useState<string | null>(null);
+  const [metricSummaryLoading, setMetricSummaryLoading] = useState(false);
 
   // Publishing state
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
@@ -240,46 +210,67 @@ export default function PostDetailPage({
   const [postsLoading, setPostsLoading] = useState(true);
   const [retryingPostId, setRetryingPostId] = useState<string | null>(null);
 
-  // Creative media generation state
-  const [mediaTemplates, setMediaTemplates] = useState<CreativeTemplateOption[]>([]);
-  const [mediaRuns, setMediaRuns] = useState<CreativeRun[]>([]);
-  const [mediaAssets, setMediaAssets] = useState<CreativeAsset[]>([]);
+  // Content Base-owned media referenced by this Post.
+  const [mediaRuns, setMediaRuns] = useState<CreativeRunView[]>([]);
+  const [baseMediaRuns, setBaseMediaRuns] = useState<CreativeRunView[]>([]);
+  const [linkedMedia, setLinkedMedia] = useState<PostMediaUsageView[]>([]);
+  const [availableMedia, setAvailableMedia] = useState<CreativeAssetView[]>([]);
   const [mediaLoading, setMediaLoading] = useState(true);
   const [mediaGenerating, setMediaGenerating] = useState(false);
   const [mediaCancellingId, setMediaCancellingId] = useState<string | null>(null);
-  const [mediaSelectingId, setMediaSelectingId] = useState<string | null>(null);
-  const [mediaTemplateKey, setMediaTemplateKey] = useState("");
-  const [mediaModelKey, setMediaModelKey] = useState("auto");
-  const [mediaPrompt, setMediaPrompt] = useState("");
-  const [mediaAspectRatio, setMediaAspectRatio] = useState("");
-  const [mediaVariations, setMediaVariations] = useState("1");
-  const [mediaDuration, setMediaDuration] = useState("5");
+  const [mediaActionId, setMediaActionId] = useState<string | null>(null);
+  const [visualBriefOpen, setVisualBriefOpen] = useState(false);
+  const [pendingMediaBrief, setPendingMediaBrief] = useState<VisualBrief | null>(null);
 
-  const fetchDraft = async () => {
+  const fetchMetricSummary = async (silent = false, cancelled: () => boolean = () => false) => {
+    setMetricSummaryLoading(true);
+    try {
+      const summary = await apiGet<PerformanceMetricSummary>(`/content/posts/${id}/metrics`);
+      if (cancelled()) return;
+      setMetricSummary(summary);
+      setMetricSummaryError(null);
+    } catch (error) {
+      if (cancelled()) return;
+      const message = error instanceof Error ? error.message : "Could not load performance metrics.";
+      setMetricSummaryError(message);
+      if (!silent) toast.error(message);
+    } finally {
+      if (!cancelled()) setMetricSummaryLoading(false);
+    }
+  };
+
+  const fetchDraft = async (cancelled: () => boolean = () => false) => {
     try {
       const { draft: data } = await apiGet<{ draft: ContentDraft }>(`/content/drafts/${id}`);
+      if (cancelled()) return;
       setDraft(data);
+      setEditTitle(data.title);
+      setEditContent(data.content);
       setPublishedUrl(data.publishedUrl || "");
       setPerformanceLevel(data.performanceLevel || "");
       setPerformanceInsights(data.performanceInsights || "");
       setReminderWhen(reminderInputValue(data.scheduledFor));
+      if (data.status === "published") void fetchMetricSummary(true, cancelled);
     } catch (error) {
+      if (cancelled()) return;
       console.error("Error fetching Post:", error);
       toast.error("Could not load the Post. Refresh to try again.");
     } finally {
-      setLoading(false);
+      if (!cancelled()) setLoading(false);
     }
   };
 
-  const fetchPosts = async (silent = false) => {
+  const fetchPosts = async (silent = false, cancelled: () => boolean = () => false) => {
     try {
       const data = await apiGet<{ posts?: PublishingPost[] }>(`/publishing/drafts/${id}/posts`);
+      if (cancelled()) return;
       setPosts(data.posts ?? []);
     } catch (error) {
+      if (cancelled()) return;
       console.error("Error fetching posts:", error);
       if (!silent) toast.error("Could not load publishing posts. Refresh to try again.");
     } finally {
-      setPostsLoading(false);
+      if (!cancelled()) setPostsLoading(false);
     }
   };
 
@@ -296,41 +287,50 @@ export default function PostDetailPage({
     }
   };
 
-  const fetchCreativeMedia = async (silent = false) => {
+  const fetchCreativeMedia = async (silent = false, cancelled: () => boolean = () => false) => {
     try {
-      const data = await apiGet<{ templates?: CreativeTemplateOption[]; runs?: CreativeRun[]; assets?: CreativeAsset[] }>(`/content/drafts/${id}/media`);
-      const templates = (data.templates ?? []) as CreativeTemplateOption[];
-      setMediaTemplates(templates);
-      setMediaRuns(data.runs ?? []);
-      setMediaAssets(data.assets ?? []);
-      setMediaTemplateKey((current) => current || templates[0]?.key || "");
+      const data = await apiGet<{ contentBaseId: string; linked: PostMediaUsageView[]; available: CreativeAssetView[] }>(`/content/drafts/${id}/media-links`);
+      if (cancelled()) return;
+      setLinkedMedia(data.linked ?? []);
+      setAvailableMedia(data.available ?? []);
+      const overview = await apiGet<{ runs: CreativeRunView[] }>(`/content/ideas/${data.contentBaseId}/media`);
+      if (!cancelled()) {
+        setBaseMediaRuns(overview.runs ?? []);
+        setMediaRuns((overview.runs ?? []).filter((run) => run.originPostId === id));
+      }
     } catch (error) {
+      if (cancelled()) return;
       console.error("Error fetching creative media:", error);
       if (!silent) toast.error("Could not load creative assets. Refresh to try again.");
     } finally {
-      setMediaLoading(false);
+      if (!cancelled()) setMediaLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDraft();
-    fetchPosts();
-    fetchCreativeMedia();
+    let active = true;
+    const cancelled = () => !active;
+    void fetchDraft(cancelled);
+    void fetchPosts(false, cancelled);
+    void fetchCreativeMedia(false, cancelled);
+    return () => { active = false; };
   }, [id]);
 
-  const selectedMediaTemplate = mediaTemplates.find((template) => template.key === mediaTemplateKey);
+  const hasUnsavedChanges = Boolean(
+    editing
+    && draft
+    && (editTitle !== draft.title || editContent !== draft.content),
+  );
 
   useEffect(() => {
-    if (!selectedMediaTemplate) return;
-    setMediaModelKey((current) =>
-      current !== "auto" && selectedMediaTemplate.models.some((model) => model.key === current)
-        ? current
-        : "auto",
-    );
-    setMediaAspectRatio(selectedMediaTemplate.defaultAspectRatio ?? "");
-    setMediaVariations(String(selectedMediaTemplate.defaultVariations));
-    setMediaDuration(String(selectedMediaTemplate.defaultDurationSeconds ?? 5));
-  }, [selectedMediaTemplate?.key]);
+    if (!hasUnsavedChanges) return;
+    const preventUnsavedUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventUnsavedUnload);
+    return () => window.removeEventListener("beforeunload", preventUnsavedUnload);
+  }, [hasUnsavedChanges]);
 
   // Refresh channels whenever the publish dialog opens.
   useEffect(() => {
@@ -348,9 +348,14 @@ export default function PostDetailPage({
     return () => clearInterval(interval);
   }, [hasActivePosts, id]);
 
-  const hasActiveMediaRuns = mediaRuns.some((run) =>
-    run.status === "queued" || run.status === "submitted" || run.status === "processing",
+  const visibleMediaRuns = mediaRuns.filter((run) =>
+    run.status === "preparing" || run.status === "queued" || run.status === "submitted" || run.status === "processing"
+      || run.status === "failed" || run.status === "cancelled",
   );
+  const activeMediaRuns = visibleMediaRuns.filter((run) =>
+    run.status === "preparing" || run.status === "queued" || run.status === "submitted" || run.status === "processing",
+  );
+  const hasActiveMediaRuns = activeMediaRuns.length > 0;
 
   useEffect(() => {
     if (!hasActiveMediaRuns) return;
@@ -358,30 +363,23 @@ export default function PostDetailPage({
     return () => clearInterval(interval);
   }, [hasActiveMediaRuns, id]);
 
-  const startCreativeMedia = async (input: Record<string, unknown>) => {
+  const startCreativeMedia = async (brief: VisualBrief) => {
+    setVisualBriefOpen(false);
+    setPendingMediaBrief(brief);
     setMediaGenerating(true);
     try {
-      await apiMutate("POST", `/content/drafts/${id}/media`, input);
-      toast.success("Creative generation started");
+      const { data } = await apiMutate<{ run: CreativeRunView }>("POST", `/content/drafts/${id}/media`, { brief });
+      setMediaRuns((current) => [data.run, ...current.filter((run) => run.id !== data.run.id)]);
+      setPendingMediaBrief(null);
+      toast.success("Visual generation started");
       await fetchCreativeMedia(true);
     } catch (error) {
-      console.error("Error generating creative media:", error);
       toast.error(error instanceof Error ? error.message : "Could not start creative generation.");
+      await fetchCreativeMedia(true);
     } finally {
+      setPendingMediaBrief(null);
       setMediaGenerating(false);
     }
-  };
-
-  const handleGenerateCreativeMedia = async () => {
-    if (!selectedMediaTemplate) return;
-    await startCreativeMedia({
-      templateKey: selectedMediaTemplate.key,
-      modelKey: mediaModelKey === "auto" ? undefined : mediaModelKey,
-      prompt: mediaPrompt.trim() || undefined,
-      aspectRatio: mediaAspectRatio || undefined,
-      variations: Number(mediaVariations),
-      durationSeconds: selectedMediaTemplate.kind === "video" ? Number(mediaDuration) : undefined,
-    });
   };
 
   const handleCancelCreativeRun = async (runId: string) => {
@@ -397,22 +395,36 @@ export default function PostDetailPage({
     }
   };
 
-  const handleSelectCreativeAsset = async (asset: CreativeAsset) => {
-    setMediaSelectingId(asset.id);
+  const handleAttachCreativeAsset = async (assetId: string) => {
+    setMediaActionId(assetId);
     try {
-      await apiMutate("POST", `/content/drafts/${id}/media/${asset.id}/select`);
-      toast.success("Asset selected for publishing");
+      await apiMutate("POST", `/content/drafts/${id}/media-links`, { assetId });
+      toast.success("Media attached to the Post");
       await fetchCreativeMedia(true);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not select this asset.");
+      toast.error(error instanceof Error ? error.message : "Could not attach this media.");
     } finally {
-      setMediaSelectingId(null);
+      setMediaActionId(null);
     }
+  };
+
+  const handleDetachCreativeAsset = async (assetId: string) => {
+    setMediaActionId(assetId);
+    try {
+      await apiMutate("DELETE", `/content/drafts/${id}/media-links/${assetId}`, {});
+      toast.success("Media detached; the Content Base asset was preserved");
+      await fetchCreativeMedia(true);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not detach this media."); }
+    finally { setMediaActionId(null); }
   };
 
   const handlePublish = async () => {
     const channel = channels.find((entry) => entry.id === selectedChannelId);
     if (!channel) return;
+    if (scheduleWhen && new Date(scheduleWhen).getTime() <= Date.now()) {
+      toast.error("Schedule time must be in the future.");
+      return;
+    }
     setPublishing(true);
     try {
       await apiMutate("POST", `/publishing/drafts/${id}/publish`, {
@@ -426,8 +438,7 @@ export default function PostDetailPage({
       setScheduleWhen("");
       fetchPosts(true);
     } catch (error) {
-      console.error("Error publishing draft:", error);
-      toast.error("Could not schedule the post. Try again.");
+      toast.error(error instanceof Error ? error.message : "Could not schedule the post. Try again.");
     } finally {
       setPublishing(false);
     }
@@ -448,6 +459,15 @@ export default function PostDetailPage({
   };
 
   const handleUpdateStatus = async (status: "ready" | "published") => {
+    if (status === "published" && publishedUrl) {
+      try {
+        const parsed = new URL(publishedUrl);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("unsupported protocol");
+      } catch {
+        toast.error("Enter a valid HTTP or HTTPS URL, or leave the published URL empty.");
+        return;
+      }
+    }
     setUpdating(true);
     try {
       const body: Record<string, string> = { status };
@@ -460,10 +480,55 @@ export default function PostDetailPage({
       fetchDraft();
     } catch (error) {
       console.error("Error updating Post:", error);
-      toast.error("Could not update the Post. Try again.");
+      toast.error(error instanceof Error ? error.message : "Could not update the Post. Try again.");
     } finally {
       setUpdating(false);
     }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!draft) return;
+    const title = editTitle.trim();
+    if (!title || !editContent.trim()) {
+      toast.error("Title and content are required.");
+      return;
+    }
+    setUpdating(true);
+    try {
+      const result = await apiMutate<{ draft: ContentDraft }>("PATCH", `/content/drafts/${id}`, {
+        title,
+        content: editContent,
+        expectedUpdatedAt: draft.updatedAt,
+      });
+      setDraft(result.data.draft);
+      setEditTitle(result.data.draft.title);
+      setEditContent(result.data.draft.content);
+      setEditing(false);
+      toast.success("Post saved");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        try {
+          const { draft: latest } = await apiGet<{ draft: ContentDraft }>(`/content/drafts/${id}`);
+          setDraft(latest);
+          toast.error(`${error.message} Your edits are preserved; review and save again.`);
+        } catch {
+          toast.error(`${error.message} Your edits are preserved; refresh when you are ready to reconcile them.`);
+        }
+      } else {
+        toast.error(error instanceof Error ? error.message : "Could not save the Post. Try again.");
+      }
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleCancelEditing = () => {
+    if (hasUnsavedChanges && !window.confirm("Discard your unsaved Post changes?")) return;
+    if (draft) {
+      setEditTitle(draft.title);
+      setEditContent(draft.content);
+    }
+    setEditing(false);
   };
 
   const publishedPosts = posts.filter((post) => post.status === "published");
@@ -511,21 +576,21 @@ export default function PostDetailPage({
       }
 
       if (hasMetrics) {
-        const metricsRes = await fetch(`/api/content/posts/${metricsTargetId}/metrics`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        try {
+          await apiMutate("POST", `/content/posts/${metricsTargetId}/metrics`, {
             impressions: metricImpressions.trim() === "" ? undefined : Number(metricImpressions),
             clicks: metricClicks.trim() === "" ? undefined : Number(metricClicks),
-          }),
-        });
-        if (!metricsRes.ok) {
-          toast.error("Saved the annotation, but could not record the metrics. Try again.");
+          });
+        } catch (error) {
+          toast.error(error instanceof Error
+            ? `Saved the annotation, but metrics were not recorded. ${error.message}`
+            : "Saved the annotation, but metrics were not recorded. Try again.");
           fetchDraft();
           return;
         }
         setMetricImpressions("");
         setMetricClicks("");
+        await fetchMetricSummary(true);
       }
 
       toast.success("Performance annotation saved");
@@ -540,27 +605,34 @@ export default function PostDetailPage({
   };
 
   const handleCopyContent = async () => {
-    if (draft?.content) {
+    if (!draft?.content) return;
+    try {
       await navigator.clipboard.writeText(draft.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Clipboard access was denied. Select the Post content and copy it manually.");
     }
   };
 
   const handleExportContent = (format: ContentExportFormat) => {
     if (!draft) return;
-    const exported = buildContentExport(draft, format);
-    const url = URL.createObjectURL(
-      new Blob([exported.body], { type: exported.mimeType }),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = exported.filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast.success(`Exported ${exported.filename}`);
+    try {
+      const exported = buildContentExport(draft, format);
+      const url = URL.createObjectURL(
+        new Blob([exported.body], { type: exported.mimeType }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = exported.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      toast.success(`Exported ${exported.filename}`);
+    } catch {
+      toast.error("Could not export the Post. Try again.");
+    }
   };
 
   const handleReminder = async (clear = false) => {
@@ -598,6 +670,11 @@ export default function PostDetailPage({
         : contentBaseIdFromRoute
           ? `/content/${contentBaseIdFromRoute}`
           : "/content"}
+      onClick={(event) => {
+        if (hasUnsavedChanges && !window.confirm("Leave without saving your Post changes?")) {
+          event.preventDefault();
+        }
+      }}
     >
       <ArrowLeft className="size-4" />
       {draft?.ideaId || contentBaseIdFromRoute ? "Content Base" : "All content"}
@@ -654,9 +731,16 @@ export default function PostDetailPage({
     <div className="w-full min-w-0">
       {backLink}
       <PageHeader
+        stackActionsUntil="xl"
         title={draft.title}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {draft.status === "draft" && !editing && (
+              <Button onClick={() => setEditing(true)} size="sm" variant="outline">
+                <Edit className="h-4 w-4" />
+                Edit Post
+              </Button>
+            )}
             <Button asChild size="sm" variant="outline">
               <Link href={`/resonance?post=${draft.id}`}>
                 <AudioWaveform className="h-4 w-4" />
@@ -727,245 +811,160 @@ export default function PostDetailPage({
           )}
         </div>
 
-        <PostContentPreview post={draft} />
+        {editing && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Edit Post</CardTitle>
+              <CardDescription>
+                Save the title and body before moving this Post into editorial review.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="post-title">Title</Label>
+                <Input
+                  id="post-title"
+                  maxLength={500}
+                  onChange={(event) => setEditTitle(event.target.value)}
+                  value={editTitle}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="post-content">Content</Label>
+                <Textarea
+                  className="min-h-64 font-mono text-sm"
+                  id="post-content"
+                  onChange={(event) => setEditContent(event.target.value)}
+                  value={editContent}
+                />
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button disabled={updating} onClick={handleCancelEditing} variant="outline">
+                  Cancel
+                </Button>
+                <Button
+                  disabled={updating || !hasUnsavedChanges || !editTitle.trim() || !editContent.trim()}
+                  onClick={() => void handleSaveDraft()}
+                >
+                  {updating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Save Post
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5" />
-              Creative assets
-            </CardTitle>
-            <CardDescription>
-              Generate images, video, and audio from this Post. Selected assets are attached automatically when the destination supports them.
-            </CardDescription>
+        <PostContentPreview media={linkedMedia.map(({ asset }) => asset)} post={draft} />
+
+        <VisualBriefDialog
+          initialKind="image"
+          onOpenChange={setVisualBriefOpen}
+          onSubmit={startCreativeMedia}
+          open={visualBriefOpen}
+          submitLabel="Create visual"
+          submitting={mediaGenerating}
+          title="Create a visual from this Post"
+        />
+
+        <Card id="creative-assets">
+          <CardHeader className="flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5" />
+                Media used
+              </CardTitle>
+              <CardDescription className="mt-1">
+                This Post references media owned by its Content Base. Detaching an item never deletes the Base asset.
+              </CardDescription>
+            </div>
+            <Button disabled={mediaGenerating} onClick={() => setVisualBriefOpen(true)} size="sm">
+              <ImageIcon className="size-4" />
+              Create visual
+            </Button>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-5">
             {mediaLoading ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 3 }).map((_, index) => (
-                  <Skeleton className="h-36 w-full" key={index} />
-                ))}
-              </div>
-            ) : mediaTemplates.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                Creative models are not available for this workspace yet.
-              </div>
-            ) : (
-              <div className="space-y-4 rounded-lg border bg-muted/10 p-4">
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                  <div className="grid gap-2 lg:col-span-2">
-                    <Label htmlFor="creative-template">Content template</Label>
-                    <Select value={mediaTemplateKey} onValueChange={setMediaTemplateKey}>
-                      <SelectTrigger id="creative-template">
-                        <SelectValue placeholder="Choose a template" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {mediaTemplates.map((template) => (
-                          <SelectItem key={template.key} value={template.key}>
-                            {template.name} — {template.kind}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {selectedMediaTemplate ? (
-                      <p className="text-xs text-muted-foreground">{selectedMediaTemplate.description}</p>
-                    ) : null}
-                  </div>
-                  <div className="grid gap-2 lg:col-span-2">
-                    <Label htmlFor="creative-model">Model</Label>
-                    <Select value={mediaModelKey} onValueChange={setMediaModelKey}>
-                      <SelectTrigger id="creative-model">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="auto">Auto — recommended</SelectItem>
-                        {selectedMediaTemplate?.models.map((model) => (
-                          <SelectItem key={model.key} value={model.key}>
-                            {model.name}{model.recommended ? " — recommended" : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {selectedMediaTemplate?.allowedAspectRatios.length ? (
-                    <div className="grid gap-2">
-                      <Label htmlFor="creative-aspect">Aspect ratio</Label>
-                      <Select value={mediaAspectRatio} onValueChange={setMediaAspectRatio}>
-                        <SelectTrigger id="creative-aspect"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {selectedMediaTemplate.allowedAspectRatios.map((ratio) => (
-                            <SelectItem key={ratio} value={ratio}>{ratio}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ) : null}
-                  {selectedMediaTemplate?.kind === "image" ? (
-                    <div className="grid gap-2">
-                      <Label htmlFor="creative-variations">Variations</Label>
-                      <Select value={mediaVariations} onValueChange={setMediaVariations}>
-                        <SelectTrigger id="creative-variations"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {[1, 2, 3, 4].map((count) => (
-                            <SelectItem key={count} value={String(count)}>{count}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ) : null}
-                  {selectedMediaTemplate?.kind === "video" ? (
-                    <div className="grid gap-2">
-                      <Label htmlFor="creative-duration">Duration</Label>
-                      <Select value={mediaDuration} onValueChange={setMediaDuration}>
-                        <SelectTrigger id="creative-duration"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {[5, 10, 15].map((seconds) => (
-                            <SelectItem key={seconds} value={String(seconds)}>{seconds} seconds</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="creative-prompt">Creative direction (optional)</Label>
-                  <Textarea
-                    id="creative-prompt"
-                    maxLength={4000}
-                    onChange={(event) => setMediaPrompt(event.target.value)}
-                    placeholder="Leave empty to build a prompt from the Post, or describe the visual, motion, or voice you want."
-                    rows={3}
-                    value={mediaPrompt}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">
-                    Generation runs remotely on FAL and the final files are copied into your workspace storage.
-                  </p>
-                  <Button disabled={mediaGenerating || !selectedMediaTemplate} onClick={() => void handleGenerateCreativeMedia()}>
-                    {mediaGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    Generate {selectedMediaTemplate?.kind ?? "asset"}
-                  </Button>
-                </div>
-              </div>
-            )}
+              <div className="grid gap-3 sm:grid-cols-2">{Array.from({ length: 2 }).map((_, index) => <Skeleton className="aspect-video" key={index} />)}</div>
+            ) : null}
 
-            {mediaRuns.some((run) => run.status !== "succeeded") ? (
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Generation activity</p>
-                {mediaRuns.filter((run) => run.status !== "succeeded").slice(0, 5).map((run) => {
-                  const template = mediaTemplates.find((entry) => entry.key === run.templateKey);
-                  const active = run.status === "queued" || run.status === "submitted" || run.status === "processing";
+            {!mediaLoading && (pendingMediaBrief || visibleMediaRuns.length || linkedMedia.length) ? (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {pendingMediaBrief ? (
+                  <MediaGenerationCard aspect="video" brief={pendingMediaBrief} />
+                ) : null}
+                {visibleMediaRuns.map((run) => (
+                  <MediaGenerationCard
+                    aspect="video"
+                    brief={run.visualBrief}
+                    cancelling={mediaCancellingId === run.id}
+                    key={run.id}
+                    onCancel={activeMediaRuns.some((active) => active.id === run.id)
+                      ? () => void handleCancelCreativeRun(run.id)
+                      : undefined}
+                    onRetry={["failed", "cancelled"].includes(run.status)
+                      ? () => void startCreativeMedia(run.visualBrief)
+                      : undefined}
+                    run={run}
+                  />
+                ))}
+                {linkedMedia.map((link) => {
+                  const { asset } = link;
+                  const run = baseMediaRuns.find((entry) => entry.id === asset.generationRunId);
+                  const groundedGeneration = link.role.startsWith("grounding-");
                   return (
-                    <div className="rounded-lg border p-3" key={run.id}>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            {run.mediaKind === "image" ? <ImageIcon className="h-4 w-4" /> : run.mediaKind === "video" ? <Video className="h-4 w-4" /> : <Music2 className="h-4 w-4" />}
-                            <span className="text-sm font-medium">{template?.name ?? run.templateKey}</span>
-                            <Badge variant={run.status === "failed" ? "destructive" : run.status === "cancelled" ? "outline" : "secondary"}>
-                              {run.status}
-                            </Badge>
+                    <article className="overflow-hidden rounded-xl border" key={asset.id}>
+                      <div className="aspect-video bg-muted/20"><MediaPreview asset={asset} /></div>
+                      <div className="space-y-3 p-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-medium capitalize">{asset.visualType.replaceAll("-", " ")}</p>
+                            {groundedGeneration ? <Badge variant="secondary">Grounded this Post</Badge> : <Badge variant="outline">Attached after generation</Badge>}
                           </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {run.error || `${run.progress}% complete · up to ${run.estimatedCredits} credits`}
-                          </p>
+                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{asset.description}</p>
                         </div>
+                        {groundedGeneration && run ? (
+                          <details className="rounded-lg bg-muted/25 p-3 text-xs">
+                            <summary className="cursor-pointer font-medium">Image grounding used</summary>
+                            <div className="mt-2 space-y-2 text-muted-foreground">
+                              <p><span className="font-medium text-foreground">Visual Brief:</span> {JSON.stringify(run.visualBrief)}</p>
+                              <CopyablePrompt label="Image prompt in Post generation" prompt={run.provenance.compiledPrompt} />
+                            </div>
+                          </details>
+                        ) : null}
                         <div className="flex items-center gap-2">
-                          {(run.status === "failed" || run.status === "cancelled") ? (
-                            <Button
-                              disabled={mediaGenerating}
-                              onClick={() => void startCreativeMedia({ templateKey: run.templateKey, modelKey: run.modelKey })}
-                              size="sm"
-                              variant="outline"
-                            >
-                              <RotateCcw className="h-4 w-4" />
-                              Retry
-                            </Button>
-                          ) : null}
-                          {active ? (
-                            <Button
-                              disabled={mediaCancellingId === run.id}
-                              onClick={() => void handleCancelCreativeRun(run.id)}
-                              size="sm"
-                              variant="ghost"
-                            >
-                              {mediaCancellingId === run.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
-                              Cancel
-                            </Button>
-                          ) : null}
+                          <Button className="flex-1" disabled={mediaActionId === asset.id} onClick={() => void handleDetachCreativeAsset(asset.id)} size="sm" variant="outline">Detach</Button>
+                          <Button asChild size="sm" variant="ghost"><a download={asset.fileName} href={asset.url}><Download className="size-4" /><span className="sr-only">Download</span></a></Button>
                         </div>
                       </div>
-                      {active ? (
-                        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
-                          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(5, run.progress)}%` }} />
-                        </div>
-                      ) : null}
-                    </div>
+                    </article>
                   );
                 })}
               </div>
             ) : null}
 
-            {mediaAssets.length > 0 ? (
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Asset library</p>
-                  <p className="text-xs text-muted-foreground">Selection is tracked per role, so a hero, thumbnail, and primary asset can coexist.</p>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {mediaAssets.map((asset) => (
-                    <div className={`overflow-hidden rounded-lg border ${asset.isSelected ? "ring-2 ring-primary" : ""}`} key={asset.id}>
-                      <div className="flex aspect-video items-center justify-center bg-muted/30">
-                        {asset.mediaKind === "image" ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img alt={asset.fileName} className="h-full w-full object-cover" loading="lazy" src={asset.url} />
-                        ) : asset.mediaKind === "video" ? (
-                          <video className="h-full w-full object-cover" controls preload="metadata" src={asset.url} />
-                        ) : (
-                          <div className="w-full space-y-3 p-5 text-center">
-                            <Music2 className="mx-auto h-8 w-8 text-muted-foreground" />
-                            <audio className="w-full" controls preload="metadata" src={asset.url} />
-                          </div>
-                        )}
-                      </div>
-                      <div className="space-y-3 p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{asset.fileName}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {asset.assetRole} · {(asset.byteSize / 1024 / 1024).toFixed(1)} MB
-                            </p>
-                          </div>
-                          {asset.isSelected ? <Badge>Selected</Badge> : null}
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            className="flex-1"
-                            disabled={asset.isSelected || mediaSelectingId === asset.id}
-                            onClick={() => void handleSelectCreativeAsset(asset)}
-                            size="sm"
-                            variant={asset.isSelected ? "secondary" : "outline"}
-                          >
-                            {mediaSelectingId === asset.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                            {asset.isSelected ? "Selected" : "Use this asset"}
-                          </Button>
-                          <Button asChild size="sm" variant="ghost">
-                            <a download={asset.fileName} href={asset.url}><Download className="h-4 w-4" /><span className="sr-only">Download</span></a>
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
+            {!mediaLoading && !pendingMediaBrief && !visibleMediaRuns.length && !linkedMedia.length ? (
+              <div className="rounded-lg border border-dashed p-7 text-center"><ImageIcon className="mx-auto size-8 text-muted-foreground" /><p className="mt-2 text-sm font-medium">No media attached</p><p className="mt-1 text-xs text-muted-foreground">Attach existing Base media or create a new visual from this Post.</p></div>
+            ) : null}
+
+            {availableMedia.some((asset) => !linkedMedia.some((link) => link.assetId === asset.id)) ? (
+              <div className="space-y-3 border-t pt-5">
+                <div><p className="text-sm font-medium">Available from Content Base</p><p className="text-xs text-muted-foreground">Reuse a Base asset without copying or moving it.</p></div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {availableMedia.filter((asset) => !linkedMedia.some((link) => link.assetId === asset.id)).map((asset) => (
+                    <button className="overflow-hidden rounded-lg border text-left transition-colors hover:border-primary" disabled={mediaActionId === asset.id} key={asset.id} onClick={() => void handleAttachCreativeAsset(asset.id)} type="button">
+                      <div className="aspect-video bg-muted/20"><MediaPreview asset={asset} /></div>
+                      <div className="p-2"><p className="truncate text-xs font-medium capitalize">{asset.visualType.replaceAll("-", " ")}</p><p className="text-[11px] text-muted-foreground">Attach to Post</p></div>
+                    </button>
                   ))}
                 </div>
               </div>
-            ) : !mediaLoading ? (
-              <div className="rounded-lg border border-dashed p-8 text-center">
-                <ImageIcon className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-                <p className="text-sm font-medium">No creative assets yet</p>
-                <p className="mt-1 text-xs text-muted-foreground">Choose a template above to generate the first one.</p>
-              </div>
             ) : null}
+
+            <div className="flex justify-end">
+              <Button asChild size="sm" variant="ghost">
+                <Link href={`/content/${contentBaseIdFromRoute ?? draft.ideaId}`}>Open Content Base media gallery <ExternalLink className="size-4" /></Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -1066,18 +1065,22 @@ export default function PostDetailPage({
                     <div className="grid gap-2">
                       <Label htmlFor="publish-when">Schedule (optional)</Label>
                       <Input
+                        aria-invalid={scheduleWhen !== "" && new Date(scheduleWhen).getTime() <= Date.now()}
                         id="publish-when"
+                        min={localDateTimeInputValue(new Date())}
                         type="datetime-local"
                         value={scheduleWhen}
                         onChange={(e) => setScheduleWhen(e.target.value)}
                       />
-                      <p className="text-xs text-muted-foreground">
-                        Leave empty to publish now.
-                      </p>
+                      {scheduleWhen !== "" && new Date(scheduleWhen).getTime() <= Date.now() ? (
+                        <p className="text-xs text-destructive" role="alert">Schedule time must be in the future.</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Leave empty to publish now.</p>
+                      )}
                     </div>
-                    {mediaAssets.some((asset) => asset.isSelected) ? (
+                    {linkedMedia.length ? (
                       <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                        The selected compatible creative asset will be attached automatically. Destinations that do not accept that media type will publish the copy only.
+                        The first compatible attached Base asset will be included automatically. Destinations that do not accept that media type will publish the copy only.
                       </div>
                     ) : null}
                   </div>
@@ -1091,7 +1094,7 @@ export default function PostDetailPage({
                     </Button>
                     <Button
                       onClick={handlePublish}
-                      disabled={publishing || !selectedChannelId}
+                      disabled={publishing || !selectedChannelId || (scheduleWhen !== "" && new Date(scheduleWhen).getTime() <= Date.now())}
                     >
                       {publishing && <Loader2 className="h-4 w-4 animate-spin" />}
                       {scheduleWhen ? "Schedule post" : "Publish now"}
@@ -1104,6 +1107,7 @@ export default function PostDetailPage({
                 <Input
                   id="publishedUrl"
                   placeholder="https://..."
+                  type="url"
                   value={publishedUrl}
                   onChange={(e) => setPublishedUrl(e.target.value)}
                 />
@@ -1264,7 +1268,7 @@ export default function PostDetailPage({
                 </div>
               )}
               {metricsFieldError && (
-                <p className="text-xs text-destructive">{metricsFieldError}</p>
+                <p className="text-xs text-destructive" role="alert">{metricsFieldError}</p>
               )}
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setShowPerformanceForm(false)}>
@@ -1275,6 +1279,52 @@ export default function PostDetailPage({
                   Save annotation
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {draft.status === "published" && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Performance metrics</CardTitle>
+              <CardDescription>Latest resolved counts for this Post across recorded sources.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {metricSummaryLoading ? (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {Array.from({ length: 3 }, (_, index) => <Skeleton className="h-20" key={index} />)}
+                </div>
+              ) : metricSummaryError ? (
+                <div className="flex flex-col items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4" role="alert">
+                  <div>
+                    <p className="text-sm font-medium">Performance metrics could not be loaded</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{metricSummaryError}</p>
+                  </div>
+                  <Button onClick={() => void fetchMetricSummary()} size="sm" variant="outline">Try again</Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      ["Impressions", metricSummary?.metrics.impressions],
+                      ["Clicks", metricSummary?.metrics.clicks],
+                      ["Engagements", metricSummary?.metrics.engagements],
+                    ].map(([label, value]) => (
+                      <div className="rounded-lg border bg-muted/20 p-4" key={String(label)}>
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className="mt-1 text-xl font-semibold tabular-nums">
+                          {typeof value === "number" ? value.toLocaleString() : "Not recorded"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {metricSummary?.lastMeasuredAt
+                      ? `Last measured ${new Date(metricSummary.lastMeasuredAt).toLocaleString()} · ${metricSummary.sources.map(({ label }) => label).join(", ") || "Source unavailable"}`
+                      : "No performance metrics recorded yet. Add a human annotation or connect a measurement source."}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1313,22 +1363,11 @@ export default function PostDetailPage({
           </Card>
         )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Resonance</CardTitle>
-            <CardDescription>
-              Compare this Post against another saved Post before deciding which one to use.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild>
-              <Link href={`/resonance?post=${draft.id}`}>
-                <AudioWaveform className="h-4 w-4" />
-                Choose comparison Post
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <ContentResonanceExperience
+          draft={draft}
+          onDraftUpdated={() => fetchDraft()}
+          showSourceContent={false}
+        />
 
         {/* Content Base Link */}
         {draft.ideaId && (

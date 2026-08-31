@@ -10,6 +10,20 @@ const approvedDirectPgScripts = new Set([
   // A one-shot migration tool must preserve legacy Payload password hashes and salts,
   // fields that the Payload Local API deliberately does not expose for writes.
   "apps/cms/scripts/import-legacy-control-plane.ts",
+  // One-shot, pre-cutover evidence export reads tables that are intentionally
+  // absent from the post-cutover schema and Payload configuration.
+  "apps/cms/scripts/export-model-retirement-evidence.ts",
+  // These two files execute only inside the short-lived release Job: flow owns
+  // its raw SQL schema and the permission reconciler owns dynamic catalog DDL.
+  "packages/flow/data/schema.ts",
+  "packages/database/permissions.ts",
+  "packages/flow/data/automation-repository.ts",
+  // One-shot release backfill: discovers organization IDs only, then re-enters
+  // the organization-scoped media repository for every mutable operation.
+  "products/content-generator/media/backfill.ts",
+  // ID-only work discovery for the ontology curation interval; tenant payloads
+  // stay behind the per-organization graph and capability seams.
+  "packages/capabilities/ontology-curation.ts",
 ]);
 
 async function sourceFiles(directory) {
@@ -28,7 +42,7 @@ async function sourceFiles(directory) {
   return nested.flat();
 }
 
-test("database DDL exists only in generated database migrations", async () => {
+test("database DDL exists only in migrations and the short-lived release reconciler", async () => {
   const files = (
     await Promise.all(["apps", "packages", "products"].map(sourceFiles))
   ).flat();
@@ -36,6 +50,7 @@ test("database DDL exists only in generated database migrations", async () => {
 
   for (const file of files) {
     if (file.startsWith(payloadMigrationPrefix)) continue;
+    if (["packages/flow/data/schema.ts", "packages/database/permissions.ts"].includes(file)) continue;
     if (ddl.test(await readFile(file, "utf8"))) violations.push(file);
   }
 
@@ -96,8 +111,157 @@ test("the canonical Drizzle migration chain is checked in", async () => {
       "0025_register_prospect_capture_oauth_client",
       "0026_restore_mastra_agent_workflow_snapshots",
       "0027_drop_rate_limit_oauth_client_fk",
+      "0028_grant_cascade_admin_missing_tables",
+      "0029_durable_knowledge_event_projection",
+      "0030_intelligence_artifact_lineage",
+      "0031_organization_knowledge_module_overlays",
+      "0032_restore_knowledge_module_runtime_grants",
+      "0033_workspace_calendar_projection",
+      "0034_drop_orphaned_cascade_tables",
+      "0035_parallel_wolfpack",
+      "0036_even_sugar_man",
+      "0037_cold_miss_america",
+      "0038_funnel_run_enabled",
+      "0039_restore_automation_schema",
+      "0040_wonderful_puppet_master",
+      "0041_durable_page_guide_receipts",
+      "0042_global_page_guide_receipts",
+      "0043_sticky_iron_lad",
+      "0044_content_base_media",
+      "0045_pretty_gauntlet",
     ],
   );
+});
+
+test("page-guide receipts become global without losing cross-workspace history", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0042_global_page_guide_receipts.sql",
+    "utf8",
+  );
+  assert.match(migration, /PRIMARY KEY\("user_id", "guide_key"\)/);
+  assert.match(migration, /GROUP BY "user_id", "guide_key"/);
+  assert.match(migration, /sum\("open_count"\)/);
+  assert.match(migration, /latest_dismissal/);
+  assert.match(migration, /DROP TABLE "page_guide_receipts"/);
+  assert.doesNotMatch(migration, /DISABLE ROW LEVEL SECURITY|BYPASSRLS|SUPERUSER/i);
+});
+
+test("pricing CI bootstraps the same three release identities before applying migrations", async () => {
+  let workflow;
+  try {
+    workflow = await readFile(".github/workflows/docker.yml", "utf8");
+  } catch {
+    return; // Private CI workflow; absent from the public mirror export.
+  }
+  assert.match(workflow, /\["taicho_migrator", "BYPASSRLS"\]/);
+  assert.match(workflow, /\["taicho_runtime", "NOBYPASSRLS"\]/);
+  assert.match(workflow, /\["taicho_control", "BYPASSRLS"\]/);
+  assert.ok(
+    workflow.indexOf('name: Create release database identities')
+      < workflow.indexOf('name: Migrate pricing test database'),
+  );
+});
+
+test("the production migration image contains its executor and the release gate fails fast", async () => {
+  let databasePackage, entrypoint, releaseGate;
+  try {
+    [databasePackage, entrypoint, releaseGate] = await Promise.all([
+      readFile("packages/database/package.json", "utf8").then(JSON.parse),
+      readFile("docker/entrypoints/database-migrate.sh", "utf8"),
+      readFile("ops/k8s/run-database-migrations.sh", "utf8"),
+    ]);
+  } catch {
+    return; // Private release plumbing; absent from the public mirror export.
+  }
+
+  assert.equal(databasePackage.dependencies.tsx, "^4.23.1");
+  assert.equal(databasePackage.devDependencies.tsx, undefined);
+  assert.match(entrypoint, /packages\/database\/node_modules\/\.bin\/tsx/);
+  assert.match(releaseGate, /jsonpath='\{\.status\.failed\}'/);
+  assert.match(releaseGate, /database migration job failed/);
+  assert.doesNotMatch(releaseGate, /wait --for=condition=complete/);
+});
+
+test("the cascade simplification drop retires only orphaned cascade tables", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0034_drop_orphaned_cascade_tables.sql",
+    "utf8",
+  );
+  const drops = [...migration.matchAll(/DROP TABLE "([^"]+)"\."[^"]+"/gi)];
+  assert.equal(drops.length, 18);
+  for (const [, schema] of drops) assert.equal(schema, "cascade");
+  for (const live of ["funnels", "funnel_members", "contacts", "plain_text_emails"]) {
+    assert.doesNotMatch(migration, new RegExp(`DROP TABLE "cascade"\\."${live}"`, "i"));
+  }
+  assert.doesNotMatch(migration, /DISABLE ROW LEVEL SECURITY|BYPASSRLS|SUPERUSER/i);
+});
+
+test("the workspace calendar projection is tenant-scoped and payload-blind to the control plane", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0033_workspace_calendar_projection.sql",
+    "utf8",
+  );
+  assert.match(migration, /CREATE TABLE "calendar_entries"/i);
+  assert.match(migration, /UNIQUE\("organization_id", "module_key", "source_id"\)/i);
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
+  assert.match(migration, /FORCE ROW LEVEL SECURITY/i);
+  assert.match(migration, /calendar_entries_organization_policy/i);
+  assert.match(migration, /GRANT SELECT, INSERT, UPDATE, DELETE[^;]*"calendar_entries" TO jobs_app/is);
+  assert.doesNotMatch(migration, /TO jobs_admin|BYPASSRLS|DISABLE ROW LEVEL SECURITY/i);
+
+  const permissions = await readFile("packages/database/permissions.ts", "utf8");
+  assert.match(permissions, /GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES/);
+  assert.match(permissions, /ALTER DEFAULT PRIVILEGES FOR ROLE/);
+});
+
+test("organization knowledge module overlays are tenant-scoped and capability-managed", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0031_organization_knowledge_module_overlays.sql",
+    "utf8",
+  );
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
+  assert.match(migration, /knowledge_module_manifest_organization_policy/);
+  assert.match(migration, /GRANT SELECT, INSERT, UPDATE, DELETE[^;]*TO capability_app/is);
+  assert.doesNotMatch(migration, /BYPASSRLS|DISABLE ROW LEVEL SECURITY|TO jobs_admin/i);
+});
+
+test("knowledge module storage and publishing feedback have tenant runtime grants", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0032_restore_knowledge_module_runtime_grants.sql",
+    "utf8",
+  );
+  for (const role of ["jobs_app", "capability_app", "mcp_app"]) {
+    assert.match(migration, new RegExp(`['\"]${role}['\"]`));
+  }
+  for (const relation of [
+    "knowledge_module_manifest",
+    "metric_ingest_tokens",
+    "post_metric_snapshots",
+  ]) {
+    assert.match(migration, new RegExp(`['\"]${relation}['\"]`));
+  }
+  assert.doesNotMatch(migration, /DISABLE\s+ROW\s+LEVEL\s+SECURITY|BYPASSRLS|SUPERUSER/i);
+});
+
+test("intelligence artifacts preserve exact knowledge lineage", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0030_intelligence_artifact_lineage.sql",
+    "utf8",
+  );
+  assert.match(migration, /ADD COLUMN "used_claim_ids" text\[\].*NOT NULL/is);
+  assert.match(migration, /ADD COLUMN "used_evidence_ids" text\[\].*NOT NULL/is);
+});
+
+test("the knowledge event projector has replay-safe storage and ID-only control-plane discovery", async () => {
+  const migration = await readFile(
+    "packages/database/migrations/0029_durable_knowledge_event_projection.sql",
+    "utf8",
+  );
+  assert.match(migration, /product_events_internal_idempotency_key/);
+  assert.match(migration, /'projected'::text/);
+  assert.match(migration, /GRANT SELECT \("id", "organization_id", "name", "occurred_at"\)/i);
+  assert.doesNotMatch(migration, /GRANT SELECT\s+ON TABLE "product_events"/i);
+  assert.doesNotMatch(migration, /GRANT[^;]*(?:INSERT|UPDATE|DELETE|TRUNCATE)[^;]*TO jobs_admin/i);
 });
 
 test("runtime grants for post-baseline tables are migration-managed", async () => {
@@ -141,8 +305,8 @@ test("the tenant-scoped jobs runtime can manage durable job lifecycle rows", asy
   assert.doesNotMatch(migration, /DISABLE\s+ROW\s+LEVEL\s+SECURITY/i);
   assert.doesNotMatch(migration, /BYPASSRLS|SUPERUSER/i);
 
-  const migrator = await readFile("packages/database/migrate.ts", "utf8");
-  assert.match(migrator, /\["public\.jobs", \["SELECT", "INSERT", "UPDATE", "DELETE"\]\]/);
+  const permissions = await readFile("packages/database/permissions.ts", "utf8");
+  assert.match(permissions, /GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES/);
 });
 
 test("the jobs control plane has bounded discovery and cleanup privileges", async () => {
@@ -154,9 +318,10 @@ test("the jobs control plane has bounded discovery and cleanup privileges", asyn
   assert.doesNotMatch(migration, /GRANT[^;]*(?:INSERT|UPDATE|TRUNCATE)/i);
   assert.doesNotMatch(migration, /SUPERUSER/i);
 
-  const migrator = await readFile("packages/database/migrate.ts", "utf8");
-  assert.match(migrator, /configuredDatabaseRole\("JOBS_ADMIN_DATABASE_URL"\)/);
-  assert.match(migrator, /role must have BYPASSRLS/);
+  const permissions = await readFile("packages/database/permissions.ts", "utf8");
+  assert.match(permissions, /relation: "jobs", privileges: "SELECT, DELETE"/);
+  assert.match(permissions, /control\.bypassRls/);
+  assert.doesNotMatch(permissions, /JOBS_ADMIN_DATABASE_URL/);
 });
 
 test("capability control-plane grants are migration-managed and column-restricted", async () => {

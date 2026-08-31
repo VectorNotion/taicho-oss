@@ -10,6 +10,7 @@ export type CatalogItemStatus = "active" | "archived";
 
 export interface CatalogItem {
   id: string;
+  revision: number;
   name: string;
   kind: CatalogItemKind;
   summary: string;
@@ -24,8 +25,8 @@ export interface CatalogItem {
   updatedAt: string;
 }
 
-export type CreateCatalogItemInput = Omit<CatalogItem, "id" | "createdAt" | "updatedAt">;
-export type UpdateCatalogItemInput = Partial<CreateCatalogItemInput>;
+export type CreateCatalogItemInput = Omit<CatalogItem, "id" | "revision" | "createdAt" | "updatedAt">;
+export type UpdateCatalogItemInput = Partial<CreateCatalogItemInput> & { expectedRevision: number };
 
 /** Stable text passed to research and generation. Empty fields are omitted. */
 export function catalogItemContext(item: CatalogItem | null | undefined): string {

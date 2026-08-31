@@ -116,47 +116,65 @@ export async function getActiveOutreachPromptVersion(): Promise<OutreachPromptVe
 export async function saveOutreachPromptDraft(
   content: OutreachPromptContent,
   actorId: string,
-): Promise<OutreachPromptWorkspace> {
+  expected: { activeVersion: number; draftContentHash: string | null },
+): Promise<OutreachPromptWorkspace | null> {
   const errors = validateOutreachPromptContent(content);
   if (errors.length > 0) throw new Error(errors.join(" "));
-  const workspace = await getOutreachPromptWorkspace();
+  await ensureDefaultPrompt();
   const session = await getSession();
   try {
-    await session.run(
+    const result = await session.run(
       `
       MATCH (p:OutreachPrompt {key: $key})
+      WHERE p.activeVersion = $expectedActiveVersion
+      OPTIONAL MATCH (p)-[:HAS_DRAFT]->(existing:OutreachPromptDraft {key: $key})
+      WITH p, existing
+      WHERE ($expectedDraftHash IS NULL AND existing IS NULL)
+         OR existing.contentHash = $expectedDraftHash
       MERGE (p)-[:HAS_DRAFT]->(draft:OutreachPromptDraft {key: $key})
-      SET draft.basedOnVersion = $basedOnVersion,
+      SET draft.basedOnVersion = $expectedActiveVersion,
           draft.contentJson = $contentJson,
           draft.contentHash = $contentHash,
           draft.updatedAt = localdatetime(),
           draft.updatedBy = $actorId,
           p.updatedAt = localdatetime()
+      RETURN draft
       `,
       {
         key: OUTREACH_PROMPT_KEY,
-        basedOnVersion: workspace.draft?.basedOnVersion ?? workspace.active.version,
+        expectedActiveVersion: expected.activeVersion,
+        expectedDraftHash: expected.draftContentHash,
         contentJson: JSON.stringify(content),
         contentHash: outreachPromptContentHash(content),
         actorId,
       },
     );
+    if (result.records.length === 0) return null;
   } finally {
     await session.close();
   }
   return getOutreachPromptWorkspace();
 }
 
-export async function publishOutreachPromptDraft(actorId: string): Promise<OutreachPromptWorkspace> {
+export async function publishOutreachPromptDraft(
+  actorId: string,
+  expected: { activeVersion: number; draftContentHash: string },
+): Promise<OutreachPromptWorkspace | null> {
   const workspace = await getOutreachPromptWorkspace();
-  if (!workspace.draft) throw new Error("Save a draft before publishing it.");
+  if (!workspace.draft) {
+    if (workspace.active.version !== expected.activeVersion) return null;
+    throw new Error("Save a draft before publishing it.");
+  }
   const errors = validateOutreachPromptContent(workspace.draft.content);
   if (errors.length > 0) throw new Error(errors.join(" "));
   const session = await getSession();
   try {
-    await session.run(
+    const result = await session.run(
       `
       MATCH (p:OutreachPrompt {key: $key})-[:HAS_DRAFT]->(draft:OutreachPromptDraft {key: $key})
+      WHERE p.activeVersion = $expectedActiveVersion
+        AND draft.basedOnVersion = $expectedActiveVersion
+        AND draft.contentHash = $expectedDraftHash
       WITH p, draft, p.activeVersion + 1 AS nextVersion
       CREATE (version:OutreachPromptVersion {
         id: $id,
@@ -171,9 +189,17 @@ export async function publishOutreachPromptDraft(actorId: string): Promise<Outre
       CREATE (p)-[:HAS_VERSION]->(version)
       SET p.activeVersion = nextVersion, p.updatedAt = localdatetime()
       DETACH DELETE draft
+      RETURN version
       `,
-      { id: randomUUID(), key: OUTREACH_PROMPT_KEY, actorId },
+      {
+        id: randomUUID(),
+        key: OUTREACH_PROMPT_KEY,
+        actorId,
+        expectedActiveVersion: expected.activeVersion,
+        expectedDraftHash: expected.draftContentHash,
+      },
     );
+    if (result.records.length === 0) return null;
   } finally {
     await session.close();
   }

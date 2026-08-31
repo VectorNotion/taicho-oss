@@ -7,7 +7,7 @@
  * intentionally NOT injected — the Python prompt only used mission + identity.
  *
  * The agent is instantiated locally (no runtime.ts registration) so the model
- * string is resolved at call time from MODEL_NAME, matching the house pattern.
+ * target is resolved from the release-owned language runtime.
  */
 import { Agent } from '@mastra/core/agent';
 import { registerObservedAgent } from '@content-automation/observability/ai';

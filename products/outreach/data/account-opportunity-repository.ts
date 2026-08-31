@@ -9,6 +9,8 @@ export interface StoreAccountOpportunityAngle {
   id: string;
   angle: string;
   sourceDimensionKeys: string[];
+  sourceClaimIds?: string[];
+  sourceEvidenceIds?: string[];
   evidence: string[];
   evidenceConfidence: number;
   researchRunId: string;
@@ -46,6 +48,8 @@ function mapOpportunity(
     accountId,
     angle: String(props.angle),
     sourceDimensionKeys: parseJson<string[]>(props.sourceDimensionKeysJson, []),
+    sourceClaimIds: parseJson<string[]>(props.sourceClaimIdsJson, []),
+    sourceEvidenceIds: parseJson<string[]>(props.sourceEvidenceIdsJson, []),
     evidence: parseJson<string[]>(props.evidenceJson, []),
     evidenceConfidence: Number(props.evidenceConfidence ?? 0),
     researchRunId: String(props.researchRunId),
@@ -79,6 +83,8 @@ export async function replaceAccountOpportunityAngles(
            id: item.id,
            angle: item.angle,
            sourceDimensionKeysJson: item.sourceDimensionKeysJson,
+           sourceClaimIdsJson: item.sourceClaimIdsJson,
+           sourceEvidenceIdsJson: item.sourceEvidenceIdsJson,
            evidenceJson: item.evidenceJson,
            evidenceConfidence: item.evidenceConfidence,
            researchRunId: item.researchRunId,
@@ -93,6 +99,8 @@ export async function replaceAccountOpportunityAngles(
           opportunities: opportunities.map((item) => ({
             ...item,
             sourceDimensionKeysJson: JSON.stringify(item.sourceDimensionKeys),
+            sourceClaimIdsJson: JSON.stringify(item.sourceClaimIds ?? []),
+            sourceEvidenceIdsJson: JSON.stringify(item.sourceEvidenceIds ?? []),
             evidenceJson: JSON.stringify(item.evidence),
           })),
         },

@@ -2,9 +2,11 @@
  *  labels are translated at the repository boundary and never leave it. */
 
 export type BrainNodeType =
-  | 'project' | 'capability' | 'topic' | 'idea' | 'draft'
+  | 'project' | 'capability' | 'topic' | 'idea' | 'draft' | 'media'
   | 'research-item' | 'source' | 'prospect' | 'prospect-research'
-  | 'qualification' | 'persona' | 'agent';
+  | 'qualification' | 'persona' | 'agent'
+  | 'organization' | 'person' | 'concept' | 'event' | 'place'
+  | 'fact' | 'evidence' | 'assessment' | 'thing';
 
 export type BrainNode = {
   id: string;
@@ -13,6 +15,20 @@ export type BrainNode = {
   degree: number;
   createdAt: string | null;
   meta: Record<string, string | number | null>;
+  proofs?: BrainProof[];
+  knowledge?: BrainKnowledgeItem[];
+};
+
+export type BrainProof = {
+  id: string;
+  excerpt: string;
+  url: string;
+};
+
+export type BrainKnowledgeItem = {
+  id: string;
+  statement: string;
+  proofs: BrainProof[];
 };
 
 export type BrainLink = { a: string; b: string; kind: string };

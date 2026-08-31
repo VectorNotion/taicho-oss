@@ -101,6 +101,29 @@ export const TicketDetailSchema = TicketSummarySchema.extend({
 })
 export type TicketDetail = z.infer<typeof TicketDetailSchema>
 
+export const SupportFeedbackStateSchema = z.object({
+  helpful: z.boolean(),
+  responseRequestId: z.uuid().optional(),
+  createdAt: z.string().datetime(),
+})
+export type SupportFeedbackState = z.infer<typeof SupportFeedbackStateSchema>
+
+export const SupportEscalationOfferSchema = z.object({
+  reason: z.string().min(1),
+  severity: z.enum(['low', 'normal', 'high', 'urgent']),
+  createdAt: z.string().datetime(),
+})
+export type SupportEscalationOffer = z.infer<typeof SupportEscalationOfferSchema>
+
+export const SupportConversationStateSchema = z.object({
+  conversationStatus: z.enum(['open', 'escalated', 'resolved', 'closed']),
+  lastFeedback: SupportFeedbackStateSchema.optional(),
+  escalationOffer: SupportEscalationOfferSchema.optional(),
+  ticket: TicketSummarySchema.optional(),
+  communityUrl: TrustedHttpUrlSchema.optional(),
+})
+export type SupportConversationState = z.infer<typeof SupportConversationStateSchema>
+
 export const ChatEventTypeSchema = z.enum([
   'conversation.ready',
   'assistant.ack',
@@ -144,12 +167,14 @@ export const SupportFeedbackRequestSchema = z.object({
   requestId: z.uuid(),
   conversationId: z.uuid(),
   helpful: z.boolean(),
+  responseRequestId: z.uuid().optional(),
   note: z.string().trim().min(1).max(1_000).optional(),
 }).strict()
 export type SupportFeedbackRequest = z.infer<typeof SupportFeedbackRequestSchema>
 
 export const ConversationHistoryMessageSchema = z.object({
   id: z.string().min(1),
+  requestId: z.uuid(),
   role: z.enum(['user', 'assistant']),
   content: z.string(),
   citations: z.array(CitationSchema),
@@ -162,6 +187,7 @@ export const ConversationHistorySchema = z.object({
   surface: ChatSurfaceSchema,
   messages: z.array(ConversationHistoryMessageSchema).max(50),
   prospectState: ProspectStateSchema.optional(),
+  supportState: SupportConversationStateSchema.optional(),
 })
 export type ConversationHistory = z.infer<typeof ConversationHistorySchema>
 

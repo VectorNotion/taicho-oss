@@ -14,6 +14,7 @@ export interface UpdateSettingsInput {
   mission?: string;
   identity?: string;
   voice?: string;
+  expectedUpdatedAt?: string;
 }
 
 export const DEFAULT_SETTINGS: Omit<Settings, "id" | "updatedAt"> = {

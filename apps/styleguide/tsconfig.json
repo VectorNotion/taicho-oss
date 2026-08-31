@@ -6,6 +6,7 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/components/ui/*": ["./packages/ui/components/ui/*"],
+      "@/components/funnel/*": ["./products/cascade/components/*"],
       "@/components/PageHeader": ["./packages/ui/components/PageHeader.tsx"],
       "@/components/ListCard": ["./packages/ui/components/ListCard.tsx"],
       "@/components/ListRow": ["./packages/ui/components/ListRow.tsx"],

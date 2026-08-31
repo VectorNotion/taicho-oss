@@ -9,11 +9,17 @@ import type { Contact } from "../domain/types";
 
 export async function createContact(
   pool: Pool,
-  input: { email: string; timezone?: string; subscriptionStatus?: Contact["subscriptionStatus"] },
+  input: {
+    email: string;
+    timezone?: string;
+    attributes?: Record<string, unknown>;
+    subscriptionStatus?: Contact["subscriptionStatus"];
+  },
 ): Promise<Contact> {
   const [row] = await databaseFor(pool).insert(contactsTable).values({
     email: input.email,
     timezone: input.timezone ?? null,
+    attributes: input.attributes ?? {},
     subscription_status: input.subscriptionStatus ?? "subscribed",
   }).returning();
   return contactFromRow(row);

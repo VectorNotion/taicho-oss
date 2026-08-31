@@ -1,0 +1,1 @@
+ALTER TABLE "cascade"."funnels" ADD COLUMN "automation_enabled" boolean DEFAULT false NOT NULL;

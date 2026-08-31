@@ -4,14 +4,19 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { z } from 'zod';
 import type { DimensionDefinition } from '../domain/qualification';
 import {
   buildDimensionQuery,
   buildSynthesisPrompt,
+  cleanResearchIdentity,
+  defaultCompleteJson,
+  normalizeDimensionSynthesis,
   researchDimensions,
   type DimensionResearchDeps,
 } from '../agent/dimension-research';
 import { evaluateFitMatches } from '../agent/match-evaluator';
+import type { ResearchActivity } from '../agent/dimension-progress';
 
 const NOW = new Date('2026-08-10T00:00:00Z');
 
@@ -44,10 +49,44 @@ const stubSearch: NonNullable<DimensionResearchDeps['search']> = async (input) =
   ],
 });
 
+test('structured research completion disables reasoning and preserves the full JSON budget', { concurrency: false }, async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = process.env.OPENROUTER_API_KEY;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalKey;
+  });
+  process.env.OPENROUTER_API_KEY = 'test-openrouter-key';
+  let requestBody: Record<string, unknown> = {};
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: '{"observations":[],"timingObservations":[]}' } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  await defaultCompleteJson({
+    schemaName: 'dimension_observations',
+    schema: z.object({ observations: z.array(z.unknown()), timingObservations: z.array(z.unknown()) }),
+    system: 'Return JSON.',
+    prompt: 'Research all dimensions.',
+  });
+  assert.equal(requestBody.max_tokens, 16_384);
+  assert.deepEqual(requestBody.response_format, { type: 'json_object' });
+  assert.deepEqual(requestBody.reasoning, { effort: 'none' });
+  const messages = requestBody.messages as Array<{ role: string; content: string }>;
+  assert.match(messages[0]?.content ?? '', /<response_schema name="dimension_observations">/);
+  assert.match(messages[0]?.content ?? '', /"timingObservations"/);
+  assert.match(messages[0]?.content ?? '', /Preserve every property name and array shape exactly/);
+});
+
 test('researchDimensions maps fit → prose and timing → signals, dates untouched', async () => {
   const calls: string[] = [];
+  const activities: ResearchActivity[] = [];
   const deps: DimensionResearchDeps = {
     search: async (input) => { calls.push(input.query); return stubSearch(input); },
+    onActivity: (activity) => activities.push(activity),
     completeJson: async () => ({
       observations: [
         { dimensionKey: 'internal_ai_capability', observedValue: 'No AI team found.', evidence: ['https://example.test/e1'], confidence: 0.91 },
@@ -68,6 +107,18 @@ test('researchDimensions maps fit → prose and timing → signals, dates untouc
   const records = await researchDimensions([FIT_DIM, TIMING_DIM], { kind: 'account', name: 'Acme Corp' }, 'run-1', NOW, deps);
 
   assert.equal(calls.length, 2, 'one search per dimension');
+  assert.equal(activities.filter(({ type }) => type === 'query_started').length, 2);
+  assert.equal(activities.filter(({ type }) => type === 'query_completed').length, 2);
+  const queryReceipt = activities.find(({ type, dimensionKey }) => type === 'query_completed' && dimensionKey === FIT_DIM.key);
+  assert.equal(queryReceipt?.query, 'Acme Corp internal_ai_capability');
+  assert.equal(queryReceipt?.pagesFound, 1);
+  assert.equal(queryReceipt?.pagesRead, 1);
+  assert.equal(queryReceipt?.pages?.[0]?.url, 'https://example.test/Acme-Corp-internal_ai_capability');
+  assert.equal(queryReceipt?.pages?.[0]?.contentPreview, 'evidence text');
+  assert.deepEqual(
+    activities.filter(({ type }) => type.startsWith('synthesis_')).map(({ type }) => type),
+    ['synthesis_started', 'synthesis_completed'],
+  );
 
   const prose = records.find((r) => r.dimensionKey === 'internal_ai_capability');
   assert.equal(prose?.shape, 'prose');
@@ -75,6 +126,7 @@ test('researchDimensions maps fit → prose and timing → signals, dates untouc
   assert.equal(prose?.confidence, 0.91);
   assert.equal(prose?.researchedAt, NOW.toISOString());
   assert.equal(prose?.runId, 'run-1');
+  assert.equal(prose?.sourceDocuments?.[0]?.content, 'evidence text', 'raw search content is retained for graph evidence');
 
   const signals = records.find((r) => r.dimensionKey === 'hiring_activity');
   assert.equal(signals?.shape, 'signals');
@@ -98,6 +150,38 @@ test('synthesis prompt carries instructions and the no-recency-judgment rule', (
   assert.ok(prompt.includes('research hiring_activity'));
   assert.ok(/do not judge recency/i.test(prompt.replace(/\n/g, ' ')), 'recency rule present');
   assert.ok(prompt.includes('2026-08-10'), 'today injected');
+  assert.match(prompt, /observations array must contain exactly 1 items/i);
+  assert.match(prompt, /timingObservations array must contain exactly 1 items/i);
+});
+
+test('research identity removes opaque fixture/import tokens from queries', () => {
+  assert.equal(cleanResearchIdentity('Anthropic OUT004-20260830120959'), 'Anthropic');
+  assert.equal(
+    buildDimensionQuery(FIT_DIM, {
+      kind: 'prospect',
+      name: 'Dario Amodei',
+      title: 'Chief Executive Officer',
+      company: 'Anthropic OUT004-20260830120959',
+    }),
+    'Dario Amodei Chief Executive Officer Anthropic internal_ai_capability',
+  );
+});
+
+test('synthesis normalization preserves useful items and retains missing criteria as insufficient evidence', () => {
+  const normalized = normalizeDimensionSynthesis({
+    observations: [{
+      dimensionKey: 'Internal AI Capability',
+      observedValue: 'A small internal team is documented.',
+      evidence: ['https://example.test/team'],
+      confidence: 0.8,
+    }],
+    timingObservations: [],
+  }, [FIT_DIM, TIMING_DIM]);
+
+  assert.equal(normalized.synthesis.observations[0]?.dimensionKey, FIT_DIM.key, 'display-name key repaired to canonical key');
+  assert.equal(normalized.synthesis.observations[0]?.observedValue, 'A small internal team is documented.');
+  assert.deepEqual(normalized.synthesis.timingObservations, [{ dimensionKey: TIMING_DIM.key, signals: [] }]);
+  assert.ok(normalized.warnings.some((warning) => warning.includes('retained as insufficient evidence')));
 });
 
 test('Catalog context guides search relevance and is explicitly non-evidence', () => {
@@ -167,7 +251,7 @@ test('evaluateFitMatches: effective match multiplies freshness-decayed confidenc
   assert.equal(stale.hardExclusion, false, 'no rule on dimension → exclusion ignored');
 });
 
-test('evaluateFitMatches skips dimensions without observations and timing dimensions', async () => {
+test('evaluateFitMatches marks missing fit observations as insufficient and excludes timing dimensions', async () => {
   let prompt = '';
   const matches = await evaluateFitMatches(
     [FIT_DIM, dim({ key: 'unobserved' }), TIMING_DIM],
@@ -187,8 +271,35 @@ test('evaluateFitMatches skips dimensions without observations and timing dimens
       },
     },
   );
-  assert.equal(matches.length, 1);
+  assert.equal(matches.length, 2);
   assert.equal(matches[0].dimensionKey, FIT_DIM.key);
+  assert.equal(matches.find((match) => match.dimensionKey === 'unobserved')?.classification, 'insufficient_evidence');
   assert.ok(!prompt.includes('unobserved'), 'unobserved dim not sent to the model');
   assert.ok(!prompt.includes('hiring_activity'), 'timing dim never evaluated semantically');
+});
+
+test('evaluateFitMatches preserves valid model items when a sibling item is malformed', async () => {
+  const malformedDim = dim({ key: 'malformed_match', idealValue: 'Documented ownership.' });
+  const observations = [FIT_DIM, malformedDim].map((dimension, index) => ({
+    id: `o-${index}`,
+    dimensionKey: dimension.key,
+    shape: 'prose' as const,
+    observedValue: 'Evidence-backed observation.',
+    evidence: ['https://example.test/evidence'],
+    confidence: 0.9,
+    researchedAt: NOW.toISOString(),
+    runId: 'run-partial-match',
+  }));
+
+  const matches = await evaluateFitMatches([FIT_DIM, malformedDim], observations, NOW, {
+    completeJson: async () => ({
+      matches: [
+        { dimensionKey: FIT_DIM.key, matchScore: 0.8, classification: 'strong_match', hardExclusionTriggered: false, rationale: 'supported' },
+        { dimensionKey: malformedDim.key, matchScore: 7, classification: 'strong_match', hardExclusionTriggered: false, rationale: 'invalid score' },
+      ],
+    }),
+  });
+
+  assert.equal(matches.find((match) => match.dimensionKey === FIT_DIM.key)?.classification, 'strong_match');
+  assert.equal(matches.find((match) => match.dimensionKey === malformedDim.key)?.classification, 'insufficient_evidence');
 });

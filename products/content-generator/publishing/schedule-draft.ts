@@ -10,8 +10,7 @@ import "./adapters";
 import { getContentDraftById } from "../data/content-repository";
 import type { ContentDraft } from "../domain/content";
 import {
-  getContentAsset,
-  getSelectedContentAssetForDraft,
+  listContentAssetsForPost,
 } from "../media/repository";
 import { getChannel, listChannels } from "./channel-repository";
 import { getPublishingAdminPool, getPublishingPool } from "./pool";
@@ -68,12 +67,15 @@ export class ScheduleDraftError extends Error {
   }
 }
 
-/** `when` semantics of the publish route: absent/empty → immediate; invalid → error. */
+/** `when` semantics of the publish route: absent/empty → immediate; invalid or past → error. */
 export function resolvePublishAt(when?: string | null): Date {
   if (when === undefined || when === null || when === "") return new Date();
   const at = new Date(when);
   if (Number.isNaN(at.getTime())) {
-    throw new ScheduleDraftError("INVALID_WHEN", "Invalid schedule time");
+    throw new ScheduleDraftError("INVALID_WHEN", "Invalid schedule time.");
+  }
+  if (at.getTime() <= Date.now()) {
+    throw new ScheduleDraftError("INVALID_WHEN", "Schedule time must be in the future.");
   }
   return at;
 }
@@ -92,24 +94,23 @@ export interface ScheduleDraftPostInput {
 }
 
 async function publishingAsset(pool: Pool, input: ScheduleDraftPostInput) {
+  const links = await listContentAssetsForPost(pool, input.draftId);
   if (input.assetId) {
-    const asset = await getContentAsset(pool, input.assetId);
-    if (!asset || asset.draftId !== input.draftId) {
-      throw new ScheduleDraftError("ASSET_NOT_FOUND", "Content asset not found");
-    }
-    return asset;
+    const linked = links.find((link) => link.assetId === input.assetId);
+    if (!linked) throw new ScheduleDraftError("ASSET_NOT_FOUND", "Content asset is not attached to this Post");
+    return linked.asset;
   }
   switch (input.destination) {
     case "youtube":
-      return getSelectedContentAssetForDraft(pool, input.draftId, ["primary"], ["video"]);
+      return links.find((link) => link.asset.mediaKind === "video")?.asset ?? null;
     case "cms":
-      return getSelectedContentAssetForDraft(pool, input.draftId, ["hero", "primary"]);
+      return links.find((link) => ["hero", "primary"].includes(link.role))?.asset ?? links[0]?.asset ?? null;
     case "x":
     case "linkedin":
     case "instagram":
-      return getSelectedContentAssetForDraft(pool, input.draftId, ["primary"]);
+      return links.find((link) => link.asset.mediaKind === "image")?.asset ?? links[0]?.asset ?? null;
     default:
-      return getSelectedContentAssetForDraft(pool, input.draftId);
+      return links[0]?.asset ?? null;
   }
 }
 

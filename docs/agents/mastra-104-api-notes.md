@@ -4,7 +4,7 @@
 > `@mastra/core@1.0.4`), but the **model router changed to OpenRouter**. Ignore the
 > `anthropic/<model-id>` / `ANTHROPIC_API_KEY` guidance here — models now resolve
 > through `packages/platform/agents/model.ts` (`routerModel()` → `openrouter/` +
-> `MODEL_NAME`, default `qwen/qwen3.7-plus`), keyed by `OPENROUTER_API_KEY`.
+> the release-owned fixed model target, keyed only by `OPENROUTER_API_KEY`.
 
 Ground truth for implementers. The AI SDK layer is v5 (`ai@6`): use `generate`/`stream` (NOT `generateLegacy`); the token knob is `maxOutputTokens` (NOT `maxTokens`).
 
@@ -89,4 +89,4 @@ export const contentMastra = new Mastra({
 - Run workers via `tsx`. content-generator package is CJS (no `"type":"module"`) — use `async function main()` wrappers, no top-level await (this exact bug was commit 1316846).
 - `PinoLogger` does NOT exist here (`@mastra/loggers` not installed): use `ConsoleLogger` from `@mastra/core/logger` or omit.
 - Long-lived processes: flush observability on SIGINT/SIGTERM (Langfuse exporter buffers).
-- Env for the model router: `ANTHROPIC_API_KEY`. `MODEL_NAME` remains the default model id source.
+- The model router target is release-owned code. `OPENROUTER_API_KEY` is the language runtime credential.

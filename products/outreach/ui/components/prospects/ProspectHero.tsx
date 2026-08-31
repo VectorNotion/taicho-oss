@@ -97,7 +97,7 @@ export function ProspectHero({
                 onValueChange={(value) => onStatusChange(value as ProspectStatus)}
                 disabled={updatingStatus}
               >
-                <SelectTrigger className="h-7 w-[130px] text-xs">
+                <SelectTrigger aria-label="Prospect status" className="h-7 w-[130px] text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

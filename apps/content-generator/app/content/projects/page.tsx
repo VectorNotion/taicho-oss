@@ -7,12 +7,12 @@ import { toast } from "sonner";
 import { Plus, Pencil, Trash2, FolderKanban, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
-import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/PageHeader";
 import { ListRow, ListRows } from "@/components/ListRow";
-import { ListSurface } from "@/components/ListSurface";
+import { FilterSelect, ListSurface } from "@/components/ListSurface";
 import { StatRow } from "@/components/StatRow";
 import {
   Dialog,
@@ -24,10 +24,17 @@ import {
 } from "@/components/ui/dialog";
 
 // Context-only nodes - no performance tracking
+const KIND_LABELS: Record<string, string> = {
+  project: "Project",
+  product: "Product",
+  service: "Service",
+};
+
 export type Project = {
   id: string;
   title: string;
   description: string;
+  kind?: string;
   tags: string[];
   createdAt: string;
   entityCount?: number;
@@ -38,6 +45,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState("all");
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -58,11 +66,14 @@ export default function ProjectsPage() {
     fetchProjects();
   }, []);
 
-  const filteredProjects = projects.filter((project) =>
-    project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    project.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    project.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredProjects = projects.filter((project) => {
+    const matchesKind = kindFilter === "all" || (project.kind ?? "project") === kindFilter;
+    const matchesSearch =
+      project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      project.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      project.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesKind && matchesSearch;
+  });
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -76,7 +87,9 @@ export default function ProjectsPage() {
       fetchProjects();
     } catch (error) {
       console.error('Error deleting project:', error);
-      toast.error("Could not delete the project. Try again.");
+      toast.error(error instanceof ApiError
+        ? error.message
+        : "Could not delete the project. Try again.");
     } finally {
       setDeleting(false);
     }
@@ -133,6 +146,19 @@ export default function ProjectsPage() {
               )}
             </div>
           }
+          filters={
+            <FilterSelect
+              label="Type"
+              onValueChange={setKindFilter}
+              options={[
+                { label: "All types", value: "all" },
+                { label: "Projects", value: "project" },
+                { label: "Products", value: "product" },
+                { label: "Services", value: "service" },
+              ]}
+              value={kindFilter}
+            />
+          }
           isLoading={loading}
           onSearchChange={setSearchQuery}
           searchPlaceholder="Search projects…"
@@ -157,9 +183,12 @@ export default function ProjectsPage() {
                     },
                   ]}
                   badge={
-                    <Badge variant={project.processed ? "default" : "secondary"}>
-                      {project.processed ? "Processed" : "Not processed"}
-                    </Badge>
+                    <span className="flex items-center gap-1.5">
+                      <Badge variant="outline">{KIND_LABELS[project.kind ?? "project"] ?? project.kind}</Badge>
+                      <Badge variant={project.processed ? "default" : "secondary"}>
+                        {project.processed ? "Processed" : "Not processed"}
+                      </Badge>
+                    </span>
                   }
                   href={`/content/projects/${project.id}`}
                   key={project.id}

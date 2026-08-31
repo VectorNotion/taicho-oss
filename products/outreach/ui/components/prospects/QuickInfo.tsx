@@ -40,6 +40,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
+          aria-label={`Copy ${label}`}
           variant="ghost"
           size="sm"
           className="h-6 w-6 p-0"

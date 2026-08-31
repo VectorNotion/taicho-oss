@@ -14,6 +14,7 @@ import { DEFAULT_DIMENSIONS } from "./default-dimensions";
 function mapDimension(props: Record<string, unknown>): DimensionDefinition {
   return {
     id: props.id as string,
+    revision: props.revision == null ? 1 : toNumber(props.revision),
     catalogItemId: (props.catalogItemId as string | null) ?? undefined,
     key: props.key as string,
     name: props.name as string,
@@ -54,6 +55,7 @@ const CREATE_CYPHER = `
     freshnessWindowDays: $freshnessWindowDays,
     hardExclusionRule: $hardExclusionRule,
     isActive: $isActive,
+    revision: 1,
     createdAt: localdatetime(),
     updatedAt: localdatetime()
   })
@@ -123,6 +125,7 @@ export async function getDimensionDefinitions(opts?: {
             freshnessWindowDays: $freshnessWindowDays,
             hardExclusionRule: $hardExclusionRule,
             isActive: $isActive,
+            revision: 1,
             createdAt: localdatetime(),
             updatedAt: localdatetime()
           })
@@ -150,14 +153,38 @@ export async function createDimensionDefinition(
   }
 }
 
-export async function updateDimensionDefinition(
+export async function getDimensionDefinitionById(
   id: string,
-  patch: UpdateDimensionInput
 ): Promise<DimensionDefinition | null> {
   const session = await getSession();
   try {
-    const setClauses: string[] = ["d.updatedAt = localdatetime()"];
-    const params: Record<string, unknown> = { id };
+    const result = await session.run(
+      `MATCH (d:DimensionDefinition {id: $id}) RETURN d`,
+      { id },
+    );
+    if (result.records.length === 0) return null;
+    return mapDimension(result.records[0].get("d").properties);
+  } finally {
+    await session.close();
+  }
+}
+
+export async function updateDimensionDefinition(
+  id: string,
+  patch: UpdateDimensionInput,
+  options?: { requireAnotherActiveInCurrentGroup?: boolean },
+): Promise<DimensionDefinition | null> {
+  const session = await getSession();
+  try {
+    const setClauses: string[] = [
+      "d.updatedAt = localdatetime()",
+      "d.revision = coalesce(d.revision, 1) + 1",
+    ];
+    const params: Record<string, unknown> = {
+      id,
+      expectedRevision: patch.expectedRevision,
+      requireAnotherActive: options?.requireAnotherActiveInCurrentGroup ?? false,
+    };
     const fields: Array<keyof UpdateDimensionInput> = [
       "key", "name", "dimensionType", "appliesTo", "researchInstruction",
       "idealValue", "weight", "halfLifeDays", "freshnessWindowDays",
@@ -170,7 +197,25 @@ export async function updateDimensionDefinition(
       }
     }
     const result = await session.run(
-      `MATCH (d:DimensionDefinition {id: $id}) SET ${setClauses.join(", ")} RETURN d`,
+      `MATCH (d:DimensionDefinition {id: $id})
+       WHERE coalesce(d.revision, 1) = $expectedRevision
+       OPTIONAL MATCH (other:DimensionDefinition)
+       WHERE $requireAnotherActive = true
+         AND other.id <> d.id
+         AND other.isActive = true
+         AND other.appliesTo = d.appliesTo
+         AND other.dimensionType = d.dimensionType
+         AND (
+           (d.catalogItemId IS NULL AND other.catalogItemId IS NULL)
+           OR (
+             d.catalogItemId IS NOT NULL
+             AND (other.catalogItemId IS NULL OR other.catalogItemId = d.catalogItemId)
+           )
+         )
+       WITH d, count(other) AS activePeerCount
+       WHERE $requireAnotherActive = false OR activePeerCount > 0
+       SET ${setClauses.join(", ")}
+       RETURN d`,
       params
     );
     if (result.records.length === 0) return null;
@@ -180,13 +225,42 @@ export async function updateDimensionDefinition(
   }
 }
 
-export async function deleteDimensionDefinition(id: string): Promise<boolean> {
+export async function deleteDimensionDefinition(
+  id: string,
+  options?: {
+    expectedRevision?: number;
+    requireAnotherActiveInCurrentGroup?: boolean;
+  },
+): Promise<boolean> {
   const session = await getSession();
   try {
     const result = await session.run(
-      `MATCH (d:DimensionDefinition {id: $id}) DELETE d RETURN count(d) AS deleted`,
-      { id }
+      `MATCH (d:DimensionDefinition {id: $id})
+       WHERE $expectedRevision IS NULL OR coalesce(d.revision, 1) = $expectedRevision
+       OPTIONAL MATCH (other:DimensionDefinition)
+       WHERE $requireAnotherActive = true
+         AND other.id <> d.id
+         AND other.isActive = true
+         AND other.appliesTo = d.appliesTo
+         AND other.dimensionType = d.dimensionType
+         AND (
+           (d.catalogItemId IS NULL AND other.catalogItemId IS NULL)
+           OR (
+             d.catalogItemId IS NOT NULL
+             AND (other.catalogItemId IS NULL OR other.catalogItemId = d.catalogItemId)
+           )
+         )
+       WITH d, count(other) AS activePeerCount
+       WHERE $requireAnotherActive = false OR d.isActive = false OR activePeerCount > 0
+       DELETE d
+       RETURN count(d) AS deleted`,
+      {
+        id,
+        expectedRevision: options?.expectedRevision ?? null,
+        requireAnotherActive: options?.requireAnotherActiveInCurrentGroup ?? false,
+      },
     );
+    if (result.records.length === 0) return false;
     return toNumber(result.records[0].get("deleted")) > 0;
   } finally {
     await session.close();

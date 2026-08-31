@@ -10,7 +10,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@content-automation/atlas": "workspace:*",
     "@content-automation/config": "workspace:*",
     "@content-automation/ui": "workspace:*",
     "lucide-react": "^0.554.0",

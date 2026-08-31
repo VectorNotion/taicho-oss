@@ -52,15 +52,21 @@ export async function reserveBackgroundAction(request: Request, action: Backgrou
 }
 
 export function commercialErrorResponse(error: unknown) {
-  if (error instanceof InsufficientCreditsError) {
-    return Response.json({ error: error.message, code: error.code, required: error.required, available: error.available, refreshAt: error.refreshAt }, { status: 402 });
+  const code = error && typeof error === "object" && "code" in error
+    ? (error as { code?: unknown }).code
+    : null;
+  if (error instanceof InsufficientCreditsError || code === "INSUFFICIENT_CREDITS") {
+    const value = error as InsufficientCreditsError;
+    return Response.json({ error: value.message, code: value.code, required: value.required, available: value.available, refreshAt: value.refreshAt }, { status: 402 });
   }
-  if (error instanceof FeatureUnavailableError) {
-    return Response.json({ error: error.message, code: error.code, capability: error.capability, planId: error.planId }, { status: 403 });
+  if (error instanceof FeatureUnavailableError || code === "FEATURE_UNAVAILABLE") {
+    const value = error as FeatureUnavailableError;
+    return Response.json({ error: value.message, code: value.code, capability: value.capability, planId: value.planId }, { status: 403 });
   }
-  if (error instanceof SubscriptionInactiveError) {
+  if (error instanceof SubscriptionInactiveError || code === "SUBSCRIPTION_INACTIVE") {
+    const value = error as SubscriptionInactiveError;
     return Response.json(
-      { error: error.message, code: error.code, status: error.status, periodEnd: error.periodEnd },
+      { error: value.message, code: value.code, status: value.status, periodEnd: value.periodEnd },
       { status: 403 },
     );
   }

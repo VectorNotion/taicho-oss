@@ -6,8 +6,12 @@ import type {
 } from "../domain/catalog";
 
 function mapCatalogItem(props: Record<string, unknown>): CatalogItem {
+  const rawRevision = props.revision;
   return {
     id: String(props.id),
+    revision: rawRevision && typeof (rawRevision as { toNumber?: () => number }).toNumber === "function"
+      ? (rawRevision as { toNumber: () => number }).toNumber()
+      : Number(rawRevision ?? 1),
     name: String(props.name),
     kind: props.kind as CatalogItem["kind"],
     summary: String(props.summary ?? ""),
@@ -67,20 +71,26 @@ export async function getCatalogItem(id: string): Promise<CatalogItem | null> {
   }
 }
 
-export async function createCatalogItem(input: CreateCatalogItemInput): Promise<CatalogItem> {
+export async function createCatalogItem(input: CreateCatalogItemInput): Promise<CatalogItem | null> {
   const session = await getSession();
   try {
     const result = await session.run(
-      `CREATE (item:CatalogItem {
+      `OPTIONAL MATCH (duplicate:CatalogItem)
+       WHERE toLower(trim(duplicate.name)) = toLower(trim($name))
+       WITH count(duplicate) AS duplicateCount
+       WHERE duplicateCount = 0
+       CREATE (item:CatalogItem {
         id: randomUUID(), name: $name, kind: $kind, summary: $summary,
         positioning: $positioning, outcomes: $outcomes,
         differentiators: $differentiators, proof: $proof,
         researchGuidance: $researchGuidance, voice: $voice, status: $status,
-        createdAt: localdatetime(), updatedAt: localdatetime()
+        revision: 1, createdAt: localdatetime(), updatedAt: localdatetime()
       }) RETURN item`,
       params(input),
     );
-    return mapCatalogItem(result.records[0].get("item").properties);
+    return result.records[0]
+      ? mapCatalogItem(result.records[0].get("item").properties)
+      : null;
   } finally {
     await session.close();
   }
@@ -92,9 +102,16 @@ export async function updateCatalogItem(
 ): Promise<CatalogItem | null> {
   const session = await getSession();
   try {
-    const values: Record<string, unknown> = { id };
-    const sets = ["item.updatedAt = localdatetime()"];
-    const fields: Array<keyof UpdateCatalogItemInput> = [
+    const values: Record<string, unknown> = {
+      id,
+      expectedRevision: patch.expectedRevision,
+      name: patch.name ?? null,
+    };
+    const sets = [
+      "item.revision = coalesce(item.revision, 1) + 1",
+      "item.updatedAt = localdatetime()",
+    ];
+    const fields: Array<keyof CreateCatalogItemInput> = [
       "name", "kind", "summary", "positioning", "outcomes", "differentiators",
       "proof", "researchGuidance", "voice", "status",
     ];
@@ -106,6 +123,13 @@ export async function updateCatalogItem(
     }
     const result = await session.run(
       `MATCH (item:CatalogItem {id: $id})
+       WHERE coalesce(item.revision, 1) = $expectedRevision
+       WITH item
+       OPTIONAL MATCH (duplicate:CatalogItem)
+       WHERE duplicate.id <> item.id
+         AND toLower(trim(duplicate.name)) = toLower(trim(coalesce($name, item.name)))
+       WITH item, count(duplicate) AS duplicateCount
+       WHERE duplicateCount = 0
        SET ${sets.join(", ")}
        WITH item
        OPTIONAL MATCH (prospect:Prospect)-[:PURSUED_FOR]->(item)
@@ -121,16 +145,20 @@ export async function updateCatalogItem(
   }
 }
 
-export async function deleteCatalogItem(id: string): Promise<boolean> {
+export async function deleteCatalogItem(
+  id: string,
+  options: { expectedRevision: number },
+): Promise<boolean> {
   const session = await getSession();
   try {
     const result = await session.run(
       `MATCH (item:CatalogItem {id: $id})
+       WHERE coalesce(item.revision, 1) = $expectedRevision
        OPTIONAL MATCH (prospect:Prospect)-[:PURSUED_FOR]->(item)
        WITH item, count(prospect) AS uses
        FOREACH (_ IN CASE WHEN uses = 0 THEN [1] ELSE [] END | DETACH DELETE item)
        RETURN uses`,
-      { id },
+      { id, expectedRevision: options.expectedRevision },
     );
     if (!result.records[0]) return false;
     const raw = result.records[0].get("uses");

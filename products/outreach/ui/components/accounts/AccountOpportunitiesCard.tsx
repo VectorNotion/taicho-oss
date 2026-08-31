@@ -9,6 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AccountOpportunityCoverageResult } from "../../../domain/account-opportunity";
+import { safeExternalUrl } from "../../safe-external-url";
 
 function label(value: string): string {
   return value.replaceAll("_", " ");
@@ -46,10 +47,10 @@ function MatchList({
           {matches.map((match) => (
             <li className="flex items-center justify-between gap-3 text-sm" key={match.id}>
               <div className="min-w-0">
-                {match.href ? (
+                {safeExternalUrl(match.href) ? (
                   <a
                     className="inline-flex max-w-full items-center gap-1 font-medium hover:text-primary"
-                    href={match.href}
+                    href={safeExternalUrl(match.href)!}
                     rel="noopener noreferrer"
                     target="_blank"
                   >
@@ -155,7 +156,11 @@ export function AccountOpportunitiesCard({
 
                   {opportunity.evidence.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
-                      {opportunity.evidence.slice(0, 4).map((url) => (
+                      {opportunity.evidence
+                        .map((url) => safeExternalUrl(url))
+                        .filter((url): url is string => Boolean(url))
+                        .slice(0, 4)
+                        .map((url) => (
                         <a
                           className="text-xs text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
                           href={url}

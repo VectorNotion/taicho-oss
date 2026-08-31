@@ -85,6 +85,14 @@ Target content:
 
 {{prospect_context}}
 {{resonance_context}}`,
+    connection_note: `## Task: Write a LinkedIn Connection Request Note
+
+Write a single short note under 280 characters — LinkedIn rejects longer connection notes.
+Reference one specific, evidence-grounded thing about the prospect's world, and give one honest reason to connect.
+No greeting line, no subject, no pitch, no links, no sender credentials.
+
+{{prospect_context}}
+{{resonance_context}}`,
   },
 };
 

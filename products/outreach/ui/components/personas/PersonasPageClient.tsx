@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Loader2, Pencil, Plus, Power, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
-import { apiMutate } from "@content-automation/platform/network/api-client";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { PageHeader } from "@/components/PageHeader";
 import { ListRow, ListRows } from "@/components/ListRow";
 import { ListSurface } from "@/components/ListSurface";
@@ -71,9 +71,12 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
   const [form, setForm] = useState<PersonaForm>(emptyForm);
   const [errors, setErrors] = useState<Partial<Record<keyof PersonaForm, string>>>({});
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [pendingToggle, setPendingToggle] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Persona | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
@@ -81,6 +84,9 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
     setEditing("new");
     setForm(emptyForm);
     setErrors({});
+    setSaveError(null);
+    setActionError(null);
+    setDeleteError(null);
     setDeleteTarget(null);
   }
 
@@ -88,6 +94,9 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
     setEditing(persona);
     setForm(toForm(persona));
     setErrors({});
+    setSaveError(null);
+    setActionError(null);
+    setDeleteError(null);
     setDeleteTarget(null);
   }
 
@@ -95,6 +104,7 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
     setEditing(null);
     setForm(emptyForm);
     setErrors({});
+    setSaveError(null);
   }
 
   function payload(): CreatePersonaInput | null {
@@ -126,18 +136,33 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
     const data = payload();
     if (!data) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const current = editing === "new" ? null : editing;
       const { data: result } = current
-        ? await apiMutate<{ persona: Persona }>("PATCH", `/outreach/personas/${current.id}`, data)
+        ? await apiMutate<{ persona: Persona }>("PATCH", `/outreach/personas/${current.id}`, {
+          ...data,
+          expectedRevision: current.revision,
+        })
         : await apiMutate<{ persona: Persona }>("POST", "/outreach/personas", data);
       const saved = result.persona;
       setPersonas((items) => current ? items.map((item) => item.id === saved.id ? saved : item) : [saved, ...items]);
       toast.success(current ? "Persona updated" : "Persona created");
       cancelEdit();
     } catch (error) {
-      console.error("Failed to save persona:", error);
-      toast.error("Could not save the persona. Try again.");
+      const message = error instanceof ApiError ? error.message : "Could not save the persona. Try again.";
+      setSaveError(message);
+      if (!(error instanceof ApiError)) console.error("Failed to save persona:", error);
+      const current = editing === "new" ? null : editing;
+      if (current && error instanceof ApiError && error.status === 409) {
+        try {
+          const { persona } = await apiGet<{ persona: Persona }>(`/outreach/personas/${current.id}`);
+          setPersonas((items) => items.map((item) => item.id === persona.id ? persona : item));
+        } catch {
+          // Preserve the draft and original list if the recovery read also fails.
+        }
+      }
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -145,14 +170,20 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
 
   async function togglePersona(persona: Persona) {
     setPendingToggle(persona.id);
+    setActionError(null);
     try {
-      const { data: result } = await apiMutate<{ persona: Persona }>("PATCH", `/outreach/personas/${persona.id}`, { isActive: !persona.isActive });
+      const { data: result } = await apiMutate<{ persona: Persona }>("PATCH", `/outreach/personas/${persona.id}`, {
+        isActive: !persona.isActive,
+        expectedRevision: persona.revision,
+      });
       const updated = result.persona;
       setPersonas((items) => items.map((item) => item.id === updated.id ? updated : item));
       toast.success(updated.isActive ? "Persona activated" : "Persona deactivated");
     } catch (error) {
-      console.error("Failed to update persona:", error);
-      toast.error("Could not update the persona. Try again.");
+      const message = error instanceof ApiError ? error.message : "Could not update the persona. Try again.";
+      setActionError(message);
+      if (!(error instanceof ApiError)) console.error("Failed to update persona:", error);
+      toast.error(message);
     } finally {
       setPendingToggle(null);
     }
@@ -161,6 +192,7 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
   async function deletePersona() {
     if (!deleteTarget) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       await apiMutate("DELETE", `/outreach/personas/${deleteTarget.id}`, { confirm: true });
       setPersonas((items) => items.filter((item) => item.id !== deleteTarget.id));
@@ -168,8 +200,10 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
       toast.success("Persona deleted");
       setDeleteTarget(null);
     } catch (error) {
-      console.error("Failed to delete persona:", error);
-      toast.error("Could not delete the persona. Try again.");
+      const message = error instanceof ApiError ? error.message : "Could not delete the persona. Try again.";
+      setDeleteError(message);
+      if (!(error instanceof ApiError)) console.error("Failed to delete persona:", error);
+      toast.error(message);
     } finally {
       setDeleting(false);
     }
@@ -207,6 +241,7 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
         <CardDescription>Set the titles, company profile, and signals that define a strong match.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {saveError ? <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{saveError}</p> : null}
         <div className="grid gap-4 md:grid-cols-2">
           <div className="grid gap-2"><Label htmlFor="persona-name">Name</Label><Input id="persona-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="AI-curious CTO" />{errors.name && <p className="text-xs text-destructive">{errors.name}</p>}</div>
           <div className="grid gap-2"><Label htmlFor="persona-titles">Target titles</Label><Input id="persona-titles" value={form.targetTitles} onChange={(event) => setForm({ ...form, targetTitles: event.target.value })} placeholder="CTO, VP Engineering, Head of AI" />{errors.targetTitles ? <p className="text-xs text-destructive">{errors.targetTitles}</p> : <p className="text-xs text-muted-foreground">Separate multiple titles with commas.</p>}</div>
@@ -271,9 +306,10 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
       searchValue={searchQuery}
       title="Workspace personas"
     >
-      {filteredPersonas.length > 0 ? (
+      {actionError || filteredPersonas.length > 0 ? (
         <>
-          <ListRows>
+          {actionError ? <p className="mx-6 mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{actionError}</p> : null}
+          {filteredPersonas.length > 0 ? <ListRows>
             {filteredPersonas.map((persona) => (
               <ListRow
                 actions={[
@@ -312,18 +348,21 @@ export function PersonasPageClient({ initialPersonas }: { initialPersonas: Perso
                 title={persona.name}
               />
             ))}
-          </ListRows>
+          </ListRows> : null}
           {deleteTarget && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-4">
-              <p className="text-sm text-muted-foreground">
-                Permanently delete &ldquo;{deleteTarget.name}&rdquo; from the workspace?
-              </p>
-              <div className="flex items-center gap-2">
-                <Button disabled={deleting} onClick={() => setDeleteTarget(null)} size="sm" variant="outline">Cancel</Button>
-                <Button disabled={deleting} onClick={() => void deletePersona()} size="sm" variant="destructive">
-                  {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Delete persona
-                </Button>
+            <div className="space-y-3 border-t px-6 py-4">
+              {deleteError ? <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{deleteError}</p> : null}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Permanently delete &ldquo;{deleteTarget.name}&rdquo; from the workspace?
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button disabled={deleting} onClick={() => { setDeleteTarget(null); setDeleteError(null); }} size="sm" variant="outline">Cancel</Button>
+                  <Button disabled={deleting} onClick={() => void deletePersona()} size="sm" variant="destructive">
+                    {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Delete persona
+                  </Button>
+                </div>
               </div>
             </div>
           )}

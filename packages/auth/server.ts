@@ -63,6 +63,7 @@ export const PLATFORM_OAUTH_SCOPES = [
   "vn:outreach:read",
   "vn:cascade:read",
   "vn:operations:read",
+  "vn:user:write",
   "vn:intelligence:read",
   "vn:intelligence:execute",
   "vn:intelligence:outcomes:write",
@@ -627,7 +628,7 @@ export const SESSION_CLIENT_ID_PREFIX = "session:";
  * require an OAuth token explicitly granted that scope.
  */
 export function sessionScopesForRole(role: string): OAuthScope[] {
-  const scopes = new Set<OAuthScope>(["vn:read", "vn:workspace:read", "vn:operations:read"]);
+  const scopes = new Set<OAuthScope>(["vn:read", "vn:workspace:read", "vn:operations:read", "vn:user:write"]);
   const products: Array<{ product: ProductId; read: OAuthScope; write: OAuthScope }> = [
     { product: "outreach", read: "vn:outreach:read", write: "vn:outreach:write" },
     { product: "content", read: "vn:content:read", write: "vn:content:write" },
@@ -658,6 +659,60 @@ export function sessionScopesForRole(role: string): OAuthScope[] {
     scopes.add("vn:intelligence:outcomes:write");
   }
   return [...scopes];
+}
+
+/**
+ * Builds a current, tenant-scoped service identity for a trusted first-party
+ * runtime. The billing member must still belong to the organization, and live
+ * commercial/entitlement state is reloaded for every runtime session. Callers
+ * choose a deliberately narrow scope set; capability authorization remains the
+ * final guard for every operation.
+ */
+export async function createInternalServiceAuthorizationContext(input: {
+  organizationId: string;
+  billingUserId: string;
+  clientId: string;
+  scopes: readonly OAuthScope[];
+  claims?: JWTPayload;
+}): Promise<McpAuthorizationContext> {
+  if (!/^[A-Za-z0-9:_-]{3,240}$/.test(input.clientId)) {
+    throw new ExternalAuthorizationError('The internal service client id is invalid.', 403, 'forbidden');
+  }
+  const organization = await loadOrganizationAuthorization(
+    input.billingUserId,
+    input.organizationId,
+  );
+  if (!organization) {
+    throw new ExternalAuthorizationError(
+      'The internal service billing member is no longer active.',
+      403,
+      'forbidden',
+    );
+  }
+  const supported = new Set<OAuthScope>(PLATFORM_OAUTH_SCOPES);
+  const scopes = [...new Set(input.scopes)];
+  if (
+    scopes.length === 0
+    || scopes.includes('vn:commercial:operator')
+    || scopes.some((scope) => !supported.has(scope))
+  ) {
+    throw new ExternalAuthorizationError(
+      'The internal service requested an invalid scope boundary.',
+      403,
+      'insufficient_scope',
+    );
+  }
+  return {
+    ...organization,
+    actor: {
+      type: 'service',
+      clientId: input.clientId,
+      billingUserId: input.billingUserId,
+    },
+    scopes,
+    resource: 'mcp',
+    claims: input.claims ?? {},
+  };
 }
 
 /**
@@ -762,11 +817,9 @@ export async function authorizeRequest(
       observabilityLog.warn("authorization.denied", { reason: "forbidden", required: "admin" });
       return { allowed: false as const, reason: "forbidden" as const, context, required: "admin" as const };
     }
-    const commercialCapability = pathname.startsWith("/brain") || pathname.startsWith("/api/brain")
-      ? "brain"
-      : pathname.startsWith("/chat") || pathname.startsWith("/api/chat")
-        ? "ai.basic"
-        : null;
+    const commercialCapability = pathname.startsWith("/chat") || pathname.startsWith("/api/chat")
+      ? "ai.basic"
+      : null;
     if (commercialCapability && !context.capabilities.includes(commercialCapability)) {
       observabilityLog.warn("authorization.denied", { reason: "forbidden", required: commercialCapability });
       return { allowed: false as const, reason: "forbidden" as const, context, required: commercialCapability };

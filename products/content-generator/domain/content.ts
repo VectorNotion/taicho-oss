@@ -23,6 +23,17 @@ export type ContentType = (typeof CONTENT_TYPES)[number];
 
 export type ContentStatus = "idea" | "refined" | "draft" | "ready" | "published";
 
+export type ContentDraftStatus = "draft" | "ready" | "published";
+
+export function canTransitionContentDraftStatus(
+  current: ContentDraftStatus,
+  next: ContentDraftStatus,
+): boolean {
+  return current === next
+    || (current === "draft" && next === "ready")
+    || (current === "ready" && next === "published");
+}
+
 export type ContentPriority = "low" | "medium" | "high";
 
 export type ContentPlatform = "youtube" | "blog" | "x" | "linkedin" | "social" | "ads";
@@ -59,6 +70,8 @@ export interface ContentIdea {
   sourceTopics?: Array<{ id: string; name: string }>;
   sourceResearch?: Array<{ id: string; title: string }>;
   sourceInsight?: ContentIdeaInsightSource;
+  sourceClaimIds?: string[];
+  sourceEvidenceIds?: string[];
 
   createdAt: string;
   updatedAt: string;
@@ -72,6 +85,8 @@ export interface CreateContentIdeaInput {
   sourceTopicIds?: string[];
   sourceResearchIds?: string[];
   sourceInsight?: ContentIdeaInsightSource;
+  sourceClaimIds?: string[];
+  sourceEvidenceIds?: string[];
 }
 
 export interface UpdateContentIdeaInput {
@@ -110,8 +125,18 @@ export interface ContentDraft {
   performanceLevel?: PerformanceLevel;
   performanceInsights?: string;
 
+  // Latest audience-tested variation intentionally applied to this Post.
+  // Stored on the Post so the originating experiment remains traceable after
+  // reloads and later edits without treating the generated candidates as
+  // standalone drafts.
+  resonanceAppliedJobId?: string;
+  resonanceAppliedCandidateId?: string;
+  resonanceAppliedAt?: string;
+
   // Relationships
   citations?: string[];
+  sourceClaimIds?: string[];
+  sourceEvidenceIds?: string[];
   innerLinks?: string[];
 
   createdAt: string;
@@ -124,6 +149,8 @@ export interface CreateContentDraftInput {
   type: ContentType;
   content: string;
   citations?: string[];
+  sourceClaimIds?: string[];
+  sourceEvidenceIds?: string[];
   innerLinks?: string[];
 }
 

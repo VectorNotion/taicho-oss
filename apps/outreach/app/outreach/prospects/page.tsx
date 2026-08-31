@@ -55,6 +55,7 @@ import {
 } from "@/products/outreach/domain/types";
 import { DueBadge } from "@/products/outreach/ui/components/action-items/DueBadge";
 import type { CatalogItem } from "@/products/outreach/domain/catalog";
+import type { QualificationStatus } from "@/products/outreach/domain/qualification";
 
 type ProspectListResponse = {
   items: Prospect[];
@@ -76,6 +77,34 @@ const LIFECYCLE_LABELS: Record<ProspectLifecycle, string> = {
   replied: "Replied",
 };
 
+const QUALIFICATION_BADGES: Record<QualificationStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  QUALIFIED: { label: "Qualified fit", variant: "default" },
+  UNQUALIFIED: { label: "Unqualified fit", variant: "secondary" },
+  REVIEW: { label: "Fit needs review", variant: "outline" },
+  HARD_EXCLUDED: { label: "Hard excluded", variant: "destructive" },
+  CONTACT_DISCOVERY_REQUIRED: { label: "Find another person", variant: "outline" },
+};
+
+const PROSPECT_STATUSES = new Set<ProspectStatus>(
+  Object.keys(PROSPECT_STATUS_CONFIG) as ProspectStatus[],
+);
+const PROSPECT_PRIORITIES = new Set<ProspectPriority>(
+  Object.keys(PROSPECT_PRIORITY_CONFIG) as ProspectPriority[],
+);
+const PROSPECT_SOURCES = new Set<ProspectSource>(
+  Object.keys(PROSPECT_SOURCE_CONFIG) as ProspectSource[],
+);
+const PROSPECT_LIFECYCLES = new Set<ProspectLifecycle>(
+  Object.keys(LIFECYCLE_LABELS) as ProspectLifecycle[],
+);
+
+function valueFromUrl<T extends string>(
+  value: string | null,
+  allowed: ReadonlySet<T>,
+): T | "all" {
+  return value && allowed.has(value as T) ? value as T : "all";
+}
+
 async function fetchProspectList(filters: {
   status: ProspectStatus | "all";
   source: ProspectSource | "all";
@@ -85,7 +114,7 @@ async function fetchProspectList(filters: {
   pageSize: number;
   lifecycle: ProspectLifecycle | "all";
   catalogItemId: string | "all";
-}): Promise<ProspectListResponse> {
+}, signal?: AbortSignal): Promise<ProspectListResponse> {
   return apiGet<ProspectListResponse>("/outreach/prospects", {
     status: filters.status === "all" ? undefined : filters.status,
     source: filters.source === "all" ? undefined : filters.source,
@@ -95,7 +124,7 @@ async function fetchProspectList(filters: {
     catalogItemId: filters.catalogItemId === "all" ? undefined : filters.catalogItemId,
     cursor: filters.cursor,
     limit: filters.pageSize,
-  });
+  }, { signal });
 }
 
 export default function PipelinePage() {
@@ -117,8 +146,69 @@ export default function PipelinePage() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [filterContextReady, setFilterContextReady] = useState(false);
+  const [pageSize, setPageSize] = useState(50);
   const loadMoreGeneration = useRef(0);
-  const pageSize = 50;
+
+  const replaceFilterContext = useCallback((next: {
+    catalogItemId: string;
+    lifecycle: ProspectLifecycle | "all";
+    pageSize: number;
+    priority: ProspectPriority | "all";
+    search: string;
+    source: ProspectSource | "all";
+    status: ProspectStatus | "all";
+  }) => {
+    const parameters = new URLSearchParams(window.location.search);
+    const values = {
+      q: next.search,
+      status: next.status === "all" ? "" : next.status,
+      source: next.source === "all" ? "" : next.source,
+      priority: next.priority === "all" ? "" : next.priority,
+      lifecycle: next.lifecycle === "all" ? "" : next.lifecycle,
+      catalogItemId: next.catalogItemId === "all" ? "" : next.catalogItemId,
+      limit: next.pageSize > 50 ? String(next.pageSize) : "",
+    };
+    for (const [key, value] of Object.entries(values)) {
+      if (value) parameters.set(key, value);
+      else parameters.delete(key);
+    }
+    const query = parameters.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+  }, []);
+
+  useEffect(() => {
+    function restoreFilterContext() {
+      const parameters = new URLSearchParams(window.location.search);
+      const next = {
+        search: parameters.get("q") ?? "",
+        status: valueFromUrl(parameters.get("status"), PROSPECT_STATUSES),
+        source: valueFromUrl(parameters.get("source"), PROSPECT_SOURCES),
+        priority: valueFromUrl(parameters.get("priority"), PROSPECT_PRIORITIES),
+        lifecycle: valueFromUrl(parameters.get("lifecycle"), PROSPECT_LIFECYCLES),
+        catalogItemId: parameters.get("catalogItemId")?.trim() || "all",
+        pageSize: parameters.get("limit") === "100" ? 100 : 50,
+      };
+      setSearchQuery(next.search);
+      setStatusFilter(next.status);
+      setSourceFilter(next.source);
+      setPriorityFilter(next.priority);
+      setLifecycleFilter(next.lifecycle);
+      setCatalogFilter(next.catalogItemId);
+      setPageSize(next.pageSize);
+      replaceFilterContext(next);
+      setFilterContextReady(true);
+    }
+
+    restoreFilterContext();
+    window.addEventListener("popstate", restoreFilterContext);
+    return () => window.removeEventListener("popstate", restoreFilterContext);
+  }, [replaceFilterContext]);
+
   useEffect(() => {
     void apiGet<{ items: CatalogItem[] }>("/outreach/catalog")
       .then(({ items }) => setCatalog(items))
@@ -126,7 +216,9 @@ export default function PipelinePage() {
   }, []);
 
   useEffect(() => {
+    if (!filterContextReady) return;
     let cancelled = false;
+    const controller = new AbortController();
     loadMoreGeneration.current += 1;
     setLoading(true);
     setLoadingMore(false);
@@ -138,7 +230,7 @@ export default function PipelinePage() {
       pageSize,
       lifecycle: lifecycleFilter,
       catalogItemId: catalogFilter,
-    })
+    }, controller.signal)
       .then((data) => {
         if (cancelled) return;
         setProspects(data.items);
@@ -147,7 +239,7 @@ export default function PipelinePage() {
         setLifecycleCounts(data.counts.byLifecycle);
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (cancelled || controller.signal.aborted) return;
         console.error("Error fetching Outreach pipeline:", error);
         toast.error("Could not load the pipeline. Refresh to try again.");
       })
@@ -156,6 +248,7 @@ export default function PipelinePage() {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [
     deferredSearchQuery,
@@ -164,7 +257,47 @@ export default function PipelinePage() {
     statusFilter,
     lifecycleFilter,
     catalogFilter,
+    filterContextReady,
+    pageSize,
   ]);
+
+  function changeFilters(next: Partial<{
+    catalogItemId: string;
+    lifecycle: ProspectLifecycle | "all";
+    priority: ProspectPriority | "all";
+    search: string;
+    source: ProspectSource | "all";
+    status: ProspectStatus | "all";
+  }>) {
+    const values = {
+      catalogItemId: next.catalogItemId ?? catalogFilter,
+      lifecycle: next.lifecycle ?? lifecycleFilter,
+      pageSize: 50,
+      priority: next.priority ?? priorityFilter,
+      search: next.search ?? searchQuery,
+      source: next.source ?? sourceFilter,
+      status: next.status ?? statusFilter,
+    };
+    if (next.catalogItemId !== undefined) setCatalogFilter(next.catalogItemId);
+    if (next.lifecycle !== undefined) setLifecycleFilter(next.lifecycle);
+    if (next.priority !== undefined) setPriorityFilter(next.priority);
+    if (next.search !== undefined) setSearchQuery(next.search);
+    if (next.source !== undefined) setSourceFilter(next.source);
+    if (next.status !== undefined) setStatusFilter(next.status);
+    setPageSize(50);
+    replaceFilterContext(values);
+  }
+
+  function clearFilters() {
+    changeFilters({
+      catalogItemId: "all",
+      lifecycle: "all",
+      priority: "all",
+      search: "",
+      source: "all",
+      status: "all",
+    });
+  }
 
   const loadMore = useCallback(async () => {
     if (loading || loadingMore || !nextCursor) return;
@@ -192,6 +325,19 @@ export default function PipelinePage() {
       setNextCursor(data.pagination.nextCursor);
       setTotal(data.total);
       setLifecycleCounts(data.counts.byLifecycle);
+      const nextPageSize = Math.min(100, pageSize + 50);
+      if (nextPageSize !== pageSize) {
+        setPageSize(nextPageSize);
+        replaceFilterContext({
+          catalogItemId: catalogFilter,
+          lifecycle: lifecycleFilter,
+          pageSize: nextPageSize,
+          priority: priorityFilter,
+          search: searchQuery,
+          source: sourceFilter,
+          status: statusFilter,
+        });
+      }
     } catch (error) {
       if (loadMoreGeneration.current !== generation) return;
       console.error("Error loading more Outreach people:", error);
@@ -206,7 +352,10 @@ export default function PipelinePage() {
     loading,
     loadingMore,
     nextCursor,
+    pageSize,
     priorityFilter,
+    replaceFilterContext,
+    searchQuery,
     sourceFilter,
     statusFilter,
     lifecycleFilter,
@@ -314,14 +463,7 @@ export default function PipelinePage() {
             {filtersActive ? (
               <Button
                 className="mt-2"
-                onClick={() => {
-                  setSearchQuery("");
-                  setStatusFilter("all");
-                  setPriorityFilter("all");
-                  setSourceFilter("all");
-                  setLifecycleFilter("all");
-                  setCatalogFilter("all");
-                }}
+                onClick={clearFilters}
                 variant="outline"
               >
                 Clear filters
@@ -335,14 +477,14 @@ export default function PipelinePage() {
         }
         filters={
           <>
-            <Select onValueChange={(value) => setLifecycleFilter(value as ProspectLifecycle | "all")} value={lifecycleFilter}>
+            <Select onValueChange={(value) => changeFilters({ lifecycle: value as ProspectLifecycle | "all" })} value={lifecycleFilter}>
               <SelectTrigger aria-label="Filter by lifecycle" className="w-48"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All lifecycle states</SelectItem>
                 {Object.entries(LIFECYCLE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Select onValueChange={setCatalogFilter} value={catalogFilter}>
+            <Select onValueChange={(value) => changeFilters({ catalogItemId: value })} value={catalogFilter}>
               <SelectTrigger aria-label="Filter by Catalog item" className="w-48"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Catalog items</SelectItem>
@@ -351,7 +493,7 @@ export default function PipelinePage() {
             </Select>
             <Select
               onValueChange={(value) =>
-                setStatusFilter(value as ProspectStatus | "all")
+                changeFilters({ status: value as ProspectStatus | "all" })
               }
               value={statusFilter}
             >
@@ -369,7 +511,7 @@ export default function PipelinePage() {
             </Select>
             <Select
               onValueChange={(value) =>
-                setPriorityFilter(value as ProspectPriority | "all")
+                changeFilters({ priority: value as ProspectPriority | "all" })
               }
               value={priorityFilter}
             >
@@ -387,7 +529,7 @@ export default function PipelinePage() {
             </Select>
             <Select
               onValueChange={(value) =>
-                setSourceFilter(value as ProspectSource | "all")
+                changeFilters({ source: value as ProspectSource | "all" })
               }
               value={sourceFilter}
             >
@@ -409,7 +551,7 @@ export default function PipelinePage() {
         isLoading={loading}
         isLoadingMore={loadingMore}
         onLoadMore={() => void loadMore()}
-        onSearchChange={setSearchQuery}
+        onSearchChange={(value) => changeFilters({ search: value })}
         searchPlaceholder="Search prospects…"
         searchValue={searchQuery}
         title="Prospects"
@@ -449,6 +591,11 @@ export default function PipelinePage() {
                         {lifecycle === "draft_ready" ? <FileCheck2 className="size-3" /> : null}
                         {LIFECYCLE_LABELS[lifecycle]}
                       </Badge>
+                      {prospect.qualificationStatus ? (
+                        <Badge variant={QUALIFICATION_BADGES[prospect.qualificationStatus].variant}>
+                          {QUALIFICATION_BADGES[prospect.qualificationStatus].label}
+                        </Badge>
+                      ) : null}
                       {prospect.catalogItemName ? <Badge variant="outline">{prospect.catalogItemName}</Badge> : null}
                       {nextAction ? <span className="inline-flex items-center gap-1" title={nextAction.title}><AlarmClock className="size-3.5 text-amber-500" /><DueBadge dueAt={nextAction.dueAt} /></span> : null}
                     </span>

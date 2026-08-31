@@ -145,6 +145,22 @@ test('computeFitScore: weighted mean of effective matches × 100, only observed 
   assert.equal(computeFitScore([], dims), 0, 'no matches → 0');
 });
 
+test('computeFitScore keeps insufficient evidence visible without treating it as a mismatch', () => {
+  const dims = [dim({ key: 'known', weight: 1 }), dim({ key: 'unknown', weight: 4 })];
+  const matches = [
+    match({ dimensionKey: 'known', matchScore: 0.8, effectiveMatch: 0.8 }),
+    match({
+      dimensionKey: 'unknown',
+      matchScore: 0,
+      effectiveMatch: 0,
+      confidence: 0,
+      classification: 'insufficient_evidence',
+    }),
+  ];
+
+  assert.equal(computeFitScore(matches, dims), 80);
+});
+
 test('decideStatus implements the spec §11 tree', () => {
   const t = DEFAULT_THRESHOLDS;
   const decide = (icpScore: number, personaScore: number, hardExcluded = false) =>

@@ -7,6 +7,7 @@ import type {
 } from '../intelligence/contracts';
 import { executeIntelligenceWorkflow } from '../intelligence/dispatcher';
 import { drainProductEvents, setProductEventSinkForTests } from '../events/emit';
+import { currentGraphOrganizationId } from '../data/organization-context';
 
 const running: IntelligenceRun = {
   id: 'run-1',
@@ -31,6 +32,8 @@ const draft: ArtifactDraft = {
   summary: 'Qualified prospect',
   content: { prospect: { id: 'prospect-1' } },
   sourceRefs: [{ type: 'prospect', id: 'prospect-1' }],
+  usedClaimIds: ['claim-1'],
+  usedEvidenceIds: ['evidence-1'],
   recommendations: [{ action: 'outreach_intelligence', label: 'Prepare outreach' }],
   provenance: { workflowVersion: 'test' },
 };
@@ -76,13 +79,19 @@ test('a workflow persists one artifact, resolves attention, and emits readiness'
     getArtifactForRun: async () => null,
     resolveAttention: async () => { calls.push('resolve'); return null; },
     actOnNotification: async () => { calls.push('act'); return null; },
-    handlers: { prospect_intelligence: async () => draft },
+    handlers: { prospect_intelligence: async () => {
+      assert.equal(currentGraphOrganizationId(), 'org-1');
+      return draft;
+    } },
   } as never);
   await drainProductEvents();
   assert.equal(result.artifact.id, 'artifact-1');
   assert.equal(result.replayed, false);
   assert.deepEqual(calls, ['commit', 'resolve', 'act']);
-  assert.deepEqual(events, ['intelligence.artifact.ready']);
+  assert.deepEqual(events, [
+    'intelligence.artifact.ready',
+    'knowledge.intelligence.artifact.ready',
+  ]);
 });
 
 test('an idempotent completed run replays its existing artifact', async () => {

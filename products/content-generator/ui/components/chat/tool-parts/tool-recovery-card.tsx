@@ -14,6 +14,8 @@ type ToolRecoveryCardProps = {
   status: ToolCallMessagePartStatus;
   isError?: boolean;
   partialResult?: unknown;
+  errorMessage?: string;
+  effectState?: "none" | "committed";
 };
 
 const reasonCopy = {
@@ -40,10 +42,13 @@ export function ToolRecoveryCard({
   toolName,
   status,
   partialResult,
+  errorMessage,
+  effectState = "none",
 }: ToolRecoveryCardProps) {
   const assistant = useAssistantApi();
   const [showPartial, setShowPartial] = useState(false);
   const partial = formatPartialResult(partialResult);
+  const committed = effectState === "committed";
 
   const retry = () => {
     assistant.message().reload();
@@ -65,13 +70,15 @@ export function ToolRecoveryCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700/80 dark:text-amber-300/80">
-            Work paused safely
+            {committed ? "Change saved; response interrupted" : "Work paused safely"}
           </p>
           <p className="mt-1 text-sm font-medium text-foreground">
-            {status.type === "incomplete" ? reasonCopy[status.reason] : "The tool encountered a temporary problem."}
+            {errorMessage ?? (status.type === "incomplete" ? reasonCopy[status.reason] : "The tool encountered a temporary problem.")}
           </p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Nothing new was written. Retry this turn, or adjust the request and send it again.
+            {committed
+              ? "The approved workspace change was written exactly once. Retry to recover its confirmation; the same idempotency key prevents a duplicate write."
+              : "Nothing new was written. Retry this turn, or adjust the request and send it again."}
           </p>
         </div>
         <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={retry}>

@@ -23,7 +23,16 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
 import { ComponentTag, InferenceTicker, SectionHeading } from './spec-primitives';
 
 const X_POST =
@@ -36,6 +45,28 @@ const YT_TITLE = 'I built a synthetic audience that scores my hooks before I pub
 const BLOG_TITLE = 'Scoring creative variants with activation-steered logprob readouts';
 const SHORT_CAPTION = 'Your audience, simulated — 412k impressions before publishing';
 const REEL_CAPTION = 'We score every hook against a synthetic audience before it ships. $0.008 per thousand reads.';
+
+type DraftId = 'x' | 'li' | 'yt' | 'blog' | 'short' | 'reel';
+
+const INITIAL_DRAFTS: Record<DraftId, string> = {
+  x: X_POST,
+  li: LINKEDIN_POST,
+  yt: YT_TITLE,
+  blog: BLOG_TITLE,
+  short: SHORT_CAPTION,
+  reel: REEL_CAPTION,
+};
+
+const DRAFT_LABELS: Record<DraftId, string> = {
+  x: 'X Post Preview',
+  li: 'LinkedIn Post Preview',
+  yt: 'YouTube Video Card',
+  blog: 'Blog Article Preview',
+  short: 'YouTube Short',
+  reel: 'Instagram Reel',
+};
+
+const PREVIEW_STATE_KEY = 'taicho:content-preview-gallery';
 
 // Per-surface inference summaries — WORK-07 Inference Ticker, rendered in the
 // exact space each draft will fill so the reveal happens in place. Long lines
@@ -92,28 +123,54 @@ function AvatarDot({ label, className = '' }: { label: string; className?: strin
 }
 
 function useCopy() {
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyResult, setCopyResult] = useState<{ id: DraftId; outcome: 'copied' | 'failed' } | null>(null);
   useEffect(() => {
-    if (!copiedId) return;
-    const t = setTimeout(() => setCopiedId(null), 1600);
+    if (!copyResult) return;
+    const t = setTimeout(() => setCopyResult(null), 1600);
     return () => clearTimeout(t);
-  }, [copiedId]);
-  const copy = (id: string, text: string) => {
-    navigator.clipboard?.writeText(text).catch(() => undefined);
-    setCopiedId(id);
+  }, [copyResult]);
+  const copy = async (id: DraftId, text: string) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(text);
+      setCopyResult({ id, outcome: 'copied' });
+    } catch {
+      setCopyResult({ id, outcome: 'failed' });
+    }
   };
-  return { copiedId, copy };
+  return { copyResult, copy };
 }
 
-function ActionRow({ id, text, copiedId, onCopy }: { id: string; text: string; copiedId: string | null; onCopy: (id: string, text: string) => void }) {
-  const copied = copiedId === id;
+function ActionRow({
+  available,
+  id,
+  isScheduled,
+  text,
+  copyResult,
+  onCopy,
+  onEdit,
+  onSchedule,
+}: {
+  available: boolean;
+  id: DraftId;
+  isScheduled: boolean;
+  text: string;
+  copyResult: { id: DraftId; outcome: 'copied' | 'failed' } | null;
+  onCopy: (id: DraftId, text: string) => Promise<void>;
+  onEdit: (id: DraftId) => void;
+  onSchedule: (id: DraftId) => void;
+}) {
+  const copied = copyResult?.id === id && copyResult.outcome === 'copied';
+  const copyFailed = copyResult?.id === id && copyResult.outcome === 'failed';
   return (
-    <div className="flex items-center gap-1 border-t pt-2">
-      <Button className="h-7 text-xs" onClick={() => onCopy(id, text)} size="sm" variant="ghost">
-        {copied ? <Check className="size-3 text-primary" /> : <Copy className="size-3" />} {copied ? 'Copied' : 'Copy'}
+    <div aria-hidden={!available} className="flex flex-wrap items-center gap-1 border-t pt-2">
+      <Button aria-label={`Copy ${DRAFT_LABELS[id]}`} className="h-7 text-xs" disabled={!available} onClick={() => void onCopy(id, text)} size="sm" variant="ghost">
+        {copied ? <Check className="size-3 text-primary" /> : <Copy className="size-3" />} {copied ? 'Copied' : copyFailed ? 'Copy failed' : 'Copy'}
       </Button>
-      <Button className="h-7 text-xs" size="sm" variant="ghost"><Pencil className="size-3" /> Edit draft</Button>
-      <Button className="ml-auto h-7 text-xs" size="sm" variant="outline"><CalendarPlus className="size-3" /> Schedule</Button>
+      <Button aria-label={`Edit ${DRAFT_LABELS[id]}`} className="h-7 text-xs" disabled={!available} onClick={() => onEdit(id)} size="sm" variant="ghost"><Pencil className="size-3" /> Edit draft</Button>
+      <Button aria-label={`Schedule ${DRAFT_LABELS[id]}`} className="ml-auto h-7 text-xs" disabled={!available || isScheduled} onClick={() => onSchedule(id)} size="sm" variant="outline">
+        {isScheduled ? <Check className="size-3" /> : <CalendarPlus className="size-3" />} {isScheduled ? 'Scheduled' : 'Schedule'}
+      </Button>
     </div>
   );
 }
@@ -134,7 +191,13 @@ function VerticalRail({ items }: { items: Array<{ icon: React.ComponentType<{ cl
 export function ContentPreviewGallery() {
   const [tick, setTick] = useState(0);
   const [paused, setPaused] = useState(false);
-  const { copiedId, copy } = useCopy();
+  const [drafts, setDrafts] = useState(INITIAL_DRAFTS);
+  const [scheduled, setScheduled] = useState<DraftId[]>([]);
+  const [editorId, setEditorId] = useState<DraftId | null>(null);
+  const [editorValue, setEditorValue] = useState('');
+  const [lastAction, setLastAction] = useState('');
+  const [restored, setRestored] = useState(false);
+  const { copyResult, copy } = useCopy();
 
   const thinking = tick < THINK_TICKS;
   const draftTick = Math.max(0, tick - THINK_TICKS);
@@ -142,21 +205,66 @@ export function ContentPreviewGallery() {
   const thinkLines = (lines: readonly string[]) => lines.slice(0, Math.min(lines.length, Math.floor(tick / 10) + 1)) as string[];
 
   useEffect(() => {
-    if (paused) return;
-    if (!complete) {
-      const t = setTimeout(() => setTick((value) => value + 1), 70);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setTick(0), 6000);
+    if (paused || complete) return;
+    const t = setTimeout(() => setTick((value) => value + 1), 70);
     return () => clearTimeout(t);
   }, [tick, paused, complete]);
 
-  const xText = useMemo(() => X_WORDS.slice(0, draftTick).join(' '), [draftTick]);
-  const liText = useMemo(() => LI_WORDS.slice(0, Math.min(draftTick, LI_FOLD)).join(' '), [draftTick]);
-  const xStreaming = draftTick > 0 && draftTick < X_WORDS.length;
-  const liStreaming = draftTick > 0 && draftTick < LI_FOLD;
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        const saved = sessionStorage.getItem(PREVIEW_STATE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved) as { drafts?: Partial<Record<DraftId, string>>; scheduled?: DraftId[] };
+          setDrafts({ ...INITIAL_DRAFTS, ...parsed.drafts });
+          setScheduled(parsed.scheduled?.filter((id) => id in INITIAL_DRAFTS) ?? []);
+        }
+      } catch {
+        sessionStorage.removeItem(PREVIEW_STATE_KEY);
+      }
+      setRestored(true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    sessionStorage.setItem(PREVIEW_STATE_KEY, JSON.stringify({ drafts, scheduled }));
+  }, [drafts, restored, scheduled]);
+
+  const xWords = useMemo(() => drafts.x.split(' '), [drafts.x]);
+  const liWords = useMemo(() => drafts.li.split(' '), [drafts.li]);
+  const xText = useMemo(() => (complete ? drafts.x : xWords.slice(0, draftTick).join(' ')), [complete, draftTick, drafts.x, xWords]);
+  const liText = useMemo(() => liWords.slice(0, Math.min(draftTick, LI_FOLD)).join(' '), [draftTick, liWords]);
+  const xStreaming = draftTick > 0 && draftTick < xWords.length;
+  const liStreaming = draftTick > 0 && draftTick < Math.min(liWords.length, LI_FOLD);
   const mediaReady = draftTick > 24;
   const settleCls = `transition-opacity duration-300 ${complete ? 'opacity-100' : 'pointer-events-none opacity-0'}`;
+
+  const openEditor = (id: DraftId) => {
+    setEditorId(id);
+    setEditorValue(drafts[id]);
+  };
+
+  const saveEdit = () => {
+    if (!editorId || !editorValue.trim()) return;
+    const label = DRAFT_LABELS[editorId];
+    setDrafts((value) => ({ ...value, [editorId]: editorValue.trim() }));
+    setLastAction(`${label} saved in this preview.`);
+    setEditorId(null);
+  };
+
+  const scheduleDraft = (id: DraftId) => {
+    setScheduled((value) => value.includes(id) ? value : [...value, id]);
+    setLastAction(`${DRAFT_LABELS[id]} marked scheduled in this preview.`);
+  };
+
+  const resetPreviews = () => {
+    sessionStorage.removeItem(PREVIEW_STATE_KEY);
+    setDrafts(INITIAL_DRAFTS);
+    setScheduled([]);
+    setLastAction('Preview edits and simulated schedules cleared.');
+  };
 
   return (
     <div className="space-y-7">
@@ -166,17 +274,20 @@ export function ContentPreviewGallery() {
           title="Preview content the way the platform will render it"
           description="Generation is one atomic operation per surface: WORK-07 Inference Ticker thinks in the exact space the draft will fill, the draft replaces it in place, and the preview settles with its full action set — copy, edit, schedule."
         />
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
           <span className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs text-muted-foreground">
             {!complete && <span className="size-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden />}
             {thinking ? 'Thinking' : complete ? 'Settled' : 'Drafting'}
           </span>
           <Button onClick={() => setTick(0)} size="sm" variant="outline"><RotateCcw className="size-3.5" /> Replay</Button>
-          <Button onClick={() => setPaused((value) => !value)} size="sm" variant="outline">
+          <Button aria-pressed={paused} disabled={complete} onClick={() => setPaused((value) => !value)} size="sm" variant="outline">
             {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />} {paused ? 'Resume' : 'Pause'}
           </Button>
+          <Button disabled={scheduled.length === 0 && Object.entries(INITIAL_DRAFTS).every(([id, text]) => drafts[id as DraftId] === text)} onClick={resetPreviews} size="sm" variant="outline">Reset previews</Button>
         </div>
       </div>
+
+      {lastAction && <p aria-live="polite" className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground" role="status">{lastAction}</p>}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <PlatformFrame tag="DATA-08" name="X Post Preview" purpose="The post as the timeline shows it, with thread position.">
@@ -194,7 +305,7 @@ export function ContentPreviewGallery() {
                     {thinking ? (
                       <InferenceTicker lines={thinkLines(THINKING.x)} windowClass="max-h-20" />
                     ) : (
-                      <p>
+                      <p className="[overflow-wrap:anywhere]">
                         {xText}
                         {xStreaming && <span className="ml-0.5 inline-block h-3.5 w-1 animate-pulse bg-primary align-text-bottom motion-reduce:animate-none" aria-hidden />}
                       </p>
@@ -207,7 +318,7 @@ export function ContentPreviewGallery() {
                     <span className="flex items-center gap-1.5"><BarChart3 className="size-3.5" /> 41K</span>
                   </div>
                   <div className={settleCls}>
-                    <ActionRow copiedId={copiedId} id="x" onCopy={copy} text={X_POST} />
+                    <ActionRow available={complete} copyResult={copyResult} id="x" isScheduled={scheduled.includes('x')} onCopy={copy} onEdit={openEditor} onSchedule={scheduleDraft} text={drafts.x} />
                   </div>
                 </div>
               </div>
@@ -230,7 +341,7 @@ export function ContentPreviewGallery() {
                 {thinking ? (
                   <InferenceTicker lines={thinkLines(THINKING.li)} windowClass="max-h-24" />
                 ) : (
-                  <p>
+                  <p className="[overflow-wrap:anywhere]">
                     {liText}
                     {liStreaming && <span className="ml-0.5 inline-block h-3.5 w-1 animate-pulse bg-primary align-text-bottom motion-reduce:animate-none" aria-hidden />}
                     {draftTick >= LI_FOLD && <span className="text-muted-foreground"> …see more</span>}
@@ -245,7 +356,7 @@ export function ContentPreviewGallery() {
                 84 · 12 comments
               </div>
               <div className={settleCls}>
-                <ActionRow copiedId={copiedId} id="li" onCopy={copy} text={LINKEDIN_POST} />
+                <ActionRow available={complete} copyResult={copyResult} id="li" isScheduled={scheduled.includes('li')} onCopy={copy} onEdit={openEditor} onSchedule={scheduleDraft} text={drafts.li} />
               </div>
             </CardContent>
           </Card>
@@ -270,7 +381,7 @@ export function ContentPreviewGallery() {
                       <div className="min-h-9 pt-0.5"><InferenceTicker lines={thinkLines(THINKING.yt)} windowClass="max-h-10" /></div>
                     ) : mediaReady ? (
                       <div className="animate-in fade-in duration-300 motion-reduce:animate-none">
-                        <p className="text-sm font-medium leading-snug">{YT_TITLE}</p>
+                        <p className="text-sm font-medium leading-snug [overflow-wrap:anywhere]">{drafts.yt}</p>
                         <p className="mt-1 text-xs text-muted-foreground">Vector Notion · 8.1K views · 2 days ago</p>
                       </div>
                     ) : (
@@ -282,7 +393,7 @@ export function ContentPreviewGallery() {
                   </div>
                 </div>
                 <div className={`mt-3 ${settleCls}`}>
-                  <ActionRow copiedId={copiedId} id="yt" onCopy={copy} text={YT_TITLE} />
+                  <ActionRow available={complete} copyResult={copyResult} id="yt" isScheduled={scheduled.includes('yt')} onCopy={copy} onEdit={openEditor} onSchedule={scheduleDraft} text={drafts.yt} />
                 </div>
               </div>
             </CardContent>
@@ -303,7 +414,7 @@ export function ContentPreviewGallery() {
                 ) : mediaReady ? (
                   <div className="min-h-24 animate-in fade-in slide-in-from-bottom-1 duration-300 motion-reduce:animate-none">
                     <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-primary">Engineering</p>
-                    <p className="mt-1.5 text-base font-semibold leading-snug">{BLOG_TITLE}</p>
+                    <p className="mt-1.5 text-base font-semibold leading-snug [overflow-wrap:anywhere]">{drafts.blog}</p>
                     <p className="mt-1.5 text-sm leading-6 text-muted-foreground">Why we stopped generating synthetic audience text and started reading a single token’s probability instead.</p>
                     <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="size-3.5" /> 9 min read · Jul 29, 2026</p>
                   </div>
@@ -315,7 +426,7 @@ export function ContentPreviewGallery() {
                   </div>
                 )}
                 <div className={`mt-3 ${settleCls}`}>
-                  <ActionRow copiedId={copiedId} id="blog" onCopy={copy} text={BLOG_TITLE} />
+                  <ActionRow available={complete} copyResult={copyResult} id="blog" isScheduled={scheduled.includes('blog')} onCopy={copy} onEdit={openEditor} onSchedule={scheduleDraft} text={drafts.blog} />
                 </div>
               </div>
             </CardContent>
@@ -338,7 +449,7 @@ export function ContentPreviewGallery() {
                     <span className="absolute left-1/2 top-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-background/85"><Play className="ml-0.5 size-4" /></span>
                     <VerticalRail items={[{ icon: Heart, count: '2.4K' }, { icon: MessageCircle, count: '118' }, { icon: Send, count: 'Share' }]} />
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/70 to-transparent p-3 pt-8">
-                      <p className="text-xs font-medium leading-snug">{SHORT_CAPTION}</p>
+                      <p className="text-xs font-medium leading-snug [overflow-wrap:anywhere]">{drafts.short}</p>
                       <p className="mt-1 text-[10px] text-muted-foreground">@vectornotion · 0:48</p>
                     </div>
                   </div>
@@ -349,7 +460,7 @@ export function ContentPreviewGallery() {
                   </div>
                 )}
                 <div className={`px-3 pb-2 pt-1 ${settleCls}`}>
-                  <ActionRow copiedId={copiedId} id="short" onCopy={copy} text={SHORT_CAPTION} />
+                  <ActionRow available={complete} copyResult={copyResult} id="short" isScheduled={scheduled.includes('short')} onCopy={copy} onEdit={openEditor} onSchedule={scheduleDraft} text={drafts.short} />
                 </div>
               </CardContent>
             </Card>
@@ -366,7 +477,7 @@ export function ContentPreviewGallery() {
                     </div>
                     <VerticalRail items={[{ icon: Heart, count: '1.9K' }, { icon: MessageCircle, count: '86' }, { icon: Send, count: '212' }]} />
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/70 to-transparent p-3 pt-8">
-                      <p className="text-xs leading-snug">{REEL_CAPTION}</p>
+                      <p className="text-xs leading-snug [overflow-wrap:anywhere]">{drafts.reel}</p>
                       <p className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground"><Music2 className="size-3" /> Original audio · rajesh.builds</p>
                     </div>
                   </div>
@@ -377,7 +488,7 @@ export function ContentPreviewGallery() {
                   </div>
                 )}
                 <div className={`px-3 pb-2 pt-1 ${settleCls}`}>
-                  <ActionRow copiedId={copiedId} id="reel" onCopy={copy} text={REEL_CAPTION} />
+                  <ActionRow available={complete} copyResult={copyResult} id="reel" isScheduled={scheduled.includes('reel')} onCopy={copy} onEdit={openEditor} onSchedule={scheduleDraft} text={drafts.reel} />
                 </div>
               </CardContent>
             </Card>
@@ -389,6 +500,20 @@ export function ContentPreviewGallery() {
         <MessageSquareText className="mb-2 size-4 text-primary" />
         These previews are conversation surfaces, not separate tools: when a draft targets a platform, the matching preview (DATA-08…13) renders inline in the assistant message. WORK-07 thinks in the space the draft will fill, the draft streams in place, and the surface settles with its action row — copy, edit, schedule. This page shows every platform draft for a piece of content side by side for review.
       </div>
+
+      <Dialog open={editorId !== null} onOpenChange={(open) => { if (!open) setEditorId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit {editorId ? DRAFT_LABELS[editorId] : 'draft'}</DialogTitle>
+            <DialogDescription>Changes stay in this browser preview so you can inspect the rendered surface before scheduling.</DialogDescription>
+          </DialogHeader>
+          <Textarea aria-label="Draft content" autoFocus className="min-h-32 [overflow-wrap:anywhere]" onChange={(event) => setEditorValue(event.target.value)} value={editorValue} />
+          <DialogFooter>
+            <Button onClick={() => setEditorId(null)} variant="outline">Cancel</Button>
+            <Button disabled={!editorValue.trim()} onClick={saveEdit}>Save edit</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -14,7 +14,7 @@ import {
   post_metric_snapshots as metricSnapshotsTable,
 } from '@content-automation/database';
 import { and, desc, eq } from 'drizzle-orm';
-import { emitProductEvent } from '../events/emit';
+import { emitProductEvent, recordProductEvent } from '../events/emit';
 import {
   getJobPool,
   validateJobOrganizationId,
@@ -158,6 +158,21 @@ export async function recordMetricSnapshot(
       ...(draftId ? { draftId } : {}),
     },
   });
+  await recordProductEvent({
+    organizationId,
+    name: 'knowledge.publishing.metrics.recorded',
+    origin: 'internal',
+    idempotencyKey: id,
+    payload: {
+      snapshotId: id,
+      postId,
+      draftId,
+      source: input.source,
+      metrics: input.metrics,
+      occurredAt: new Date().toISOString(),
+    },
+    refs: { postId, ...(draftId ? { draftId } : {}) },
+  });
 
   return { id };
 }
@@ -214,7 +229,11 @@ export function mergeLatestSnapshots(rows: SnapshotSelectionRow[]): {
 export async function latestAggregateDetail(
   organizationId: string,
   draftId: string,
-): Promise<{ totals: Record<string, number>; lastMeasuredAt: Date | null }> {
+): Promise<{
+  totals: Record<string, number>;
+  lastMeasuredAt: Date | null;
+  sources: MetricSource[];
+}> {
   const scoped = validateJobOrganizationId(organizationId);
   await ensureMetricsTables();
   const rows = await databaseFor(getJobPool(scoped))
@@ -238,12 +257,17 @@ export async function latestAggregateDetail(
       desc(metricSnapshotsTable.captured_at),
       desc(metricSnapshotsTable.id),
     );
-  return mergeLatestSnapshots(rows.map((row) => ({
+  const snapshots = rows.map((row) => ({
     postId: row.postId,
     source: row.source as MetricSource,
     capturedAt: new Date(row.capturedAt),
     metrics: (row.metrics ?? {}) as Record<string, number>,
-  })));
+  }));
+  return {
+    ...mergeLatestSnapshots(snapshots),
+    sources: [...new Set(snapshots.map(({ source }) => source))]
+      .sort((left, right) => SOURCE_PRIORITY[right] - SOURCE_PRIORITY[left]),
+  };
 }
 
 /** Pinned contract: per-draft aggregate totals under the merge rule above. */

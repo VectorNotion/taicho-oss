@@ -183,51 +183,6 @@ export const teamMember = pgTable("teamMember", {
 		}).onDelete("cascade"),
 ]);
 
-export const variantsInCascade = cascade.table("variants", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	step_id: uuid().notNull(),
-	segment: text().default('all').notNull(),
-	email_id: uuid().notNull(),
-	generation: integer().default(1).notNull(),
-	status: text().default('draft').notNull(),
-	created_by: text().default('human').notNull(),
-	validation_error: text(),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("variants_organization_id_id_key").on(table.organization_id, table.id),
-	foreignKey({
-			columns: [table.email_id, table.organization_id],
-			foreignColumns: [emailsInCascade.id, emailsInCascade.organization_id],
-			name: "variants_email_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.step_id, table.organization_id],
-			foreignColumns: [funnel_stepsInCascade.id, funnel_stepsInCascade.organization_id],
-			name: "variants_step_id_organization_fkey"
-		}),
-	pgPolicy("variants_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("variants_status_check", sql`status = ANY (ARRAY['draft'::text, 'validated'::text, 'active'::text, 'retired'::text])`),
-]).enableRLS();
-
-export const variant_statsInCascade = cascade.table("variant_stats", {
-	variant_id: uuid().primaryKey().notNull(),
-	sends: integer().default(0).notNull(),
-	opens: integer().default(0).notNull(),
-	clicks: integer().default(0).notNull(),
-	interests: integer().default(0).notNull(),
-	conversions: integer().default(0).notNull(),
-	revenue: numeric().default('0').notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	foreignKey({
-			columns: [table.variant_id, table.organization_id],
-			foreignColumns: [variantsInCascade.id, variantsInCascade.organization_id],
-			name: "variant_stats_variant_id_organization_fkey"
-		}),
-	pgPolicy("variant_stats_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-]).enableRLS();
-
 export const execution_eventInObservability = observability.table("execution_event", {
 	event_id: uuid().primaryKey().notNull(),
 	support_code: text().notNull(),
@@ -432,46 +387,6 @@ export const oauthAccessToken = pgTable("oauthAccessToken", {
 	unique("oauthAccessToken_token_key").on(table.token),
 ]);
 
-export const contentInCascade = cascade.table("content", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	name: text().notNull(),
-	subject: text().notNull(),
-	preheader: text(),
-	slots: jsonb().default({}).notNull(),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("content_organization_id_id_key").on(table.organization_id, table.id),
-	uniqueIndex("content_org_name_key").using("btree", table.organization_id.asc().nullsLast(), table.name.asc().nullsLast()),
-	pgPolicy("content_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-]).enableRLS();
-
-export const emailsInCascade = cascade.table("emails", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	name: text().notNull(),
-	template_id: uuid().notNull(),
-	content_id: uuid().notNull(),
-	from_email: text().notNull(),
-	from_name: text(),
-	interest_url: text(),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("emails_organization_id_id_key").on(table.organization_id, table.id),
-	foreignKey({
-			columns: [table.content_id, table.organization_id],
-			foreignColumns: [contentInCascade.id, contentInCascade.organization_id],
-			name: "emails_content_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.template_id, table.organization_id],
-			foreignColumns: [templatesInCascade.id, templatesInCascade.organization_id],
-			name: "emails_template_id_organization_fkey"
-		}),
-	unique("emails_name_key").on(table.name),
-	pgPolicy("emails_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-]).enableRLS();
-
 export const credit_wallet = pgTable("credit_wallet", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	organization_id: text().notNull(),
@@ -492,38 +407,6 @@ export const credit_wallet = pgTable("credit_wallet", {
 	check("credit_wallet_debt_check", sql`debt >= 0`),
 	check("credit_wallet_reserved_check", sql`reserved >= 0`),
 ]);
-
-export const cascade_settingsInCascade = cascade.table("cascade_settings", {
-	key: text().notNull(),
-	value: jsonb().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("cascade_settings_org_key").using("btree", table.organization_id.asc().nullsLast(), table.key.asc().nullsLast()),
-	pgPolicy("cascade_settings_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-]).enableRLS();
-
-export const delivery_domainsInCascade = cascade.table("delivery_domains", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	provider_connection_id: uuid().notNull(),
-	name: text().notNull(),
-	provider_domain_id: text(),
-	verification_status: text().default('unknown').notNull(),
-	last_checked_at: timestamp({ withTimezone: true, mode: 'string' }),
-	last_error_code: text(),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("delivery_domains_organization_id_id_key").on(table.organization_id, table.id),
-	uniqueIndex("delivery_domain_org_name_key").using("btree", table.organization_id.asc().nullsLast(), table.provider_connection_id.asc().nullsLast(), table.name.asc().nullsLast()),
-	foreignKey({
-			columns: [table.provider_connection_id, table.organization_id],
-			foreignColumns: [delivery_provider_connectionsInCascade.id, delivery_provider_connectionsInCascade.organization_id],
-			name: "delivery_domains_provider_connection_id_organization_fkey"
-		}).onDelete("cascade"),
-	pgPolicy("delivery_domains_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("delivery_domains_verification_status_check", sql`verification_status = ANY (ARRAY['unknown'::text, 'pending'::text, 'verified'::text, 'failed'::text])`),
-]).enableRLS();
 
 export const credit_ledger = pgTable("credit_ledger", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
@@ -720,67 +603,13 @@ export const enterprise_inquiry = pgTable("enterprise_inquiry", {
 	name: text().notNull(),
 	email: text().notNull(),
 	company: text().notNull(),
+	company_url: text().notNull(),
 	team_size: text(),
 	requirements: text().notNull(),
+	consent_recorded_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
 	status: text().default('new').notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 });
-
-export const delivery_provider_connectionsInCascade = cascade.table("delivery_provider_connections", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	provider: text().notNull(),
-	display_name: text().notNull(),
-	credential_ciphertext: text().notNull(),
-	credential_key_version: text().notNull(),
-	enabled: boolean().default(true).notNull(),
-	is_default: boolean().default(false).notNull(),
-	health_status: text().default('unchecked').notNull(),
-	last_checked_at: timestamp({ withTimezone: true, mode: 'string' }),
-	last_error_code: text(),
-	webhook_status: text().default('not_configured').notNull(),
-	webhook_configured_at: timestamp({ withTimezone: true, mode: 'string' }),
-	webhook_last_received_at: timestamp({ withTimezone: true, mode: 'string' }),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("delivery_provider_connections_organization_id_id_key").on(table.organization_id, table.id),
-	uniqueIndex("delivery_provider_org_default_key").using("btree", table.organization_id.asc().nullsLast()).where(sql`(is_default = true)`),
-	uniqueIndex("delivery_provider_org_provider_key").using("btree", table.organization_id.asc().nullsLast(), table.provider.asc().nullsLast()),
-	pgPolicy("delivery_provider_connections_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("delivery_provider_connections_health_status_check", sql`health_status = ANY (ARRAY['unchecked'::text, 'connected'::text, 'error'::text])`),
-	check("delivery_provider_connections_provider_check", sql`provider = ANY (ARRAY['resend'::text, 'sendgrid'::text, 'mailchimp'::text])`),
-	check("delivery_provider_connections_webhook_status_check", sql`webhook_status = ANY (ARRAY['not_configured'::text, 'configured'::text, 'receiving'::text, 'error'::text])`),
-]).enableRLS();
-
-export const delivery_sender_identitiesInCascade = cascade.table("delivery_sender_identities", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	provider_connection_id: uuid().notNull(),
-	domain_id: uuid().notNull(),
-	name: text().notNull(),
-	email: text().notNull(),
-	verification_status: text().default('unknown').notNull(),
-	is_default: boolean().default(false).notNull(),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("delivery_sender_identities_organization_id_id_key").on(table.organization_id, table.id),
-	uniqueIndex("delivery_sender_org_default_key").using("btree", table.organization_id.asc().nullsLast()).where(sql`(is_default = true)`),
-	uniqueIndex("delivery_sender_org_email_key").using("btree", table.organization_id.asc().nullsLast(), table.provider_connection_id.asc().nullsLast(), table.email.asc().nullsLast()),
-	foreignKey({
-			columns: [table.domain_id, table.organization_id],
-			foreignColumns: [delivery_domainsInCascade.id, delivery_domainsInCascade.organization_id],
-			name: "delivery_sender_identities_domain_id_organization_fkey"
-		}).onDelete("cascade"),
-	foreignKey({
-			columns: [table.provider_connection_id, table.organization_id],
-			foreignColumns: [delivery_provider_connectionsInCascade.id, delivery_provider_connectionsInCascade.organization_id],
-			name: "delivery_sender_identities_provider_connection_id_organization_"
-		}).onDelete("cascade"),
-	pgPolicy("delivery_sender_identities_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("delivery_sender_identities_verification_status_check", sql`verification_status = ANY (ARRAY['unknown'::text, 'pending'::text, 'verified'::text, 'failed'::text])`),
-]).enableRLS();
 
 export const postsInPublishing = publishing.table("posts", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
@@ -821,15 +650,31 @@ export const postsInPublishing = publishing.table("posts", {
 export const contentGenerationRunsInPublishing = publishing.table("content_generation_runs", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	organization_id: text().default(organizationIdDefault).notNull(),
-	draft_id: text().notNull(),
+	// Kept nullable while legacy draft-owned rows are moved to Content Bases.
+	draft_id: text(),
+	content_base_id: text(),
+	origin_post_id: text(),
+	parent_asset_id: uuid(),
 	template_key: text().notNull(),
 	template_version: integer().default(1).notNull(),
 	media_kind: text().notNull(),
+	visual_type: text().notNull(),
 	asset_role: text().default('primary').notNull(),
-	model_key: text().notNull(),
-	deployment_id: text().notNull(),
-	provider: text().default('fal').notNull(),
+	visual_brief: jsonb().default({}).notNull(),
+	compiled_prompt: text().notNull(),
+	negative_prompt: text(),
+	render_spec: jsonb(),
+	renderer_version: text(),
+	// Provider details are provenance only; routing is server-owned.
+	model_key: text(),
+	deployment_id: text(),
+	provider: text(),
+	provider_params: jsonb().default({}).notNull(),
 	provider_request_id: text(),
+	provider_request_url: text(),
+	provider_status_url: text(),
+	provider_result_url: text(),
+	provider_cancel_url: text(),
 	status: text().default('queued').notNull(),
 	progress: integer().default(0).notNull(),
 	input: jsonb().default({}).notNull(),
@@ -844,15 +689,17 @@ export const contentGenerationRunsInPublishing = publishing.table("content_gener
 	completed_at: timestamp({ withTimezone: true, mode: 'string' }),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("content_generation_runs_draft_idx").using("btree", table.organization_id.asc().nullsLast(), table.draft_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
-	index("content_generation_runs_reconcile_idx").using("btree", table.status.asc().nullsLast(), table.updated_at.asc().nullsLast()).where(sql`(status = ANY (ARRAY['submitted'::text, 'processing'::text]))`),
+	index("content_generation_runs_base_idx").using("btree", table.organization_id.asc().nullsLast(), table.content_base_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
+	index("content_generation_runs_origin_post_idx").using("btree", table.organization_id.asc().nullsLast(), table.origin_post_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
+	index("content_generation_runs_reconcile_idx").using("btree", table.status.asc().nullsLast(), table.updated_at.asc().nullsLast()).where(sql`(status = ANY (ARRAY['preparing'::text, 'queued'::text, 'submitted'::text, 'processing'::text]))`),
 	uniqueIndex("content_generation_runs_organization_id_id_key").using("btree", table.organization_id.asc().nullsLast(), table.id.asc().nullsLast()),
 	uniqueIndex("content_generation_runs_provider_request_key").using("btree", table.provider.asc().nullsLast(), table.provider_request_id.asc().nullsLast()).where(sql`provider_request_id IS NOT NULL`),
 	pgPolicy("content_generation_runs_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
+	// Audio is retained for legacy rows, but the V1 brief API only accepts image/video.
 	check("content_generation_runs_kind_check", sql`media_kind = ANY (ARRAY['image'::text, 'video'::text, 'audio'::text])`),
 	check("content_generation_runs_progress_check", sql`(progress >= 0) AND (progress <= 100)`),
-	check("content_generation_runs_provider_check", sql`provider = 'fal'::text`),
-	check("content_generation_runs_status_check", sql`status = ANY (ARRAY['queued'::text, 'submitted'::text, 'processing'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text])`),
+	check("content_generation_runs_provider_check", sql`provider IS NULL OR provider = ANY (ARRAY['openrouter'::text, 'fal'::text, 'renderer'::text, 'local'::text])`),
+	check("content_generation_runs_status_check", sql`status = ANY (ARRAY['preparing'::text, 'queued'::text, 'submitted'::text, 'processing'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text])`),
 ]).enableRLS();
 
 export const contentAssetsInPublishing = publishing.table("content_assets", {
@@ -860,9 +707,14 @@ export const contentAssetsInPublishing = publishing.table("content_assets", {
 	organization_id: text().default(organizationIdDefault).notNull(),
 	generation_run_id: uuid().notNull(),
 	output_index: integer().notNull(),
-	draft_id: text().notNull(),
+	// Legacy-only ownership column; new assets are owned by content_base_id.
+	draft_id: text(),
+	content_base_id: text(),
+	origin_post_id: text(),
+	parent_asset_id: uuid(),
 	asset_role: text().default('primary').notNull(),
 	media_kind: text().notNull(),
+	visual_type: text().notNull(),
 	file_name: text().notNull(),
 	mime_type: text().notNull(),
 	r2_key: text().notNull(),
@@ -870,15 +722,17 @@ export const contentAssetsInPublishing = publishing.table("content_assets", {
 	height: integer(),
 	duration_ms: integer(),
 	byte_size: integer().notNull(),
-	is_selected: boolean().default(false).notNull(),
+	description: text().notNull(),
+	alt_text: text().notNull(),
 	metadata: jsonb().default({}).notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("content_assets_draft_idx").using("btree", table.organization_id.asc().nullsLast(), table.draft_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
+	index("content_assets_base_idx").using("btree", table.organization_id.asc().nullsLast(), table.content_base_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
+	index("content_assets_origin_post_idx").using("btree", table.organization_id.asc().nullsLast(), table.origin_post_id.asc().nullsLast(), table.created_at.desc().nullsFirst()),
 	index("content_assets_run_idx").using("btree", table.organization_id.asc().nullsLast(), table.generation_run_id.asc().nullsLast()),
+	uniqueIndex("content_assets_organization_id_id_key").using("btree", table.organization_id.asc().nullsLast(), table.id.asc().nullsLast()),
 	uniqueIndex("content_assets_run_output_key").using("btree", table.organization_id.asc().nullsLast(), table.generation_run_id.asc().nullsLast(), table.output_index.asc().nullsLast()),
-	uniqueIndex("content_assets_selected_role_key").using("btree", table.organization_id.asc().nullsLast(), table.draft_id.asc().nullsLast(), table.asset_role.asc().nullsLast()).where(sql`is_selected = true`),
 	foreignKey({
 		columns: [table.organization_id, table.generation_run_id],
 		foreignColumns: [contentGenerationRunsInPublishing.organization_id, contentGenerationRunsInPublishing.id],
@@ -888,6 +742,28 @@ export const contentAssetsInPublishing = publishing.table("content_assets", {
 	check("content_assets_byte_size_check", sql`byte_size >= 0`),
 	check("content_assets_kind_check", sql`media_kind = ANY (ARRAY['image'::text, 'video'::text, 'audio'::text])`),
 	check("content_assets_output_index_check", sql`output_index >= 0`),
+]).enableRLS();
+
+export const contentPostMediaInPublishing = publishing.table("content_post_media", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	organization_id: text().default(organizationIdDefault).notNull(),
+	post_id: text().notNull(),
+	asset_id: uuid().notNull(),
+	role: text().default('primary').notNull(),
+	position: integer().default(0).notNull(),
+	created_by: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	uniqueIndex("content_post_media_post_asset_key").using("btree", table.organization_id.asc().nullsLast(), table.post_id.asc().nullsLast(), table.asset_id.asc().nullsLast()),
+	index("content_post_media_post_idx").using("btree", table.organization_id.asc().nullsLast(), table.post_id.asc().nullsLast(), table.position.asc().nullsLast()),
+	index("content_post_media_asset_idx").using("btree", table.organization_id.asc().nullsLast(), table.asset_id.asc().nullsLast()),
+	foreignKey({
+		columns: [table.organization_id, table.asset_id],
+		foreignColumns: [contentAssetsInPublishing.organization_id, contentAssetsInPublishing.id],
+		name: "content_post_media_asset_organization_fkey"
+	}).onDelete("cascade"),
+	pgPolicy("content_post_media_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
+	check("content_post_media_position_check", sql`position >= 0`),
 ]).enableRLS();
 
 export const mcp_service_principal = pgTable("mcp_service_principal", {
@@ -1105,37 +981,6 @@ export const organization_subscription = pgTable("organization_subscription", {
 	check("organization_subscription_seat_count_check", sql`seat_count > 0`),
 	check("organization_subscription_status_check", sql`status = ANY (ARRAY['active'::text, 'scheduled_change'::text, 'cancelled'::text])`),
 ]);
-
-export const eventsInCascade = cascade.table("events", {
-	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity({ name: "cascade.events_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: "9223372036854775807", cache: 1 }),
-	contact_id: uuid().notNull(),
-	enrollment_id: uuid(),
-	send_id: uuid(),
-	type: text().notNull(),
-	value: numeric(),
-	occurred_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("events_organization_id_id_key").using("btree", table.organization_id.asc().nullsLast(), table.id.asc().nullsLast()),
-	foreignKey({
-			columns: [table.contact_id, table.organization_id],
-			foreignColumns: [contactsInCascade.id, contactsInCascade.organization_id],
-			name: "events_contact_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.enrollment_id, table.organization_id],
-			foreignColumns: [enrollmentsInCascade.id, enrollmentsInCascade.organization_id],
-			name: "events_enrollment_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.send_id, table.organization_id],
-			foreignColumns: [sendsInCascade.id, sendsInCascade.organization_id],
-			name: "events_send_id_organization_fkey"
-		}),
-	pgPolicy("events_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("events_type_check", sql`type = ANY (ARRAY['queued'::text, 'sent'::text, 'delivered'::text, 'open'::text, 'click'::text, 'bounce'::text, 'complaint'::text, 'unsub'::text, 'interest'::text, 'convert'::text])`),
-]).enableRLS();
 
 export const post_metric_snapshots = pgTable("post_metric_snapshots", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
@@ -1355,26 +1200,6 @@ export const promotion_redemption = pgTable("promotion_redemption", {
 	check("promotion_redemption_status_check", sql`status = ANY (ARRAY['reserved'::text, 'applied'::text, 'released'::text])`),
 ]);
 
-export const funnel_stepsInCascade = cascade.table("funnel_steps", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	funnel_id: uuid().notNull(),
-	position: integer().notNull(),
-	type: text().notNull(),
-	config: jsonb().default({}).notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("funnel_steps_organization_id_id_key").on(table.organization_id, table.id),
-	foreignKey({
-			columns: [table.funnel_id, table.organization_id],
-			foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id],
-			name: "funnel_steps_funnel_id_organization_fkey"
-		}).onDelete("cascade"),
-	unique("funnel_steps_funnel_id_position_key").on(table.funnel_id, table.position),
-	pgPolicy("funnel_steps_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("funnel_steps_position_check", sql`"position" >= 1`),
-	check("funnel_steps_type_check", sql`type = ANY (ARRAY['email'::text, 'delay'::text, 'branch'::text, 'goal'::text])`),
-]).enableRLS();
-
 export const contactsInCascade = cascade.table("contacts", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	email: text().notNull(),
@@ -1392,110 +1217,6 @@ export const contactsInCascade = cascade.table("contacts", {
 	uniqueIndex("contacts_org_workspace_contact_key").using("btree", table.organization_id.asc().nullsLast(), table.workspace_contact_id.asc().nullsLast()).where(sql`(workspace_contact_id IS NOT NULL)`),
 	pgPolicy("contacts_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
 	check("contacts_subscription_status_check", sql`subscription_status = ANY (ARRAY['subscribed'::text, 'unsubscribed'::text, 'suppressed'::text])`),
-]).enableRLS();
-
-export const enrollmentsInCascade = cascade.table("enrollments", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	funnel_id: uuid().notNull(),
-	contact_id: uuid().notNull(),
-	current_step_id: uuid(),
-	state: text().default('active').notNull(),
-	next_run_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	created_by: text(),
-	actor_type: text(),
-	request_id: text(),
-	parent_execution_id: text(),
-	trace_id: text(),
-	traceparent: text(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("enrollments_organization_id_id_key").on(table.organization_id, table.id),
-	index("enrollments_due_idx").using("btree", table.next_run_at.asc().nullsLast()).where(sql`(state = 'active'::text)`),
-	foreignKey({
-			columns: [table.contact_id, table.organization_id],
-			foreignColumns: [contactsInCascade.id, contactsInCascade.organization_id],
-			name: "enrollments_contact_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.current_step_id, table.organization_id],
-			foreignColumns: [funnel_stepsInCascade.id, funnel_stepsInCascade.organization_id],
-			name: "enrollments_current_step_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.funnel_id, table.organization_id],
-			foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id],
-			name: "enrollments_funnel_id_organization_fkey"
-		}),
-	pgPolicy("enrollments_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("enrollments_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
-	check("enrollments_state_check", sql`state = ANY (ARRAY['active'::text, 'completed'::text, 'stopped'::text])`),
-]).enableRLS();
-
-export const sendsInCascade = cascade.table("sends", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	enrollment_id: uuid().notNull(),
-	step_id: uuid().notNull(),
-	provider_message_id: text(),
-	status: text().default('queued').notNull(),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	attempts: integer().default(0).notNull(),
-	variant_id: uuid(),
-	created_by: text(),
-	actor_type: text(),
-	request_id: text(),
-	parent_execution_id: text(),
-	trace_id: text(),
-	traceparent: text(),
-	organization_id: text().default(organizationIdDefault),
-	delivery_provider_id: uuid(),
-	sender_identity_id: uuid(),
-}, (table) => [
-	uniqueIndex("sends_organization_id_id_key").on(table.organization_id, table.id),
-	foreignKey({
-			columns: [table.organization_id, table.delivery_provider_id],
-			foreignColumns: [delivery_provider_connectionsInCascade.id, delivery_provider_connectionsInCascade.organization_id],
-			name: "sends_delivery_provider_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.enrollment_id, table.organization_id],
-			foreignColumns: [enrollmentsInCascade.id, enrollmentsInCascade.organization_id],
-			name: "sends_enrollment_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.organization_id, table.sender_identity_id],
-			foreignColumns: [delivery_sender_identitiesInCascade.id, delivery_sender_identitiesInCascade.organization_id],
-			name: "sends_sender_identity_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.step_id, table.organization_id],
-			foreignColumns: [funnel_stepsInCascade.id, funnel_stepsInCascade.organization_id],
-			name: "sends_step_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.variant_id, table.organization_id],
-			foreignColumns: [variantsInCascade.id, variantsInCascade.organization_id],
-			name: "sends_variant_id_organization_fkey"
-		}),
-	unique("sends_enrollment_id_step_id_key").on(table.enrollment_id, table.step_id),
-	pgPolicy("sends_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("sends_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
-	check("sends_status_check", sql`status = ANY (ARRAY['queued'::text, 'sent'::text, 'failed'::text, 'skipped'::text])`),
-]).enableRLS();
-
-export const templatesInCascade = cascade.table("templates", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	name: text().notNull(),
-	mjml: text().notNull(),
-	compiled_html: text(),
-	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-	design_json: jsonb(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("templates_organization_id_id_key").on(table.organization_id, table.id),
-	uniqueIndex("templates_org_name_key").using("btree", table.organization_id.asc().nullsLast(), table.name.asc().nullsLast()),
-	pgPolicy("templates_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
 ]).enableRLS();
 
 export const pricing_rollout = pgTable("pricing_rollout", {
@@ -1527,18 +1248,6 @@ export const pricing_rollout = pgTable("pricing_rollout", {
 	check("pricing_rollout_policy_check", sql`policy = ANY (ARRAY['cycle-end'::text, 'new-customers-only'::text])`),
 	check("pricing_rollout_status_check", sql`status = ANY (ARRAY['queued'::text, 'running'::text, 'scheduled'::text, 'attention'::text, 'completed'::text, 'cancelled'::text])`),
 ]);
-
-export const offersInCascade = cascade.table("offers", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	code: text().notNull(),
-	claim: text().notNull(),
-	active: boolean().default(true).notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("offers_org_code_key").using("btree", table.organization_id.asc().nullsLast(), table.code.asc().nullsLast()),
-	uniqueIndex("offers_organization_id_id_key").using("btree", table.organization_id.asc().nullsLast(), table.id.asc().nullsLast()),
-	pgPolicy("offers_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-]).enableRLS();
 
 export const pricing_rollout_item = pgTable("pricing_rollout_item", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
@@ -1574,14 +1283,6 @@ export const pricing_rollout_item = pgTable("pricing_rollout_item", {
 	check("pricing_rollout_item_status_check", sql`status = ANY (ARRAY['queued'::text, 'processing'::text, 'retry'::text, 'scheduled'::text, 'applied'::text, 'skipped'::text, 'blocked'::text])`),
 ]);
 
-export const platform_catalog_snapshots = pgTable("platform_catalog_snapshots", {
-	id: text().primaryKey().notNull(),
-	catalog_version: text().notNull(),
-	catalog: jsonb().notNull(),
-	source_generated_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
-	synced_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-});
-
 export const funnelsInCascade = cascade.table("funnels", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	name: text().notNull(),
@@ -1590,6 +1291,13 @@ export const funnelsInCascade = cascade.table("funnels", {
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	organization_id: text().default(organizationIdDefault),
 	builder_layout: jsonb().default({}).notNull(),
+	goal_type: text().default('reply').notNull(),
+	goal_description: text().default('').notNull(),
+	send_window: jsonb(),
+	auto_approve: boolean().default(false).notNull(),
+	reentry_days: integer(),
+	entry_node_id: uuid(),
+	run_enabled: boolean().default(false).notNull(),
 }, (table) => [
 	uniqueIndex("funnels_organization_id_id_key").on(table.organization_id, table.id),
 	pgPolicy("funnels_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
@@ -1599,6 +1307,12 @@ export const funnel_membersInCascade = cascade.table("funnel_members", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	funnel_id: uuid().notNull(),
 	contact_id: uuid().notNull(),
+	current_node_id: uuid(),
+	status: text().default('active').notNull(),
+	status_reason: text(),
+	entered_node_at: timestamp({ withTimezone: true, mode: 'string' }),
+	attempt: integer().default(0).notNull(),
+	snoozed_until: timestamp({ withTimezone: true, mode: 'string' }),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	created_by: text(),
 	actor_type: text(),
@@ -1615,6 +1329,79 @@ export const funnel_membersInCascade = cascade.table("funnel_members", {
 	index("funnel_members_funnel_created_idx").on(table.funnel_id, table.created_at),
 	check("funnel_members_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
 	pgPolicy("funnel_members_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+]).enableRLS();
+
+export const funnel_nodesInCascade = cascade.table("funnel_nodes", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	funnel_id: uuid().notNull(),
+	type: text().notNull(),
+	name: text().default('').notNull(),
+	config: jsonb().default({}).notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_by: text(),
+	actor_type: text(),
+	request_id: text(),
+	parent_execution_id: text(),
+	trace_id: text(),
+	traceparent: text(),
+	organization_id: text().default(organizationIdDefault),
+}, (table) => [
+	foreignKey({ columns: [table.funnel_id, table.organization_id], foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id], name: "funnel_nodes_funnel_id_organization_fkey" }).onDelete("cascade"),
+	uniqueIndex("funnel_nodes_organization_id_id_key").on(table.organization_id, table.id),
+	index("funnel_nodes_funnel_idx").on(table.funnel_id),
+	check("funnel_nodes_type_check", sql`type = ANY (ARRAY['touch'::text, 'wait'::text, 'branch'::text, 'goal'::text, 'route'::text])`),
+	check("funnel_nodes_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
+	pgPolicy("funnel_nodes_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+]).enableRLS();
+
+export const funnel_edgesInCascade = cascade.table("funnel_edges", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	funnel_id: uuid().notNull(),
+	from_node_id: uuid().notNull(),
+	to_node_id: uuid().notNull(),
+	label: text().notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_by: text(),
+	actor_type: text(),
+	request_id: text(),
+	parent_execution_id: text(),
+	trace_id: text(),
+	traceparent: text(),
+	organization_id: text().default(organizationIdDefault),
+}, (table) => [
+	foreignKey({ columns: [table.funnel_id, table.organization_id], foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id], name: "funnel_edges_funnel_id_organization_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.from_node_id, table.organization_id], foreignColumns: [funnel_nodesInCascade.id, funnel_nodesInCascade.organization_id], name: "funnel_edges_from_node_organization_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.to_node_id, table.organization_id], foreignColumns: [funnel_nodesInCascade.id, funnel_nodesInCascade.organization_id], name: "funnel_edges_to_node_organization_fkey" }).onDelete("cascade"),
+	uniqueIndex("funnel_edges_organization_id_id_key").on(table.organization_id, table.id),
+	unique("funnel_edges_from_label_key").on(table.from_node_id, table.label),
+	check("funnel_edges_label_check", sql`label = ANY (ARRAY['next'::text, 'yes'::text, 'no'::text, 'responded'::text, 'exhausted'::text])`),
+	check("funnel_edges_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
+	pgPolicy("funnel_edges_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+]).enableRLS();
+
+export const funnel_eventsInCascade = cascade.table("funnel_events", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	funnel_id: uuid().notNull(),
+	member_id: uuid(),
+	node_id: uuid(),
+	type: text().notNull(),
+	occurred_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	metadata: jsonb().default({}).notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_by: text(),
+	actor_type: text(),
+	request_id: text(),
+	parent_execution_id: text(),
+	trace_id: text(),
+	traceparent: text(),
+	organization_id: text().default(organizationIdDefault),
+}, (table) => [
+	foreignKey({ columns: [table.funnel_id, table.organization_id], foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id], name: "funnel_events_funnel_id_organization_fkey" }).onDelete("cascade"),
+	uniqueIndex("funnel_events_organization_id_id_key").on(table.organization_id, table.id),
+	index("funnel_events_funnel_occurred_idx").on(table.funnel_id, table.occurred_at),
+	check("funnel_events_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
+	pgPolicy("funnel_events_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
 ]).enableRLS();
 
 export const plain_text_emailsInCascade = cascade.table("plain_text_emails", {
@@ -1644,20 +1431,90 @@ export const plain_text_emailsInCascade = cascade.table("plain_text_emails", {
 	pgPolicy("plain_text_emails_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
 ]).enableRLS();
 
-export const assetsInCascade = cascade.table("assets", {
+export const step_outputsInCascade = cascade.table("step_outputs", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
-	source_id: text().notNull(),
-	type: text().notNull(),
-	title: text().notNull(),
-	url: text().notNull(),
-	topics: jsonb().default([]).notNull(),
-	published_at: timestamp({ withTimezone: true, mode: 'string' }),
-	synced_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	funnel_id: uuid().notNull(),
+	member_id: uuid().notNull(),
+	node_id: uuid().notNull(),
+	attempt: integer().notNull(),
+	subject: text().default('').notNull(),
+	body: text().default('').notNull(),
+	status: text().default('generated').notNull(),
+	metadata: jsonb().default({}).notNull(),
+	generated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_by: text(),
+	actor_type: text(),
+	request_id: text(),
+	parent_execution_id: text(),
+	trace_id: text(),
+	traceparent: text(),
 	organization_id: text().default(organizationIdDefault),
 }, (table) => [
-	uniqueIndex("assets_org_source_key").using("btree", table.organization_id.asc().nullsLast(), table.source_id.asc().nullsLast()),
-	uniqueIndex("assets_organization_id_id_key").using("btree", table.organization_id.asc().nullsLast(), table.id.asc().nullsLast()),
-	pgPolicy("assets_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
+	foreignKey({ columns: [table.funnel_id, table.organization_id], foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id], name: "step_outputs_funnel_id_organization_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [funnel_membersInCascade.id, funnel_membersInCascade.organization_id], name: "step_outputs_member_id_organization_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.node_id, table.organization_id], foreignColumns: [funnel_nodesInCascade.id, funnel_nodesInCascade.organization_id], name: "step_outputs_node_id_organization_fkey" }).onDelete("cascade"),
+	uniqueIndex("step_outputs_organization_id_id_key").on(table.organization_id, table.id),
+	unique("step_outputs_member_node_attempt_key").on(table.member_id, table.node_id, table.attempt),
+	index("step_outputs_funnel_status_idx").on(table.funnel_id, table.status),
+	check("step_outputs_status_check", sql`status = ANY (ARRAY['generated'::text, 'approved'::text, 'sent'::text, 'failed'::text])`),
+	check("step_outputs_attempt_check", sql`attempt >= 1`),
+	check("step_outputs_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
+	pgPolicy("step_outputs_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+]).enableRLS();
+
+export const funnel_repliesInCascade = cascade.table("funnel_replies", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	funnel_id: uuid().notNull(),
+	member_id: uuid().notNull(),
+	node_id: uuid(),
+	attempt: integer(),
+	body: text().notNull(),
+	classification: text(),
+	classifier_note: text().default('').notNull(),
+	routed_outcome: text(),
+	received_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_by: text(),
+	actor_type: text(),
+	request_id: text(),
+	parent_execution_id: text(),
+	trace_id: text(),
+	traceparent: text(),
+	organization_id: text().default(organizationIdDefault),
+}, (table) => [
+	foreignKey({ columns: [table.funnel_id, table.organization_id], foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id], name: "funnel_replies_funnel_id_organization_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [funnel_membersInCascade.id, funnel_membersInCascade.organization_id], name: "funnel_replies_member_id_organization_fkey" }).onDelete("cascade"),
+	uniqueIndex("funnel_replies_organization_id_id_key").on(table.organization_id, table.id),
+	index("funnel_replies_funnel_received_idx").on(table.funnel_id, table.received_at),
+	check("funnel_replies_classification_check", sql`(classification IS NULL) OR (classification = ANY (ARRAY['positive'::text, 'neutral'::text, 'negative'::text, 'ooo'::text, 'unsubscribe'::text]))`),
+	check("funnel_replies_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
+	pgPolicy("funnel_replies_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+]).enableRLS();
+
+export const funnel_decisionsInCascade = cascade.table("funnel_decisions", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	funnel_id: uuid().notNull(),
+	member_id: uuid().notNull(),
+	node_id: uuid().notNull(),
+	condition: jsonb().default({}).notNull(),
+	result: boolean().notNull(),
+	rationale: text().default('').notNull(),
+	decided_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	created_by: text(),
+	actor_type: text(),
+	request_id: text(),
+	parent_execution_id: text(),
+	trace_id: text(),
+	traceparent: text(),
+	organization_id: text().default(organizationIdDefault),
+}, (table) => [
+	foreignKey({ columns: [table.funnel_id, table.organization_id], foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id], name: "funnel_decisions_funnel_id_organization_fkey" }).onDelete("cascade"),
+	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [funnel_membersInCascade.id, funnel_membersInCascade.organization_id], name: "funnel_decisions_member_id_organization_fkey" }).onDelete("cascade"),
+	uniqueIndex("funnel_decisions_organization_id_id_key").on(table.organization_id, table.id),
+	index("funnel_decisions_member_decided_idx").on(table.member_id, table.decided_at),
+	check("funnel_decisions_actor_type_check", sql`(actor_type IS NULL) OR (actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text]))`),
+	pgPolicy("funnel_decisions_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
 ]).enableRLS();
 
 export const mcp_audit_event = pgTable("mcp_audit_event", {
@@ -1790,29 +1647,6 @@ export const mcp_media_upload = pgTable("mcp_media_upload", {
 	pgPolicy("mcp_media_upload_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
 	check("mcp_media_upload_actor_type_check", sql`actor_type = ANY (ARRAY['user'::text, 'service'::text, 'system'::text])`),
 	check("mcp_media_upload_max_bytes_check", sql`max_bytes > 0`),
-]).enableRLS();
-
-export const funnel_routesInCascade = cascade.table("funnel_routes", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	from_funnel_id: uuid().notNull(),
-	outcome: text().notNull(),
-	to_funnel_id: uuid().notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	uniqueIndex("funnel_routes_organization_id_id_key").using("btree", table.organization_id.asc().nullsLast(), table.id.asc().nullsLast()),
-	foreignKey({
-			columns: [table.from_funnel_id, table.organization_id],
-			foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id],
-			name: "funnel_routes_from_funnel_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.to_funnel_id, table.organization_id],
-			foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id],
-			name: "funnel_routes_to_funnel_id_organization_fkey"
-		}),
-	unique("funnel_routes_from_funnel_id_outcome_key").on(table.from_funnel_id, table.outcome),
-	pgPolicy("funnel_routes_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("funnel_routes_outcome_check", sql`outcome = ANY (ARRAY['completed'::text, 'interest'::text])`),
 ]).enableRLS();
 
 /** Provider-scoped identities that make Outreach prospect capture duplicate-safe. */
@@ -2010,11 +1844,13 @@ export const product_events = pgTable("product_events", {
 	origin: text().default('internal').notNull(),
 	connector_id: text(),
 	external_event_id: text(),
+	idempotency_key: text(),
 	payload: jsonb().default({}).notNull(),
 }, (table) => [
 	index("idx_product_events_org_name_time").using("btree", table.organization_id.asc().nullsLast(), table.name.asc().nullsLast(), table.occurred_at.desc().nullsFirst()),
 	index("idx_product_events_time").using("btree", table.occurred_at.asc().nullsLast(), table.id.asc().nullsLast()),
 	uniqueIndex("product_events_external_delivery_key").using("btree", table.organization_id.asc().nullsLast(), table.connector_id.asc().nullsLast(), table.external_event_id.asc().nullsLast(), table.name.asc().nullsLast()).where(sql`(origin = 'external_connector' AND connector_id IS NOT NULL AND external_event_id IS NOT NULL)`),
+	uniqueIndex("product_events_internal_idempotency_key").using("btree", table.organization_id.asc().nullsLast(), table.name.asc().nullsLast(), table.idempotency_key.asc().nullsLast()).where(sql`(idempotency_key IS NOT NULL)`),
 	unique("product_events_id_organization_key").on(table.id, table.organization_id),
 	pgPolicy("product_events_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
 	check("product_events_origin_check", sql`origin = ANY (ARRAY['internal'::text, 'external_connector'::text])`),
@@ -2098,15 +1934,6 @@ export const team_administrator = pgTable("team_administrator", {
 	primaryKey({ columns: [table.team_id, table.member_id], name: "team_administrator_pkey"}),
 ]);
 
-export const webhook_receiptsInCascade = cascade.table("webhook_receipts", {
-	organization_id: text().default(organizationIdDefault).notNull(),
-	id: text().notNull(),
-	received_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-}, (table) => [
-	primaryKey({ columns: [table.organization_id, table.id], name: "webhook_receipts_pkey"}),
-	pgPolicy("webhook_receipts_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-]).enableRLS();
-
 export const organization_entitlement = pgTable("organization_entitlement", {
 	organization_id: text().notNull(),
 	product: text().notNull(),
@@ -2171,30 +1998,6 @@ export const idempotency_keysInAssistant = assistant.table("idempotency_keys", {
 	index("idempotency_expiry_idx").using("btree", table.expires_at.asc().nullsLast()),
 	primaryKey({ columns: [table.tenant_id, table.key, table.operation], name: "idempotency_keys_pkey"}),
 	pgPolicy("idempotency_keys_tenant_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(tenant_id = NULLIF(current_setting('app.assistant_tenant_id'::text, true), ''::text))`, withCheck: sql`(tenant_id = NULLIF(current_setting('app.assistant_tenant_id'::text, true), ''::text))`  }),
-]).enableRLS();
-
-export const stage_daily_statsInCascade = cascade.table("stage_daily_stats", {
-	day: date().notNull(),
-	funnel_id: uuid().notNull(),
-	step_id: uuid().notNull(),
-	sends: integer().default(0).notNull(),
-	opens: integer().default(0).notNull(),
-	clicks: integer().default(0).notNull(),
-	interests: integer().default(0).notNull(),
-	organization_id: text().default(organizationIdDefault),
-}, (table) => [
-	foreignKey({
-			columns: [table.funnel_id, table.organization_id],
-			foreignColumns: [funnelsInCascade.id, funnelsInCascade.organization_id],
-			name: "stage_daily_stats_funnel_id_organization_fkey"
-		}),
-	foreignKey({
-			columns: [table.step_id, table.organization_id],
-			foreignColumns: [funnel_stepsInCascade.id, funnel_stepsInCascade.organization_id],
-			name: "stage_daily_stats_step_id_organization_fkey"
-		}),
-	primaryKey({ columns: [table.day, table.funnel_id, table.step_id], name: "stage_daily_stats_pkey"}),
-	pgPolicy("stage_daily_stats_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
 ]).enableRLS();
 
 export const payment_provider_event = pgTable("payment_provider_event", {
@@ -2499,6 +2302,8 @@ export const intelligence_artifacts = pgTable("intelligence_artifacts", {
 	summary: text(),
 	content: jsonb().notNull(),
 	source_refs: jsonb().default([]).notNull(),
+	used_claim_ids: text().array().default([]).notNull(),
+	used_evidence_ids: text().array().default([]).notNull(),
 	recommendations: jsonb().default([]).notNull(),
 	provenance: jsonb().default({}).notNull(),
 	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -2573,7 +2378,71 @@ export const product_event_projections = pgTable("product_event_projections", {
 		name: "product_event_projections_event_id_fkey"
 	}).onDelete("cascade"),
 	pgPolicy("product_event_projections_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
-	check("product_event_projections_outcome_check", sql`outcome = ANY (ARRAY['notified'::text, 'suppressed'::text])`),
+	check("product_event_projections_outcome_check", sql`outcome = ANY (ARRAY['notified'::text, 'suppressed'::text, 'projected'::text, 'ignored'::text])`),
+]).enableRLS();
+
+/**
+ * Workspace-level read projection of module-owned schedules. Modules never
+ * write this table directly: they emit calendar.entry.changed and the shared
+ * projector applies the newest normalized revision.
+ */
+export const calendar_entries = pgTable("calendar_entries", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	organization_id: text().notNull(),
+	module_key: text().notNull(),
+	kind_key: text().notNull(),
+	source_id: text().notNull(),
+	source_revision: text().notNull(),
+	state: text().notNull(),
+	title: text().notNull(),
+	description: text(),
+	starts_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+	ends_at: timestamp({ withTimezone: true, mode: 'string' }),
+	all_day: boolean().default(false).notNull(),
+	timezone: text().default('UTC').notNull(),
+	href: text().notNull(),
+	metadata: jsonb().default({}).notNull(),
+	last_event_id: uuid(),
+	event_occurred_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("calendar_entries_org_module_source_key").on(table.organization_id, table.module_key, table.source_id),
+	index("calendar_entries_org_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.starts_at.asc().nullsLast()),
+	index("calendar_entries_org_state_time_idx").using("btree", table.organization_id.asc().nullsLast(), table.state.asc().nullsLast(), table.starts_at.asc().nullsLast()),
+	foreignKey({
+		columns: [table.organization_id],
+		foreignColumns: [organization.id],
+		name: "calendar_entries_organization_fk",
+	}).onDelete("cascade"),
+	foreignKey({
+		columns: [table.last_event_id],
+		foreignColumns: [product_events.id],
+		name: "calendar_entries_last_event_id_fkey",
+	}).onDelete("set null"),
+	pgPolicy("calendar_entries_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+	check("calendar_entries_state_check", sql`state = ANY (ARRAY['scheduled'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text, 'failed'::text])`),
+	check("calendar_entries_time_check", sql`ends_at IS NULL OR ends_at >= starts_at`),
+]).enableRLS();
+
+export const knowledge_module_manifest = pgTable("knowledge_module_manifest", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	organization_id: text().notNull(),
+	module_key: text().notNull(),
+	version: integer().notNull(),
+	manifest: jsonb().notNull(),
+	digest: text().notNull(),
+	signature: text().notNull(),
+	enabled: boolean().default(true).notNull(),
+	created_by: text(),
+	created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("knowledge_module_manifest_org_module_key").on(table.organization_id, table.module_key),
+	index("knowledge_module_manifest_org_enabled_idx").using("btree", table.organization_id.asc().nullsLast(), table.enabled.asc().nullsLast()),
+	foreignKey({ columns: [table.organization_id], foreignColumns: [organization.id], name: "knowledge_module_manifest_organization_fk" }).onDelete("cascade"),
+	pgPolicy("knowledge_module_manifest_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))` }),
+	check("knowledge_module_manifest_version_check", sql`version > 0`),
 ]).enableRLS();
 
 /** Per-member lifecycle for a workspace assistant notification. */
@@ -2623,6 +2492,30 @@ export const notification_preferences = pgTable("notification_preferences", {
 	}).onDelete("cascade"),
 	pgPolicy("notification_preferences_organization_policy", { as: "permissive", for: "all", to: ["public"], using: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`, withCheck: sql`(organization_id = NULLIF(current_setting('app.organization_id'::text, true), ''::text))`  }),
 ]).enableRLS();
+
+/** Durable acknowledgement of the exact page-guide content shown to one user across workspaces. */
+export const page_guide_receipts = pgTable("page_guide_receipts", {
+	user_id: text().notNull(),
+	guide_key: text().notNull(),
+	last_seen_content_hash: varchar({ length: 64 }).notNull(),
+	dismissed_content_hash: varchar({ length: 64 }),
+	first_seen_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	last_seen_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	dismissed_at: timestamp({ withTimezone: true, mode: 'string' }),
+	open_count: integer().default(1).notNull(),
+	updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.user_id, table.guide_key], name: "page_guide_receipts_pkey" }),
+	foreignKey({
+		columns: [table.user_id],
+		foreignColumns: [user.id],
+		name: "page_guide_receipts_user_id_fkey"
+	}).onDelete("cascade"),
+	check("page_guide_receipts_last_seen_hash_check", sql`last_seen_content_hash ~ '^[0-9a-f]{64}$'`),
+	check("page_guide_receipts_dismissed_hash_check", sql`dismissed_content_hash IS NULL OR dismissed_content_hash ~ '^[0-9a-f]{64}$'`),
+	check("page_guide_receipts_dismissed_at_check", sql`(dismissed_content_hash IS NULL) = (dismissed_at IS NULL)`),
+	check("page_guide_receipts_open_count_check", sql`open_count > 0`),
+]);
 
 /** Replay-safe outcome reports returned by n8n or another delivery orchestrator. */
 export const intelligence_artifact_outcomes = pgTable("intelligence_artifact_outcomes", {

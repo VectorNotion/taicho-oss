@@ -9,6 +9,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  localResearchGenerateItems,
+  localResearchSearch,
   runDoResearch,
   type ResearchDeps,
   type TavilySearchParams,
@@ -17,6 +19,7 @@ import {
 } from '../agent/actions/research';
 import type { ExtractedResearchItems } from '../agent/actions/research-agent';
 import {
+  localTopicsGenerate,
   runExtractTopics,
   type TopicsDeps,
   type EntityRow,
@@ -107,6 +110,7 @@ interface ResearchCalls {
   generateItemsCalls: GenerateItemsInput[];
   persisted: CreateResearchItemFromAgentInput[];
   linked: Array<{ id: string; tags: string[] }>;
+  knowledgeFindings: string[];
 }
 
 function makeResearchDeps(cfg: {
@@ -127,6 +131,7 @@ function makeResearchDeps(cfg: {
     generateItemsCalls: [],
     persisted: [],
     linked: [],
+    knowledgeFindings: [],
   };
 
   const deps: ResearchDeps = {
@@ -158,6 +163,10 @@ function makeResearchDeps(cfg: {
       },
       linkResearchToMatchingTopics: async (id, tags) => {
         calls.linked.push({ id, tags });
+      },
+      ingestKnowledge: async (input) => {
+        calls.knowledgeFindings.push(input.findingId ?? '');
+        return {} as Awaited<ReturnType<NonNullable<ResearchDeps['repos']['ingestKnowledge']>>>;
       },
     },
   };
@@ -249,6 +258,7 @@ test('do_research: dedup counting splits created vs deduped', async () => {
   // only the newly-created item gets topic links
   assert.equal(calls.linked.length, 1);
   assert.equal(calls.linked[0].id, 'id-0');
+  assert.deepEqual(calls.knowledgeFindings, ['id-0:first', 'id-1:second']);
 });
 
 test('do_research: empty search results short-circuit extraction', async () => {
@@ -308,17 +318,50 @@ test('do_research: website source queries topics within its domain', async () =>
   assert.deepEqual(calls.searchParams[0].includeDomains, ['blog.example.com']);
 });
 
+test('do_research: local provider is deterministic and emits inspectable progress', async () => {
+  const params: TavilySearchParams = {
+    query: 'durable workflow browser testing',
+    timeRange: 'week',
+    maxResults: 5,
+  };
+  const first = await localResearchSearch(params);
+  const replay = await localResearchSearch(params);
+  assert.deepEqual(replay, first);
+  assert.equal(first.results.length, 1);
+  assert.match(first.results[0]?.url ?? '', /^https:\/\/research\.local\.test\/results\//);
+
+  const parts: Array<{ type: string; id?: string; data: unknown }> = [];
+  const generate = localResearchGenerateItems((part) => parts.push(part));
+  const extracted = await generate({
+    sourceName: 'Browser QA source',
+    searchResults: first.content,
+    mission: 'Test durable product behavior',
+    identity: 'Automation testing workspace',
+  });
+  assert.equal(extracted.items.length, 1);
+  assert.equal(extracted.items[0]?.title, 'Local research: Browser QA source');
+  assert.deepEqual(parts.map(({ type }) => type), [
+    'data-progress',
+    'data-reasoning',
+    'data-partial',
+    'data-progress',
+  ]);
+  assert.deepEqual((parts.at(-1)?.data as { state: string }).state, 'done');
+});
+
 // ---------------------------------------------------------------------------
 // Topics deps builder
 // ---------------------------------------------------------------------------
 
 interface TopicsCalls {
   getTopicsCalled: boolean;
+  legacyEntityReads: number;
   generateTopicsCalls: GenerateTopicsInput[];
   embedCalls: string[][];
   createTopicCalls: CreateTopicInput[];
   linkedEntities: Array<{ id: string; names: string[] }>;
   linkedResearch: Array<{ id: string; name: string }>;
+  artifacts: Array<{ usedClaimIds: string[]; usedEvidenceIds: string[] }>;
 }
 
 function makeEntity(p: Partial<EntityRow> & { name: string }): EntityRow {
@@ -328,23 +371,28 @@ function makeEntity(p: Partial<EntityRow> & { name: string }): EntityRow {
     id: p.id ?? `e-${p.name}`,
     projectNames: p.projectNames ?? ['ProjectA'],
     projectCount: p.projectCount ?? 1,
+    claimIds: p.claimIds,
+    evidenceIds: p.evidenceIds,
   };
 }
 
 function makeTopicsDeps(cfg: {
   existingTopics?: Topic[];
   entities?: EntityRow[];
+  knowledgeEntities?: EntityRow[];
   generateTopics: (i: GenerateTopicsInput) => ExtractedTopics;
   embed?: (texts: string[]) => number[][];
   createTopic?: (data: CreateTopicInput) => Topic | null;
 }): { deps: TopicsDeps; calls: TopicsCalls } {
   const calls: TopicsCalls = {
     getTopicsCalled: false,
+    legacyEntityReads: 0,
     generateTopicsCalls: [],
     embedCalls: [],
     createTopicCalls: [],
     linkedEntities: [],
     linkedResearch: [],
+    artifacts: [],
   };
 
   const deps: TopicsDeps = {
@@ -363,7 +411,11 @@ function makeTopicsDeps(cfg: {
         calls.getTopicsCalled = true;
         return makeTopicsResponse(cfg.existingTopics ?? []);
       },
-      getEntitiesByProjectCount: async () => cfg.entities ?? [],
+      getEntitiesByProjectCount: async () => {
+        calls.legacyEntityReads += 1;
+        return cfg.entities ?? [];
+      },
+      getKnowledgeTopicCandidates: async () => cfg.knowledgeEntities ?? [],
       createTopic: async (data) => {
         calls.createTopicCalls.push(data);
         if (cfg.createTopic) return cfg.createTopic(data);
@@ -379,6 +431,10 @@ function makeTopicsDeps(cfg: {
       linkTopicToResearch: async (id, name) => {
         calls.linkedResearch.push({ id, name });
       },
+    },
+    recordKnowledgeArtifact: async (artifact) => {
+      calls.artifacts.push({ usedClaimIds: artifact.usedClaimIds, usedEvidenceIds: artifact.usedEvidenceIds });
+      return null;
     },
   };
 
@@ -410,6 +466,34 @@ function captureLogs<T>(fn: () => Promise<T>): Promise<{ result: T; logs: string
 // extract_topics tests
 // ---------------------------------------------------------------------------
 
+test('extract_topics: local provider is deterministic and emits inspectable progress', async () => {
+  const parts: Array<{ type: string; id?: string; data: unknown }> = [];
+  const generate = localTopicsGenerate((part) => parts.push(part));
+  const input = {
+    entitiesFormatted: [
+      '- [content.feature] Durable workflow recovery (evidence-backed claims: 3) → Browser QA',
+      '- [content.feature] Browser automation (evidence-backed claims: 2) → Browser QA',
+    ].join('\n'),
+    existingTopicNames: 'none',
+  };
+
+  const first = await generate(input);
+  const second = await generate(input);
+
+  assert.deepEqual(first, second);
+  assert.deepEqual(first.topics.map((topic) => topic.name), [
+    'durable-workflow-recovery',
+    'browser-automation-testing',
+  ]);
+  assert.deepEqual(parts.slice(0, 4).map(({ type }) => type), [
+    'data-progress',
+    'data-reasoning',
+    'data-partial',
+    'data-progress',
+  ]);
+  assert.equal((parts[3]?.data as { state: string }).state, 'done');
+});
+
 test('extract_topics: empty entities short-circuit before the LLM call', async () => {
   const { deps, calls } = makeTopicsDeps({
     entities: [],
@@ -420,6 +504,35 @@ test('extract_topics: empty entities short-circuit before the LLM call', async (
 
   assert.equal(calls.generateTopicsCalls.length, 0);
   assert.deepEqual(result, { topicsCreated: 0, topicsDeduped: 0 });
+});
+
+test('extract_topics: accepted research claims create topics without project entities', async () => {
+  const { deps, calls } = makeTopicsDeps({
+    entities: [],
+    knowledgeEntities: [makeEntity({
+      name: 'Evidence Graphs',
+      entityType: 'core.concept',
+      projectNames: ['Research'],
+      projectCount: 2,
+      claimIds: ['claim_1'],
+      evidenceIds: ['evidence_1'],
+    })],
+    generateTopics: () => ({
+      topics: [{
+        name: 'evidence-graphs',
+        display_name: 'Evidence Graphs',
+        description: 'Evidence-backed knowledge systems',
+        source_entities: ['Evidence Graphs'],
+        confidence: 0.95,
+      }],
+    }),
+  });
+
+  const result = await runExtractTopics({ deps });
+
+  assert.deepEqual(result, { topicsCreated: 1, topicsDeduped: 0 });
+  assert.equal(calls.legacyEntityReads, 0);
+  assert.deepEqual(calls.artifacts, [{ usedClaimIds: ['claim_1'], usedEvidenceIds: ['evidence_1'] }]);
 });
 
 test('extract_topics: semantic dedup catches a near-duplicate within the batch', async () => {

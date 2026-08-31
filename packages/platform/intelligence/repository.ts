@@ -10,7 +10,6 @@ import {
   notification_preferences as notificationPreferencesTable,
   notification_recipients as notificationRecipientsTable,
   product_events as productEventsTable,
-  product_event_projections as productEventProjectionsTable,
 } from '@content-automation/database';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { getJobPool, validateJobOrganizationId } from '../jobs/pool';
@@ -65,6 +64,8 @@ function artifactFromRow(row: typeof artifactsTable.$inferSelect): StructuredArt
     summary: row.summary,
     content: row.content as Record<string, unknown>,
     sourceRefs: row.source_refs as StructuredArtifact['sourceRefs'],
+    usedClaimIds: row.used_claim_ids,
+    usedEvidenceIds: row.used_evidence_ids,
     recommendations: row.recommendations as StructuredArtifact['recommendations'],
     provenance: row.provenance as Record<string, unknown>,
     createdAt: row.created_at,
@@ -193,6 +194,8 @@ export async function commitIntelligenceArtifact(input: {
         summary: input.draft.summary,
         content: input.draft.content,
         source_refs: input.draft.sourceRefs,
+        used_claim_ids: input.draft.usedClaimIds ?? [],
+        used_evidence_ids: input.draft.usedEvidenceIds ?? [],
         recommendations: input.draft.recommendations,
         provenance: input.draft.provenance,
       })
@@ -335,46 +338,6 @@ export async function getAttentionItemForEvent(
     ))
     .limit(1);
   return row ? attentionFromRow(row) : null;
-}
-
-export async function hasProductEventProjection(input: {
-  organizationId: string;
-  eventId: string;
-  projector: string;
-  policyVersion: number;
-}): Promise<boolean> {
-  const scoped = dbFor(input.organizationId);
-  const [row] = await scoped.db
-    .select({ eventId: productEventProjectionsTable.event_id })
-    .from(productEventProjectionsTable)
-    .where(and(
-      eq(productEventProjectionsTable.organization_id, scoped.organizationId),
-      eq(productEventProjectionsTable.event_id, input.eventId),
-      eq(productEventProjectionsTable.projector, input.projector),
-      eq(productEventProjectionsTable.policy_version, input.policyVersion),
-    ))
-    .limit(1);
-  return Boolean(row);
-}
-
-export async function recordProductEventProjection(input: {
-  organizationId: string;
-  eventId: string;
-  projector: string;
-  policyVersion: number;
-  outcome: 'notified' | 'suppressed';
-}): Promise<void> {
-  const scoped = dbFor(input.organizationId);
-  await scoped.db
-    .insert(productEventProjectionsTable)
-    .values({
-      organization_id: scoped.organizationId,
-      event_id: input.eventId,
-      projector: input.projector,
-      policy_version: input.policyVersion,
-      outcome: input.outcome,
-    })
-    .onConflictDoNothing();
 }
 
 async function workspaceMemberIds(organizationId: string): Promise<string[]> {

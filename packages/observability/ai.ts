@@ -4,6 +4,7 @@ import type {
 } from "@mastra/core/observability";
 import type { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
+import { ArizeExporter } from "@mastra/arize";
 import { LangfuseExporter } from "@mastra/langfuse";
 import { Observability } from "@mastra/observability";
 import {
@@ -169,27 +170,50 @@ export function langfuseClientOptions(): { environment: string; release?: string
   };
 }
 
+function phoenixConfigured(): boolean {
+  return Boolean(process.env.PHOENIX_COLLECTOR_ENDPOINT);
+}
+
 export function createLangfuseObservability(serviceName: string): Observability | undefined {
-  if (!langfuseConfigured()) return undefined;
+  if (!langfuseConfigured() && !phoenixConfigured()) return undefined;
   if (!process.env.OBSERVABILITY_ID_HASH_KEY) {
-    throw new Error("OBSERVABILITY_ID_HASH_KEY is required whenever Langfuse is enabled.");
+    throw new Error("OBSERVABILITY_ID_HASH_KEY is required whenever AI tracing is enabled.");
   }
+  // Mastra allows exactly one active config without a configSelector, so the
+  // sinks are mutually exclusive. Self-hosted Phoenix wins when configured:
+  // it is owner-controlled infrastructure and receives FULL trace content
+  // (prompts, completions, tool payloads). Cloud Langfuse remains the
+  // fallback and stays behind the privacy processor — structure and usage
+  // only, never content.
   const observability = new Observability({
-    configs: {
-      langfuse: {
-        serviceName,
-        spanOutputProcessors: [new MastraPrivacyProcessor()],
-        exporters: [
-          new LangfuseExporter({
-            publicKey: process.env.LANGFUSE_PUBLIC_KEY,
-            secretKey: process.env.LANGFUSE_SECRET_KEY,
-            baseUrl: process.env.LANGFUSE_BASE_URL,
-            realtime: process.env.LANGFUSE_REALTIME === "true",
-            options: langfuseClientOptions(),
-          }),
-        ],
+    configs: phoenixConfigured()
+      ? {
+        phoenix: {
+          serviceName,
+          exporters: [
+            new ArizeExporter({
+              endpoint: process.env.PHOENIX_COLLECTOR_ENDPOINT,
+              ...(process.env.PHOENIX_API_KEY ? { apiKey: process.env.PHOENIX_API_KEY } : {}),
+              projectName: serviceName,
+            }),
+          ],
+        },
+      }
+      : {
+        langfuse: {
+          serviceName,
+          spanOutputProcessors: [new MastraPrivacyProcessor()],
+          exporters: [
+            new LangfuseExporter({
+              publicKey: process.env.LANGFUSE_PUBLIC_KEY,
+              secretKey: process.env.LANGFUSE_SECRET_KEY,
+              baseUrl: process.env.LANGFUSE_BASE_URL,
+              realtime: process.env.LANGFUSE_REALTIME === "true",
+              options: langfuseClientOptions(),
+            }),
+          ],
+        },
       },
-    },
   });
   observabilityInstances.add(observability);
   return observability;
@@ -202,7 +226,7 @@ const dynamicAgentHosts = new Map<string, Mastra>();
  * their model generations reach the same privacy-filtered Langfuse project.
  */
 export function registerObservedAgent<T extends Agent>(agent: T, serviceName: string): T {
-  if (!langfuseConfigured()) return agent;
+  if (!langfuseConfigured() && !phoenixConfigured()) return agent;
   let host = dynamicAgentHosts.get(serviceName);
   if (!host) {
     const observability = createLangfuseObservability(serviceName);

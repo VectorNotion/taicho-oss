@@ -81,15 +81,16 @@ export function computeTimingScore(
 }
 
 /**
- * Fit score (spec §4, §8): weighted mean of effective matches × 100.
- * Only dimensions that have a match participate — unresearched dimensions
- * neither help nor hurt.
+ * Fit score (spec §4, §8): weighted mean of evidence-backed effective matches
+ * × 100. Criteria retained as insufficient evidence remain visible but do not
+ * become false mismatches or distort the score derived from known facts.
  */
 export function computeFitScore(matches: DimensionMatch[], dims: DimensionDefinition[]): number {
   const weightByKey = new Map(dims.map((d) => [d.key, d.weight]));
   let weighted = 0;
   let totalWeight = 0;
   for (const m of matches) {
+    if (m.classification === 'insufficient_evidence') continue;
     const weight = weightByKey.get(m.dimensionKey);
     if (weight == null) continue;
     weighted += weight * m.effectiveMatch;

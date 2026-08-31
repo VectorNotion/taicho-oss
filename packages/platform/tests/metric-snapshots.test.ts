@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test, { after } from "node:test";
 import { closeDriver } from "../data/graph";
-import { closeJobPools, getJobAdminPool } from "../jobs/pool";
+import { closeJobPools, getJobAdminPool, getJobPool } from "../jobs/pool";
+import { drainProductEvents, setProductEventSinkForTests } from "../events/emit";
 import {
+  latestAggregateDetail,
   latestAggregates,
   mergeLatestSnapshots,
   recordMetricSnapshot,
@@ -39,7 +41,7 @@ test("recordMetricSnapshot persists an org-scoped, source-tagged snapshot row", 
   assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 
   const row = (
-    await getJobAdminPool().query(
+    await getJobPool(TEST_ORG).query(
       `SELECT organization_id, post_id, draft_id, source, metrics, captured_at
          FROM post_metric_snapshots WHERE id = $1`,
       [id],
@@ -112,29 +114,41 @@ test("latestAggregates reads only the newest snapshot per (post, source)", async
     clicks: 20,
     saves: 3,
   });
+  const detail = await latestAggregateDetail(TEST_ORG, draftId);
+  assert.deepEqual(detail.totals, { impressions: 850, clicks: 20, saves: 3 });
+  assert.deepEqual(detail.sources, ["platform_api", "human"]);
+  assert.ok(detail.lastMeasuredAt instanceof Date);
   assert.deepEqual(await latestAggregates(TEST_ORG, `absent_${randomUUID()}`), {});
+  assert.deepEqual(await latestAggregateDetail(TEST_ORG, `absent_${randomUUID()}`), {
+    totals: {},
+    lastMeasuredAt: null,
+    sources: [],
+  });
 });
 
-test("recordMetricSnapshot emits post.metrics.updated through the event spine", async () => {
+test("recordMetricSnapshot emits public feedback and its internal knowledge projection", async () => {
   const postId = randomUUID();
-  await recordMetricSnapshot({
-    organizationId: TEST_ORG,
-    postId,
-    draftId: "draft-events",
-    source: "plugin",
-    metrics: { clicks: 1 },
+  const events: Array<{ name: string; payload: Record<string, unknown> }> = [];
+  setProductEventSinkForTests(async (event) => {
+    events.push({ name: event.name, payload: event.payload });
+    return { id: randomUUID() };
   });
-  // Emission is fire-and-forget; poll briefly for the ledger row.
-  let row: unknown;
-  for (let attempt = 0; attempt < 20 && !row; attempt += 1) {
-    row = (
-      await getJobAdminPool().query(
-        `SELECT name FROM product_events
-          WHERE organization_id = $1 AND name = 'post.metrics.updated' AND post_id = $2`,
-        [TEST_ORG, postId],
-      )
-    ).rows[0];
-    if (!row) await new Promise((resolve) => setTimeout(resolve, 100));
+  try {
+    await recordMetricSnapshot({
+      organizationId: TEST_ORG,
+      postId,
+      draftId: "draft-events",
+      source: "plugin",
+      metrics: { clicks: 1 },
+    });
+    await drainProductEvents();
+    assert.deepEqual(events.map(({ name }) => name).sort(), [
+      "knowledge.publishing.metrics.recorded",
+      "post.metrics.updated",
+    ]);
+    const knowledge = events.find(({ name }) => name === "knowledge.publishing.metrics.recorded");
+    assert.deepEqual(knowledge?.payload.metrics, { clicks: 1 });
+  } finally {
+    setProductEventSinkForTests(null);
   }
-  assert.ok(row, "post.metrics.updated should land in product_events");
 });

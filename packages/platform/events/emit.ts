@@ -31,6 +31,18 @@ export const PRODUCT_EVENT_NAMES = [
   // Channel-neutral intelligence outputs and outcomes. Delivery remains
   // outside the platform; external orchestrators report what happened here.
   'intelligence.artifact.ready', 'intelligence.artifact.outcome.reported',
+  // Internal durable knowledge outbox. These names are never delivered to
+  // customer webhooks; see events/repository.ts.
+  'knowledge.outreach.transcript.ready',
+  'knowledge.workspace.contact.changed',
+  'knowledge.cascade.funnel.changed', 'knowledge.cascade.member.changed', 'knowledge.cascade.email.changed',
+  'knowledge.intelligence.artifact.ready', 'knowledge.intelligence.outcome.recorded',
+  'knowledge.support.feedback.recorded',
+  'knowledge.resonance.run.completed',
+  'knowledge.publishing.post.changed', 'knowledge.publishing.metrics.recorded',
+  // Internal durable workspace-calendar outbox. The shared calendar and
+  // future provider-sync adapters consume the same normalized change event.
+  'calendar.entry.changed',
 ] as const;
 
 export type ProductEventRefs = {
@@ -49,15 +61,41 @@ export type ProductEventInput = {
   origin?: 'internal' | 'external_connector';
   connectorId?: string;
   externalEventId?: string;
+  /** Stable producer key used to make an acknowledged internal boundary replay-safe. */
+  idempotencyKey?: string;
   payload?: Record<string, unknown>;
   refs?: ProductEventRefs;
 };
+
+export type ProductEventFanout = (
+  organizationId: string,
+  eventName: string,
+  payload: Record<string, unknown>,
+  deliveryId: string,
+) => Promise<unknown>;
 
 declare global {
   // eslint-disable-next-line no-var
   var __platformEventSink: ((event: ProductEventInsert) => Promise<{ id: string }>) | null | undefined;
   // eslint-disable-next-line no-var
   var __platformEventInFlight: Set<Promise<void>> | undefined;
+  // eslint-disable-next-line no-var
+  var __platformEventFanout: ProductEventFanout | undefined;
+}
+
+/**
+ * In-process fast path for event-triggered automations (packages/flow
+ * registers the real fan-out once per process, mirroring the reconciler
+ * registry's inversion). The flow worker's ledger sweep is the delivery
+ * guarantee for processes that never register. Idempotent: registering
+ * again replaces the previous fan-out.
+ */
+export function registerEventFanout(fanout: ProductEventFanout): void {
+  globalThis.__platformEventFanout = fanout;
+}
+
+export function clearEventFanoutForTests(): void {
+  globalThis.__platformEventFanout = undefined;
 }
 
 /** Replace the Postgres insert in unit tests. Pass null to restore. */
@@ -152,6 +190,7 @@ async function deliver(input: ProductEventInput): Promise<{ id: string; created:
     origin,
     connectorId,
     externalEventId,
+    idempotencyKey: input.idempotencyKey ?? null,
     payload,
   };
   const customSink = globalThis.__platformEventSink;
@@ -162,6 +201,17 @@ async function deliver(input: ProductEventInput): Promise<{ id: string; created:
   // policy; events with no human decision simply return null.
   if (!customSink) {
     await projectProductEventToAttention({ ...record, id: stored.id });
+  }
+  const fanout = globalThis.__platformEventFanout;
+  if (fanout) {
+    try {
+      await fanout(input.organizationId, input.name, payload, stored.id);
+    } catch (error) {
+      log.error('product_event.fanout_failed', error, {
+        event_name: input.name,
+        delivery_id: stored.id,
+      });
+    }
   }
   return {
     id: stored.id,

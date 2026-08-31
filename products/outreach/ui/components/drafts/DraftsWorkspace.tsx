@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Check,
@@ -9,12 +9,17 @@ import {
   Linkedin,
   Mail,
   MessageSquare,
+  Pencil,
+  UserPlus,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiMutate } from "@content-automation/platform/network/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -48,7 +53,22 @@ const mediumIcons: Record<
   inmail_traditional: Linkedin,
   email: Mail,
   content_comment: MessageSquare,
+  connection_note: UserPlus,
 };
+
+function statusFromUrl(value: string | null): OutreachStatus | "all" {
+  return value === "draft" || value === "sent" ? value : "all";
+}
+
+function mediumFromUrl(value: string | null): OutreachMedium | "all" {
+  return value === "inmail"
+    || value === "inmail_traditional"
+    || value === "email"
+    || value === "content_comment"
+    || value === "connection_note"
+    ? value
+    : "all";
+}
 
 function formatMoment(value: string) {
   return new Intl.DateTimeFormat("en", {
@@ -60,18 +80,47 @@ function formatMoment(value: string) {
 }
 
 export function DraftsWorkspace({
+  initialFilters = {},
   initialMessages,
 }: {
+  initialFilters?: {
+    medium?: OutreachMedium | "all";
+    search?: string;
+    status?: OutreachStatus | "all";
+  };
   initialMessages: OutreachMessageWithProspect[];
 }) {
   const [messages, setMessages] = useState(initialMessages);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<OutreachStatus | "all">("all");
-  const [medium, setMedium] = useState<OutreachMedium | "all">("all");
+  const [search, setSearch] = useState(initialFilters.search ?? "");
+  const [status, setStatus] = useState<OutreachStatus | "all">(
+    initialFilters.status ?? "all",
+  );
+  const [medium, setMedium] = useState<OutreachMedium | "all">(
+    initialFilters.medium ?? "all",
+  );
   const [busyId, setBusyId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [pendingEdit, setPendingEdit] =
+    useState<OutreachMessageWithProspect | null>(null);
+  const [editSubject, setEditSubject] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const editBusyRef = useRef(false);
   const [pendingDelete, setPendingDelete] =
     useState<OutreachMessageWithProspect | null>(null);
+
+  useEffect(() => {
+    function restoreFilterContext() {
+      const parameters = new URLSearchParams(window.location.search);
+      setSearch(parameters.get("q") ?? "");
+      setStatus(statusFromUrl(parameters.get("status")));
+      setMedium(mediumFromUrl(parameters.get("medium")));
+    }
+
+    restoreFilterContext();
+    window.addEventListener("popstate", restoreFilterContext);
+    return () => window.removeEventListener("popstate", restoreFilterContext);
+  }, []);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -94,6 +143,50 @@ export function DraftsWorkspace({
     ({ message }) => message.status === "draft",
   ).length;
   const filtersActive = Boolean(search) || status !== "all" || medium !== "all";
+
+  function preserveFilterContext(next: {
+    medium: OutreachMedium | "all";
+    search: string;
+    status: OutreachStatus | "all";
+  }) {
+    const parameters = new URLSearchParams(window.location.search);
+    for (const [key, value] of [
+      ["q", next.search],
+      ["status", next.status === "all" ? "" : next.status],
+      ["medium", next.medium === "all" ? "" : next.medium],
+    ] as const) {
+      if (value) parameters.set(key, value);
+      else parameters.delete(key);
+    }
+    const query = parameters.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+  }
+
+  function changeSearch(nextSearch: string) {
+    setSearch(nextSearch);
+    preserveFilterContext({ medium, search: nextSearch, status });
+  }
+
+  function changeStatus(nextStatus: OutreachStatus | "all") {
+    setStatus(nextStatus);
+    preserveFilterContext({ medium, search, status: nextStatus });
+  }
+
+  function changeMedium(nextMedium: OutreachMedium | "all") {
+    setMedium(nextMedium);
+    preserveFilterContext({ medium: nextMedium, search, status });
+  }
+
+  function clearFilters() {
+    setSearch("");
+    setStatus("all");
+    setMedium("all");
+    preserveFilterContext({ medium: "all", search: "", status: "all" });
+  }
 
   async function copyMessage(id: string, content: string) {
     await navigator.clipboard.writeText(content);
@@ -129,6 +222,37 @@ export function DraftsWorkspace({
       toast.error("Could not update the draft. Try again.");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  function openEdit(item: OutreachMessageWithProspect) {
+    setPendingEdit(item);
+    setEditSubject(item.message.subject ?? "");
+    setEditContent(item.message.content);
+  }
+
+  async function saveEdit() {
+    if (!pendingEdit || !editContent.trim() || editBusyRef.current) return;
+    editBusyRef.current = true;
+    setEditBusy(true);
+    try {
+      const { data } = await apiMutate<{ message: OutreachMessageWithProspect["message"] }>(
+        "PATCH",
+        `/outreach/messages/${pendingEdit.message.id}`,
+        { subject: editSubject.trim(), content: editContent.trim() },
+      );
+      setMessages((current) => current.map((entry) => (
+        entry.message.id === data.message.id
+          ? { ...entry, message: data.message }
+          : entry
+      )));
+      setPendingEdit(null);
+      toast.success("Draft changes saved");
+    } catch {
+      toast.error("Could not save the draft. Your edits are still here.");
+    } finally {
+      editBusyRef.current = false;
+      setEditBusy(false);
     }
   }
 
@@ -175,11 +299,7 @@ export function DraftsWorkspace({
               ) : filtersActive ? (
                 <Button
                   className="mt-5"
-                  onClick={() => {
-                    setSearch("");
-                    setStatus("all");
-                    setMedium("all");
-                  }}
+                  onClick={clearFilters}
                   variant="outline"
                 >
                   Clear filters
@@ -192,7 +312,7 @@ export function DraftsWorkspace({
           <>
             <Select
               onValueChange={(value) =>
-                setStatus(value as OutreachStatus | "all")
+                changeStatus(value as OutreachStatus | "all")
               }
               value={status}
             >
@@ -207,7 +327,7 @@ export function DraftsWorkspace({
             </Select>
             <Select
               onValueChange={(value) =>
-                setMedium(value as OutreachMedium | "all")
+                changeMedium(value as OutreachMedium | "all")
               }
               value={medium}
             >
@@ -225,7 +345,7 @@ export function DraftsWorkspace({
             </Select>
           </>
         }
-        onSearchChange={setSearch}
+        onSearchChange={changeSearch}
         searchPlaceholder="Search people or message copy…"
         searchValue={search}
         title="Outreach drafts"
@@ -240,13 +360,9 @@ export function DraftsWorkspace({
               <ListRow
                 actions={[
                   {
-                    disabled: isBusy,
-                    icon: Check,
-                    label:
-                      message.status === "draft"
-                        ? "Mark sent externally"
-                        : "Return to review",
-                    onSelect: () => void toggleStatus(item),
+                    icon: Pencil,
+                    label: `Edit message for ${prospect.name}`,
+                    onSelect: () => openEdit(item),
                   },
                   {
                     icon: copiedId === message.id ? Check : Clipboard,
@@ -254,6 +370,15 @@ export function DraftsWorkspace({
                       copiedId === message.id ? "Copied" : "Copy message",
                     onSelect: () =>
                       void copyMessage(message.id, message.content),
+                  },
+                  {
+                    disabled: isBusy,
+                    icon: Check,
+                    label:
+                      message.status === "draft"
+                        ? "Mark sent externally"
+                        : "Return to review",
+                    onSelect: () => void toggleStatus(item),
                   },
                   {
                     destructive: true,
@@ -299,6 +424,53 @@ export function DraftsWorkspace({
           </ListRows>
         ) : null}
       </ListSurface>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && !editBusy) setPendingEdit(null);
+        }}
+        open={Boolean(pendingEdit)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit outreach draft</DialogTitle>
+            <DialogDescription>
+              Review the subject and message for {pendingEdit?.prospect.name}. Saving changes updates the shared review queue without delivering anything.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="outreach-draft-subject">Subject</Label>
+              <Input
+                disabled={editBusy}
+                id="outreach-draft-subject"
+                maxLength={1_000}
+                onChange={(event) => setEditSubject(event.target.value)}
+                value={editSubject}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="outreach-draft-content">Message</Label>
+              <Textarea
+                disabled={editBusy}
+                id="outreach-draft-content"
+                maxLength={100_000}
+                onChange={(event) => setEditContent(event.target.value)}
+                rows={10}
+                value={editContent}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button disabled={editBusy} onClick={() => setPendingEdit(null)} variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={editBusy || !editContent.trim()} onClick={() => void saveEdit()}>
+              {editBusy ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {

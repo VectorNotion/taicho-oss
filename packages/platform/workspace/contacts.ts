@@ -1,4 +1,8 @@
 import { getSession } from "../data/graph";
+import { currentGraphOrganizationId } from "../data/organization-context";
+import { recordProductEvent } from "../events/emit";
+
+export const WORKSPACE_CONTACT_KNOWLEDGE_EVENT = "knowledge.workspace.contact.changed";
 
 export type WorkspaceContactRole = "outreach" | "nurture";
 export type WorkspaceOutreachSource =
@@ -85,6 +89,18 @@ function contactFromGraph(
   };
 }
 
+async function recordContactKnowledge(contact: WorkspaceContact): Promise<void> {
+  const organizationId = currentGraphOrganizationId();
+  if (!organizationId) return;
+  await recordProductEvent({
+    organizationId,
+    name: WORKSPACE_CONTACT_KNOWLEDGE_EVENT,
+    origin: "internal",
+    idempotencyKey: `${contact.id}:${contact.updatedAt}`,
+    payload: { contact },
+  });
+}
+
 export async function addWorkspaceContactRole(
   id: string,
   role: WorkspaceContactRole,
@@ -127,12 +143,14 @@ export async function addWorkspaceContactRole(
       },
     );
     const record = result.records[0];
-    return record
+    const contact = record
       ? contactFromGraph(
           record.get("contact").properties,
           record.get("labels") as string[],
         )
       : null;
+    if (contact) await recordContactKnowledge(contact);
+    return contact;
   } finally {
     await session.close();
   }
@@ -328,11 +346,13 @@ export async function ensureWorkspaceContact(
       );
       const record = existing.records[0];
       if (record) {
+        const contact = contactFromGraph(
+          record.get("contact").properties,
+          record.get("labels") as string[],
+        );
+        await recordContactKnowledge(contact);
         return {
-          contact: contactFromGraph(
-            record.get("contact").properties,
-            record.get("labels") as string[],
-          ),
+          contact,
           created: false,
         };
       }
@@ -370,11 +390,13 @@ export async function ensureWorkspaceContact(
       },
     );
     const record = created.records[0];
+    const contact = contactFromGraph(
+      record.get("contact").properties,
+      record.get("labels") as string[],
+    );
+    await recordContactKnowledge(contact);
     return {
-      contact: contactFromGraph(
-        record.get("contact").properties,
-        record.get("labels") as string[],
-      ),
+      contact,
       created: true,
     };
   } finally {
@@ -422,12 +444,14 @@ export async function updateWorkspaceContact(
       values,
     );
     const record = result.records[0];
-    return record
+    const contact = record
       ? contactFromGraph(
           record.get("contact").properties,
           record.get("labels") as string[],
         )
       : null;
+    if (contact) await recordContactKnowledge(contact);
+    return contact;
   } finally {
     await session.close();
   }

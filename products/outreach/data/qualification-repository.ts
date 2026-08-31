@@ -7,6 +7,7 @@ import type {
   ResearchRunRecord,
   TimingDimensionBreakdown,
   TimingSignal,
+  ResearchSourceDocument,
 } from "../domain/qualification";
 
 /**
@@ -59,9 +60,12 @@ function mapObservation(props: Record<string, unknown>): ObservationRecord {
         ? parseJson<TimingSignal[]>(props.signalsJson, [])
         : undefined,
     evidence: parseJson<string[]>(props.evidenceJson, []),
+    sourceDocuments: parseJson<ResearchSourceDocument[]>(props.sourceDocumentsJson, []),
     confidence: toNumber(props.confidence),
     researchedAt: props.researchedAt as string,
     runId: props.runId as string,
+    claimIds: parseJson<string[]>(props.claimIdsJson, []),
+    evidenceIds: parseJson<string[]>(props.knowledgeEvidenceIdsJson, []),
   };
 }
 
@@ -96,9 +100,12 @@ export async function upsertObservation(
         observedValue: $observedValue,
         signalsJson: $signalsJson,
         evidenceJson: $evidenceJson,
+        sourceDocumentsJson: $sourceDocumentsJson,
         confidence: $confidence,
         researchedAt: $researchedAt,
         runId: $runId,
+        claimIdsJson: $claimIdsJson,
+        knowledgeEvidenceIdsJson: $knowledgeEvidenceIdsJson,
         contextKey: $contextKey
       })
       CREATE (e)-[:HAS_OBSERVATION]->(o)
@@ -111,9 +118,12 @@ export async function upsertObservation(
         observedValue: obs.observedValue ?? null,
         signalsJson: obs.signals ? JSON.stringify(obs.signals) : null,
         evidenceJson: JSON.stringify(obs.evidence),
+        sourceDocumentsJson: JSON.stringify(obs.sourceDocuments ?? []),
         confidence: obs.confidence,
         researchedAt: obs.researchedAt,
         runId: obs.runId,
+        claimIdsJson: JSON.stringify(obs.claimIds ?? []),
+        knowledgeEvidenceIdsJson: JSON.stringify(obs.evidenceIds ?? []),
         contextKey: contextKey(entity.catalogItemId),
       }
     );
@@ -121,6 +131,45 @@ export async function upsertObservation(
       throw new Error(`${label} not found: ${entity.id}`);
     }
     return mapObservation(result.records[0].get("o").properties);
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Attach optional graph lineage after the observation itself is durable. Graph
+ * enrichment is deliberately downstream from research persistence, so a graph
+ * failure can never erase otherwise useful research.
+ */
+export async function updateObservationLineage(
+  entity: EntityRef,
+  input: {
+    dimensionKey: string;
+    runId: string;
+    claimIds: string[];
+    evidenceIds: string[];
+  },
+): Promise<void> {
+  const { label, obsLabel } = entityMatch(entity);
+  const session = await getSession();
+  try {
+    await session.run(
+      `MATCH (e:${label} {id: $entityId})-[:HAS_OBSERVATION]->(o:${obsLabel} {
+         dimensionKey: $dimensionKey,
+         runId: $runId
+       })
+       WHERE coalesce(o.contextKey, 'workspace') = $contextKey
+       SET o.claimIdsJson = $claimIdsJson,
+           o.knowledgeEvidenceIdsJson = $knowledgeEvidenceIdsJson`,
+      {
+        entityId: entity.id,
+        dimensionKey: input.dimensionKey,
+        runId: input.runId,
+        contextKey: contextKey(entity.catalogItemId),
+        claimIdsJson: JSON.stringify(input.claimIds),
+        knowledgeEvidenceIdsJson: JSON.stringify(input.evidenceIds),
+      },
+    );
   } finally {
     await session.close();
   }
@@ -169,6 +218,8 @@ export async function saveMatches(entity: EntityRef, matches: DimensionMatch[]):
           classification: $classification,
           hardExclusion: $hardExclusion,
           confidence: $confidence,
+          supportingClaimIdsJson: $supportingClaimIdsJson,
+          contradictingClaimIdsJson: $contradictingClaimIdsJson,
           evaluatedAt: localdatetime(),
           contextKey: $contextKey
         })
@@ -182,6 +233,8 @@ export async function saveMatches(entity: EntityRef, matches: DimensionMatch[]):
           classification: m.classification,
           hardExclusion: m.hardExclusion,
           confidence: m.confidence,
+          supportingClaimIdsJson: JSON.stringify(m.supportingClaimIds ?? []),
+          contradictingClaimIdsJson: JSON.stringify(m.contradictingClaimIds ?? []),
           contextKey: contextKey(entity.catalogItemId),
         }
       );
@@ -205,6 +258,8 @@ export async function getMatches(entity: EntityRef): Promise<DimensionMatch[]> {
     );
     return result.records.map((record) => {
       const props = record.get("m").properties as Record<string, unknown>;
+      const supportingClaimIds = parseJson<string[]>(props.supportingClaimIdsJson, []);
+      const contradictingClaimIds = parseJson<string[]>(props.contradictingClaimIdsJson, []);
       return {
         dimensionKey: props.dimensionKey as string,
         matchScore: toNumber(props.matchScore),
@@ -212,6 +267,8 @@ export async function getMatches(entity: EntityRef): Promise<DimensionMatch[]> {
         classification: props.classification as DimensionMatch["classification"],
         hardExclusion: props.hardExclusion as boolean,
         confidence: toNumber(props.confidence),
+        ...(supportingClaimIds.length > 0 ? { supportingClaimIds } : {}),
+        ...(contradictingClaimIds.length > 0 ? { contradictingClaimIds } : {}),
       } satisfies DimensionMatch;
     });
   } finally {

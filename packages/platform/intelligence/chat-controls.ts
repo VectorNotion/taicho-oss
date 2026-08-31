@@ -1,4 +1,3 @@
-import type { ModelSelectionKey } from '../models/catalog';
 import { z } from 'zod';
 
 export type ChatSource = 'auto' | 'workspace' | 'brain' | 'web' | 'funnels';
@@ -14,7 +13,6 @@ export interface ChatContactTarget {
 
 export interface ChatControls {
   contexts: ChatContext[];
-  model: ModelSelectionKey;
   source: ChatSource;
   depth: ChatDepth;
   permission: ChatPermission;
@@ -30,7 +28,6 @@ export interface ChatControlAvailability {
 
 export const DEFAULT_CHAT_CONTROLS: ChatControls = {
   contexts: [],
-  model: 'auto',
   source: 'auto',
   depth: 'balanced',
   permission: 'ask',
@@ -43,11 +40,13 @@ export const chatContactTargetSchema: z.ZodType<ChatContactTarget> = z.object({
   detail: z.string().max(2_000).optional(),
 });
 
-export const chatControlsSchema: z.ZodType<ChatControls> = z.object({
+export const chatControlsSchema = z.object({
   contexts: z.array(z.enum(['Projects', 'Topics'])).max(2).default([]),
-  model: z.string().trim().min(1).max(128).regex(/^[a-z0-9][a-z0-9_-]*$/).default('auto'),
+  // One-release compatibility window: old clients may still send a model
+  // control. It is accepted at the boundary and deliberately discarded.
+  model: z.unknown().optional(),
   source: z.enum(['auto', 'workspace', 'brain', 'web', 'funnels']).default('auto'),
   depth: z.enum(['quick', 'balanced', 'deep']).default('balanced'),
   permission: z.enum(['read-only', 'ask', 'workspace-edits', 'allow-all']).default('ask'),
   contact: chatContactTargetSchema.nullable().default(null),
-});
+}).transform(({ model: _legacyModel, ...controls }): ChatControls => controls);

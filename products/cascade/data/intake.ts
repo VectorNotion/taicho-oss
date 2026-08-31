@@ -32,7 +32,10 @@ export async function importWorkspaceContact(
     set: {
       workspace_contact_id: sql`excluded.workspace_contact_id`,
       outreach_prospect_id: sql`excluded.outreach_prospect_id`,
-      attributes: sql`${contactsTable.attributes} || excluded.attributes`,
+      // Product handoffs may refresh descriptive fields, but the first known
+      // relationship source is identity history and must not be overwritten
+      // by a later duplicate add through another surface.
+      attributes: sql`${contactsTable.attributes} || excluded.attributes || case when ${contactsTable.attributes} ? 'source' then jsonb_build_object('source', ${contactsTable.attributes}->'source') else '{}'::jsonb end`,
       timezone: sql`coalesce(excluded.timezone, ${contactsTable.timezone})`,
     },
   }).returning();

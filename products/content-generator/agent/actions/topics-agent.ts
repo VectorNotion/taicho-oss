@@ -8,7 +8,7 @@
  *
  * The formatted entities and existing-topic-name list are dynamic per call, so
  * they are injected into the system instructions and the agent is instantiated
- * per call (model resolved at call time from MODEL_NAME).
+ * per call using the release-owned language runtime.
  */
 import { Agent } from '@mastra/core/agent';
 import { registerObservedAgent } from '@content-automation/observability/ai';
@@ -55,25 +55,22 @@ export function buildTopicExtractionInstructions(
   entitiesFormatted: string,
   existingTopicNames: string
 ): string {
-  return `You are analyzing project entities to identify content topics.
+  return `You are analyzing accepted, evidence-backed knowledge to identify content topics.
 
-These entities were extracted from projects in our knowledge graph. Entities are ordered by
-how many projects use them (project_count). Higher count = more universally relevant topic.
+These entities and roles come from the compiled module registry, primarily from
+research claims, and may also include project context. Higher support counts
+mean more independently useful topic evidence; do not assume a fixed list of
+entity types.
 
-Entity Types:
-- AIComponent: AI/ML patterns and architectures (STRONG topic candidates)
-- Feature: Specific capabilities (STRONG topic candidates)
-- BusinessValue: Business outcomes and benefits (can inform topic angles)
-
-Entities (ordered by project usage, with weighted scores):
+Knowledge entities (ordered by evidence support):
 ${entitiesFormatted}
 
 Existing Topics (DO NOT recreate these - they already exist):
 ${existingTopicNames}
 
 Generate 5-15 content topics based on these entities:
-1. AIComponent and Feature entities are your primary topic sources
-2. BusinessValue entities can inform the angle or benefit of a topic
+1. Prefer entities with strong accepted-claim support and clear relevance
+2. Treat every bracketed entity type as a registry-defined role, including roles added by future modules
 3. You can COMBINE related entities into a single topic (e.g., "Real-time processing" + "Audio transcription" → "real-time-transcription")
 4. Topic should be specific enough for focused content but general enough for multiple pieces
 5. Include source_entities to track which entities informed each topic

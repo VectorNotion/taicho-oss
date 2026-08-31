@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -8,13 +8,14 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import { AlertCircle, Plus, Trash2, Loader2, Pencil } from "lucide-react";
 import type { ProspectNote } from "@/products/outreach/domain/types";
 
 interface ProspectNotesProps {
   notes: ProspectNote[];
   isLoading?: boolean;
   onAddNote: (content: string) => Promise<void>;
+  onUpdateNote: (noteId: string, content: string, expectedRevision: number) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
 }
 
@@ -50,10 +51,15 @@ function stripHtml(html: string): string {
   return text.trim();
 }
 
+function authorLabel(actor?: string): string {
+  return actor ? "Workspace member" : "System";
+}
+
 export function ProspectNotes({
   notes,
   isLoading = false,
   onAddNote,
+  onUpdateNote,
   onDeleteNote,
 }: ProspectNotesProps) {
   const [isAdding, setIsAdding] = useState(false);
@@ -61,6 +67,17 @@ export function ProspectNotes({
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingNote, setEditingNote] = useState<ProspectNote | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  useEffect(() => {
+    if (!editingNote) return;
+    const latest = notes.find((note) => note.id === editingNote.id);
+    if (!latest || latest.revision === editingNote.revision) return;
+    setEditingNote((current) => current?.id === latest.id ? latest : current);
+  }, [editingNote, notes]);
 
   const handleSaveNote = async () => {
     if (!newNoteContent.trim()) return;
@@ -91,11 +108,41 @@ export function ProspectNotes({
     }
   };
 
+  const startEditing = (note: ProspectNote) => {
+    setEditingNote(note);
+    setEditContent(note.content);
+    setEditError(null);
+    setIsAdding(false);
+    setNewNoteContent("");
+  };
+
+  const cancelEditing = () => {
+    setEditingNote(null);
+    setEditContent("");
+    setEditError(null);
+  };
+
+  const handleUpdateNote = async () => {
+    if (!editingNote || !editContent.trim()) return;
+    setIsUpdating(true);
+    setEditError(null);
+    try {
+      await onUpdateNote(editingNote.id, editContent, editingNote.revision);
+      cancelEditing();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not update the note — try again";
+      setEditError(message);
+      toast.error(message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return (
     <>
       <ListCard
         actions={
-          !isAdding ? (
+          !isAdding && !editingNote ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -142,6 +189,31 @@ export function ProspectNotes({
           </div>
         )}
 
+        {editingNote && (
+          <div className="space-y-3 border-b p-4">
+            <p className="text-sm font-medium">Edit note</p>
+            <RichTextEditor
+              content={editContent}
+              onChange={setEditContent}
+              placeholder="Update this note..."
+              minHeight="80px"
+            />
+            {editError && (
+              <div className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
+                <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                <p>{editError}</p>
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button onClick={cancelEditing} size="sm" variant="outline">Cancel</Button>
+              <Button disabled={!editContent.trim() || isUpdating} onClick={handleUpdateNote} size="sm">
+                {isUpdating && <Loader2 className="mr-1 size-3 animate-spin" />}
+                Save changes
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Loading State */}
         {isLoading && (
           <div className="divide-y">
@@ -169,6 +241,11 @@ export function ProspectNotes({
               <ListRow
                 actions={[
                   {
+                    icon: Pencil,
+                    label: "Edit note",
+                    onSelect: () => startEditing(note),
+                  },
+                  {
                     destructive: true,
                     disabled: deletingId === note.id,
                     icon: deletingId === note.id ? Loader2 : Trash2,
@@ -176,10 +253,13 @@ export function ProspectNotes({
                     onSelect: () => setConfirmDeleteId(note.id),
                   },
                 ]}
-                className="scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30"
+                className="scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30 data-[prospect-source-target=true]:bg-primary/10 data-[prospect-source-target=true]:ring-2 data-[prospect-source-target=true]:ring-inset data-[prospect-source-target=true]:ring-primary/30"
                 id={`note-${note.id}`}
                 key={note.id}
-                meta={[formatDate(note.createdAt)]}
+                meta={[
+                  `${note.revision > 1 ? "Edited" : "Added"} by ${authorLabel(note.updatedBy ?? note.createdBy)}`,
+                  formatDate(note.updatedAt ?? note.createdAt),
+                ]}
                 title={stripHtml(note.content)}
               />
             ))}

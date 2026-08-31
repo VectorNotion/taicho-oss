@@ -1,5 +1,10 @@
 # Business-critical E2E coverage report
 
+> Historical snapshot only. Current manual browser scripts, immutable execution
+> records, freshness, outcomes, and generated scores live in
+> `tests/browser-qa/`. This document must not be used as the current coverage
+> gate.
+
 **Project:** Taicho / content-automation
 
 **Assessment date:** 26 July 2026

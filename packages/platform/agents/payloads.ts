@@ -30,10 +30,11 @@ export interface ActionPayloads {
   extract_topics: Record<string, never>;
   refine_content_idea: { idea_id: string };
   generate_content_ideas: { count: number };
-  generate_content_draft: { idea_id: string; content_type: string };
+  generate_content_draft: { idea_id: string; content_type: string; media_asset_ids: string[] };
   research_account: { account_id: string };
   research_prospect: { prospect_id: string };
   qualify_prospect: { prospect_id: string };
+  refresh_prospect_insights: { prospect_id: string };
   schedule_post: SchedulePostPayload;
   add_to_funnel: AddToFunnelPayload;
   generate_outreach: GenerateOutreachPayload;

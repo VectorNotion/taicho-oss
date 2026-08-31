@@ -29,8 +29,8 @@ No merge tags are interpreted. HTML-like text remains text.
 
 - `/cascade` lists funnels.
 - `/cascade/funnels/:id` manages people and named text emails.
-- `/api/cascade/funnels/*` is the authenticated UI API.
-- `/api/v1/cascade/*` and MCP expose equivalent CRUD for automation.
+- `/api/v1/cascade/*` (capability registry, `packages/capabilities/catalog-cascade.ts`)
+  and MCP expose the same CRUD to the UI and to automation.
 
 Run `pnpm db:migrate`, `pnpm cascade:seed`, and `pnpm test:cascade` from the
 repository root. There is no Cascade worker command or service.

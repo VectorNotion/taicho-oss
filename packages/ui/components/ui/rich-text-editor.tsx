@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useEditor, EditorContent, Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -175,6 +176,14 @@ export function RichTextEditor({
       },
     },
   });
+
+  useEffect(() => {
+    if (!editor) return;
+    const next = format === "markdown" && content ? markdownToHtml(content) : content;
+    const current = editor.getHTML();
+    const normalizedNext = next || "<p></p>";
+    if (current !== normalizedNext) editor.commands.setContent(next, { emitUpdate: false });
+  }, [content, editor, format]);
 
   return (
     <div

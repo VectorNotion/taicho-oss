@@ -9,6 +9,7 @@ import type {
  * Map Neo4j record to Persona type
  */
 function mapRecordToPersona(record: Record<string, unknown>): Persona {
+  const revision = record.revision as { toNumber?: () => number } | number | undefined;
   return {
     id: record.id as string,
     name: record.name as string,
@@ -20,6 +21,7 @@ function mapRecordToPersona(record: Record<string, unknown>): Persona {
     targetDomains: record.targetDomains as string[] | undefined,
     signals: record.signals as string[],
     isActive: record.isActive as boolean,
+    revision: typeof revision === "object" && revision?.toNumber ? revision.toNumber() : Number(revision ?? 1),
     createdAt: record.createdAt?.toString() || new Date().toISOString(),
     updatedAt: record.updatedAt?.toString(),
   };
@@ -68,10 +70,31 @@ export async function getPersonaById(id: string): Promise<Persona | null> {
   }
 }
 
+export async function getPersonaByName(name: string): Promise<Persona | null> {
+  const session = await getSession();
+
+  try {
+    const result = await session.run(
+      `MATCH (p:Persona)
+       WHERE toLower(p.name) = toLower($name)
+       RETURN p
+       ORDER BY p.createdAt
+       LIMIT 1`,
+      { name: name.trim() },
+    );
+    return result.records[0]
+      ? mapRecordToPersona(result.records[0].get("p").properties)
+      : null;
+  } finally {
+    await session.close();
+  }
+}
+
 /**
  * Create a new persona
  */
-export async function createPersona(data: CreatePersonaInput): Promise<Persona> {
+export async function createPersona(data: CreatePersonaInput): Promise<Persona | null> {
+  if (await getPersonaByName(data.name)) return null;
   const session = await getSession();
 
   try {
@@ -88,6 +111,7 @@ export async function createPersona(data: CreatePersonaInput): Promise<Persona> 
         targetDomains: $targetDomains,
         signals: $signals,
         isActive: $isActive,
+        revision: 1,
         createdAt: localdatetime(),
         updatedAt: localdatetime()
       })
@@ -106,7 +130,9 @@ export async function createPersona(data: CreatePersonaInput): Promise<Persona> 
       }
     );
 
-    return mapRecordToPersona(result.records[0].get("p").properties);
+    return result.records[0]
+      ? mapRecordToPersona(result.records[0].get("p").properties)
+      : null;
   } finally {
     await session.close();
   }
@@ -123,8 +149,11 @@ export async function updatePersona(
 
   try {
     // Build SET clause dynamically
-    const setClauses: string[] = ["p.updatedAt = localdatetime()"];
-    const params: Record<string, unknown> = { id };
+    const setClauses: string[] = ["p.updatedAt = localdatetime()", "p.revision = coalesce(p.revision, 1) + 1"];
+    const params: Record<string, unknown> = {
+      id,
+      expectedRevision: data.expectedRevision ?? null,
+    };
 
     if (data.name !== undefined) {
       setClauses.push("p.name = $name");
@@ -166,6 +195,7 @@ export async function updatePersona(
     const result = await session.run(
       `
       MATCH (p:Persona {id: $id})
+      WHERE $expectedRevision IS NULL OR coalesce(p.revision, 1) = $expectedRevision
       SET ${setClauses.join(", ")}
       RETURN p
       `,
@@ -177,6 +207,22 @@ export async function updatePersona(
     }
 
     return mapRecordToPersona(result.records[0].get("p").properties);
+  } finally {
+    await session.close();
+  }
+}
+
+export async function isPersonaReferenced(id: string): Promise<boolean> {
+  const session = await getSession();
+
+  try {
+    const result = await session.run(
+      `MATCH (q:LegacyQualification {matchedPersonaId: $id})
+       RETURN count(q) AS references`,
+      { id },
+    );
+    const count = result.records[0]?.get("references");
+    return typeof count?.toNumber === "function" ? count.toNumber() > 0 : Number(count ?? 0) > 0;
   } finally {
     await session.close();
   }

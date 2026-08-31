@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpenText, Bot, ChartLine, Component, Newspaper, Palette, Shapes, TextCursorInput } from "lucide-react";
+import { BookOpenText, Bot, ChartLine, Component, Newspaper, Palette, Shapes, TextCursorInput, Workflow } from "lucide-react";
 
 const items = [
   { href: "/", label: "Foundations", icon: Palette, exact: true },
+  { href: "/funnel", label: "Funnel canvas", icon: Workflow },
   { href: "/components", label: "Components", icon: Component },
   { href: "/patterns", label: "Patterns", icon: Shapes },
   { href: "/forms", label: "Forms", icon: TextCursorInput },

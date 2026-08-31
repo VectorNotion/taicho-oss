@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import {
   databaseFor,
   execution_eventInObservability as executionEventTable,
+  runtimePoolConfig,
 } from "@content-automation/database";
 import { lt, sql } from "drizzle-orm";
 import {
@@ -35,11 +36,7 @@ export function executionLedgerEnabled(): boolean {
 function databasePool(): Pool {
   if (!pool) {
     pool = new Pool({
-      host: process.env.POSTGRES_HOST ?? "localhost",
-      port: Number(process.env.POSTGRES_PORT ?? 5432),
-      database: process.env.POSTGRES_DB ?? "langgraph",
-      user: process.env.POSTGRES_USER ?? "postgres",
-      password: process.env.POSTGRES_PASSWORD ?? "postgres",
+      ...runtimePoolConfig(),
       max: 4,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 2_000,

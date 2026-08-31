@@ -1,23 +1,20 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Building2, ExternalLink, Search } from "lucide-react";
+import { ArrowLeft, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { ApiError, apiGet } from "@content-automation/platform/network/api-client";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ListCard } from "@/components/ListCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScoreTile } from "@/components/genui";
 import { PageHeader } from "@/components/PageHeader";
-import { icpBand, timingBand } from "@/lib/score-bands";
 import { AccountProspectsSection } from "@/components/prospects/AccountProspectsSection";
 import {
   DetailNavigation,
   type DetailNavigationData,
 } from "@/components/prospects";
-import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
-import { ResearchProgressPanel } from "@/products/outreach/ui/components/research/ResearchProgressPanel";
+import { AccountResearchInsights } from "@/products/outreach/ui/components/prospects/AccountResearchInsights";
+import { useDurableDimensionResearch } from "@/products/outreach/ui/components/research/useDurableDimensionResearch";
 import { AccountOpportunitiesCard } from "@/products/outreach/ui/components/accounts/AccountOpportunitiesCard";
 import type { AccountOpportunityCoverageResult } from "@/products/outreach/domain/account-opportunity";
 
@@ -73,103 +70,6 @@ type AccountDetail = {
   opportunityCoverage: AccountOpportunityCoverageResult;
 };
 
-function formatDimensionKey(key: string): string {
-  return key.replaceAll("_", " ");
-}
-
-function hostname(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "source";
-  }
-}
-
-function EvidenceLinks({ urls }: { urls: string[] }) {
-  const unique = [...new Set(urls)].filter(Boolean).slice(0, 4);
-  if (unique.length === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-2">
-      {unique.map((url) => (
-        <a
-          key={url}
-          className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:text-primary"
-          href={url}
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          <ExternalLink className="size-3" />
-          {hostname(url)}
-        </a>
-      ))}
-    </div>
-  );
-}
-
-function ObservationBlock({ observation }: { observation: AccountObservation }) {
-  const percent = Math.round((observation.effectiveMatch ?? 0) * 100);
-  const excluded = Boolean(observation.hardExclusion);
-  return (
-    <div className="space-y-2 rounded-lg border p-3">
-      <div className="flex items-center gap-1.5">
-        <span className="text-sm font-medium capitalize">{formatDimensionKey(observation.dimensionKey)}</span>
-        {excluded && <AlertTriangle className="size-3.5 text-destructive" />}
-      </div>
-      {observation.observedValue ? (
-        <p className="text-sm leading-6 text-muted-foreground">{observation.observedValue}</p>
-      ) : (
-        <p className="text-sm text-muted-foreground">No observation recorded.</p>
-      )}
-      <EvidenceLinks urls={observation.evidence} />
-      <div className="space-y-1">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-muted-foreground">Match</span>
-          <span className="font-medium tabular-nums">{percent}%</span>
-        </div>
-        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className={`h-full transition-all duration-500 ${excluded ? "bg-destructive" : "bg-chart-2"}`}
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TimingSignalBlock({ entry }: { entry: AccountTimingSignals }) {
-  const percent = Math.round((entry.dimensionValue ?? 0) * 100);
-  return (
-    <div className="space-y-2 rounded-lg border p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium capitalize">{formatDimensionKey(entry.dimensionKey)}</span>
-        <span className="text-xs tabular-nums text-muted-foreground">
-          {entry.signalCount} {entry.signalCount === 1 ? "signal" : "signals"}
-        </span>
-      </div>
-      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full bg-chart-1 transition-all duration-500"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-      {entry.signals.length > 0 && (
-        <ul className="space-y-2 pt-1">
-          {entry.signals.map((signal, index) => (
-            <li key={index} className="space-y-1">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-sm text-muted-foreground">{signal.signal}</span>
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{signal.date}</span>
-              </div>
-              <EvidenceLinks urls={signal.evidence} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function AccountDetailSkeleton() {
   return (
     <div className="w-full min-w-0 space-y-8">
@@ -194,19 +94,28 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   const [navigation, setNavigation] = useState<DetailNavigationData | null>(null);
   const [navigationLoading, setNavigationLoading] = useState(true);
   const [navigationError, setNavigationError] = useState(false);
-  const research = useDimensionResearch(
-    `/outreach/accounts/${id}/research`,
-    { primaryScope: "account" },
-  );
+  const researchWasActive = useRef(false);
+  const research = useDurableDimensionResearch({
+    action: "research_account",
+    entityId: id,
+    startApi: "/outreach/operations/account-research",
+    body: { accountId: id },
+    primaryScope: "account",
+  });
 
   const loadAccount = useCallback(
-    async (options?: { silent?: boolean }) => {
+    async (options?: { silent?: boolean; signal?: AbortSignal }) => {
       if (!options?.silent) setLoading(true);
       setNotFound(false);
       try {
-        const { account: loaded } = await apiGet<{ account: AccountDetail }>(`/outreach/accounts/${id}`);
-        setAccount(loaded);
+        const { account: loaded } = await apiGet<{ account: AccountDetail }>(
+          `/outreach/accounts/${id}`,
+          undefined,
+          { signal: options?.signal },
+        );
+        if (!options?.signal?.aborted) setAccount(loaded);
       } catch (error) {
+        if (options?.signal?.aborted) return;
         if (error instanceof ApiError && error.status === 404) {
           setNotFound(true);
           return;
@@ -214,14 +123,16 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
         console.error("Error fetching account:", error);
         toast.error("Could not load this account — refresh to try again.");
       } finally {
-        if (!options?.silent) setLoading(false);
+        if (!options?.silent && !options?.signal?.aborted) setLoading(false);
       }
     },
     [id],
   );
 
   useEffect(() => {
-    void loadAccount();
+    const controller = new AbortController();
+    void loadAccount({ signal: controller.signal });
+    return () => controller.abort();
   }, [loadAccount]);
 
   useEffect(() => {
@@ -229,12 +140,20 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     setNavigationLoading(true);
     setNavigationError(false);
     setNavigation(null);
-    void apiGet<{ navigation: DetailNavigationData }>(`/outreach/accounts/${id}/navigation`)
+    void apiGet<{ navigation: DetailNavigationData }>(
+      `/outreach/accounts/${id}/navigation`,
+      undefined,
+      { signal: controller.signal },
+    )
       .then(({ navigation: data }) => {
         if (!controller.signal.aborted) setNavigation(data);
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
+          if (error instanceof ApiError && error.status === 404) {
+            setNavigationError(false);
+            return;
+          }
           console.error("Error fetching account navigation:", error);
           setNavigationError(true);
         }
@@ -246,9 +165,16 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   }, [id]);
 
   useEffect(() => {
+    if (research.isStreaming) researchWasActive.current = true;
+  }, [research.isStreaming]);
+
+  useEffect(() => {
     if (!research.final) return;
-    if (account) toast.success(`Research complete for ${account.name}`);
-    void loadAccount({ silent: true });
+    const controller = new AbortController();
+    if (researchWasActive.current && account) toast.success(`Research complete for ${account.name}`);
+    researchWasActive.current = false;
+    void loadAccount({ silent: true, signal: controller.signal });
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [research.final]);
 
@@ -272,13 +198,6 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const qualifiedCount = account.prospects.filter((p) => p.qualificationStatus === "QUALIFIED").length;
-  const backgroundResearch = research.backgroundTargets
-    .filter((target) => target.scope === "person")
-    .map((target) => ({
-      id: target.entityId,
-      name: account.prospects.find((prospect) => prospect.id === target.entityId)?.name ?? "A prospect",
-    }));
-  const showResearchProgress = research.isStreaming || Boolean(research.error);
   return (
     <div className="w-full min-w-0 space-y-8">
       <div>
@@ -296,50 +215,35 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
           navigation={navigation}
         />
         <PageHeader
-          actions={
-            <Button disabled={research.isStreaming} onClick={() => research.start()}>
-              <Search className="size-4" /> Research account
-            </Button>
-          }
           description="Company fit and buying-window timing. Fit gates. Timing ranks."
           title={account.name}
         />
       </div>
 
-      {showResearchProgress ? (
-        <ResearchProgressPanel
-          backgroundItems={backgroundResearch}
-          error={research.error}
-          groups={[
-            {
-              id: "account",
-              entityName: account.name,
-              kind: "account",
-              label: "Company research",
+      <ListCard
+        description="What research found about this company, with evidence behind each score."
+        title="Research insights"
+      >
+        <div className="p-6">
+          <AccountResearchInsights
+            account={account}
+            accountLoading={false}
+            execution={{
+              completedAt: research.completedAt,
               dimensions: research.dimensions,
-              pendingLabel: "Loading the ICP fit and timing criteria for this account.",
-            },
-          ]}
-          isComplete={research.isComplete}
-          isStreaming={research.isStreaming}
-        />
-      ) : null}
+              error: research.error,
+              isRetrying: research.isRetrying,
+              isRunning: research.isStreaming,
+              onRetry: () => void research.retry(),
+              progress: research.progress,
+              startedAt: research.startedAt,
+              telemetry: research.telemetry,
+            }}
+            onResearch={() => void research.start()}
+          />
+        </div>
+      </ListCard>
 
-      {/* Two self-explanatory score tiles: value out of 100, a qualitative band, and what it measures. */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <ScoreTile
-          band={icpBand(account.icpScore, account.hardExcluded)}
-          explanation={`How closely ${account.name} matches your Ideal Customer Profile, 0–100. Fit gates qualification — 70+ makes it a target account.`}
-          label="ICP fit"
-          score={account.icpScore}
-        />
-        <ScoreTile
-          band={timingBand(account.timingScore)}
-          explanation={`How active ${account.name}'s buying-window signals are right now, 0–100. Decays with time. Timing ranks the pool; it never gates.`}
-          label="Timing"
-          score={account.timingScore}
-        />
-      </div>
       {(account.reviewReason || account.prospects.length > 0) && (
         <p className="-mt-4 text-xs text-muted-foreground">
           {account.prospects.length > 0 && (
@@ -350,41 +254,6 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
       )}
 
       <AccountOpportunitiesCard result={account.opportunityCoverage} />
-
-      {/* Research findings — two balanced columns of similar height. */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Company fit</CardTitle>
-            <CardDescription>What research found for each ICP dimension, and how well it matches your ideal.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {account.icpObservations.length > 0 ? (
-              account.icpObservations.map((observation) => (
-                <ObservationBlock key={observation.dimensionKey} observation={observation} />
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">Not researched yet — run Research account.</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Timing signals</CardTitle>
-            <CardDescription>Dated buying-window signals, decayed by recency.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {account.timingSignals.length > 0 ? (
-              account.timingSignals.map((entry) => (
-                <TimingSignalBlock key={entry.dimensionKey} entry={entry} />
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">No timing signals found yet.</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
 
       <AccountProspectsSection
         accountId={account.id}

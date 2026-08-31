@@ -161,6 +161,7 @@ export async function getProspectDossier(
       isStale: qualificationIsStale(
         qualification?.computedAt,
         [personScore?.computedAt, accountScore?.computedAt],
+        dimensions.map((dimension) => dimension.updatedAt ?? dimension.createdAt),
       ),
       icpMatches: accountMatches,
       personaMatches: personMatches,

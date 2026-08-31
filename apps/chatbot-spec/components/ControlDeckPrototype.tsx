@@ -714,7 +714,6 @@ function ComposerDeck({
 
         <InputGroupTextarea
           aria-label="Ask Taicho"
-          autoFocus
           className="max-h-72 min-h-32 px-4 py-4 text-base"
           disabled={running}
           onChange={(event) => onPromptChange(event.target.value)}
@@ -809,7 +808,7 @@ function StarterCards({ onSelect }: { onSelect: (prompt: string) => void }) {
 
 function UserRequest({ prompt }: { prompt: string }) {
   return (
-    <div className="ml-auto max-w-[85%] rounded-2xl bg-muted px-4 py-2.5 text-sm leading-6">
+    <div className="ml-auto max-w-[85%] rounded-2xl bg-muted px-4 py-2.5 text-sm leading-6" data-component="CHAT-03 User Request">
       {prompt}
     </div>
   );

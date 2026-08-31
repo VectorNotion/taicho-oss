@@ -173,8 +173,26 @@ export function qualificationNarrative(input: {
 export function qualificationIsStale(
   qualificationComputedAt: string | null | undefined,
   scoreComputedAt: Array<string | null | undefined>,
+  targetingUpdatedAt: Array<string | null | undefined> = [],
 ): boolean {
-  if (!qualificationComputedAt) return scoreComputedAt.some(Boolean);
-  const qualificationTime = Date.parse(qualificationComputedAt);
-  return scoreComputedAt.some((value) => value != null && Date.parse(value) > qualificationTime);
+  if (!qualificationComputedAt) return false;
+  const parseStoredTimestamp = (value: string): number => Date.parse(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
+      ? `${value}Z`
+      : value,
+  );
+  const qualificationTime = parseStoredTimestamp(qualificationComputedAt);
+  const scoreTimes = scoreComputedAt
+    .filter((value): value is string => value != null)
+    .map(parseStoredTimestamp)
+    .filter(Number.isFinite);
+  const targetingTimes = targetingUpdatedAt
+    .filter((value): value is string => value != null)
+    .map(parseStoredTimestamp)
+    .filter(Number.isFinite);
+  if (scoreTimes.some((value) => value > qualificationTime)) return true;
+  if (targetingTimes.some((value) => value > qualificationTime)) return true;
+  if (scoreTimes.length === 0 || targetingTimes.length === 0) return false;
+  const oldestScore = Math.min(...scoreTimes);
+  return targetingTimes.some((value) => value > oldestScore);
 }

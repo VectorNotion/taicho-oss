@@ -26,12 +26,19 @@ import {
   recordResearchRun as recordResearchRunDefault,
   saveAccountScore as saveAccountScoreDefault,
   saveMatches as saveMatchesDefault,
+  updateObservationLineage as updateObservationLineageDefault,
   upsertObservation as upsertObservationDefault,
   type AccountScoreRecord,
 } from '../data/qualification-repository';
-import { researchDimensions as researchDimensionsDefault } from './dimension-research';
+import { insufficientObservation, researchDimensions as researchDimensionsDefault } from './dimension-research';
 import { evaluateFitMatches as evaluateFitMatchesDefault } from './match-evaluator';
-import { streamingDimensionProgress, type DimensionProgress } from './dimension-progress';
+import {
+  evaluateFitMatchesVector,
+  researchDimensionsVector,
+  vectorScoringEnabled,
+  VECTOR_THRESHOLDS,
+} from './vector-research';
+import { streamingDimensionProgress, type DimensionProgress, type ResearchActivity } from './dimension-progress';
 import { ageDays, computeFitScore, computeTimingScore } from '../domain/scoring';
 import {
   DEFAULT_THRESHOLDS,
@@ -43,6 +50,7 @@ import {
 } from '../domain/qualification';
 import { summarizeDatabaseRead } from './research-tracing';
 import { refreshAccountOpportunityAngles as refreshAccountOpportunityAnglesDefault } from './account-opportunities';
+import { extractOutreachResearchKnowledge, ingestOutreachObservationKnowledge, recordOutreachKnowledgeAssessment } from '../knowledge-service';
 
 const log = createLogger('account-research');
 
@@ -56,11 +64,13 @@ export interface AccountResearchDeps {
   getDimensionDefinitions: (opts?: { activeOnly?: boolean; seedIfEmpty?: boolean; catalogItemId?: string }) => Promise<DimensionDefinition[]>;
   getObservations: (entity: EntityRef) => Promise<ObservationRecord[]>;
   upsertObservation: (entity: EntityRef, obs: Omit<ObservationRecord, 'id'>) => Promise<ObservationRecord>;
+  updateObservationLineage?: typeof updateObservationLineageDefault;
   researchDimensions: (
     dims: DimensionDefinition[],
     entity: { kind: 'account'; id?: string; name: string; commercialContext?: string },
     runId: string,
     now: Date,
+    options?: { onActivity?: (activity: ResearchActivity) => void },
   ) => Promise<Array<Omit<ObservationRecord, 'id'>>>;
   evaluateFitMatches: (dims: DimensionDefinition[], observations: ObservationRecord[], now: Date) => Promise<DimensionMatch[]>;
   saveMatches: (entity: EntityRef, matches: DimensionMatch[]) => Promise<void>;
@@ -70,6 +80,7 @@ export interface AccountResearchDeps {
   now: () => Date;
   thresholds: QualificationThresholds;
   onDimension?: (part: DimensionProgress) => void;
+  onActivity?: (activity: ResearchActivity) => void;
   /**
    * When not false, researching an account requalifies prospects that already
    * have Persona research and starts missing Persona research in the background.
@@ -88,6 +99,9 @@ export interface AccountResearchDeps {
   qualifyProspect: (prospectId: string) => Promise<unknown>;
   onProspect?: (part: { prospectId: string; phase: 'researching' }) => void;
   refreshAccountOpportunityAngles: typeof refreshAccountOpportunityAnglesDefault;
+  ingestObservationKnowledge?: typeof ingestOutreachObservationKnowledge;
+  extractResearchKnowledge?: typeof extractOutreachResearchKnowledge;
+  recordKnowledgeAssessment?: typeof recordOutreachKnowledgeAssessment;
 }
 
 export interface AccountResearchResult {
@@ -105,12 +119,24 @@ const defaultDeps: AccountResearchDeps = {
   getDimensionDefinitions: getDimensionDefinitionsDefault,
   getObservations: getObservationsDefault,
   upsertObservation: upsertObservationDefault,
-  researchDimensions: researchDimensionsDefault,
-  evaluateFitMatches: evaluateFitMatchesDefault,
+  updateObservationLineage: updateObservationLineageDefault,
+  researchDimensions: (dims, entity, runId, now, options) => (
+    vectorScoringEnabled()
+      ? researchDimensionsVector(dims, entity, runId, now, options)
+      : researchDimensionsDefault(dims, entity, runId, now, options)
+  ),
+  evaluateFitMatches: (dims, observations, now) => (
+    vectorScoringEnabled()
+      ? evaluateFitMatchesVector(dims, observations, now)
+      : evaluateFitMatchesDefault(dims, observations, now)
+  ),
   saveMatches: saveMatchesDefault,
   recordResearchRun: recordResearchRunDefault,
   hasAnyResearchRun: hasAnyResearchRunDefault,
   saveAccountScore: saveAccountScoreDefault,
+  ingestObservationKnowledge: ingestOutreachObservationKnowledge,
+  extractResearchKnowledge: extractOutreachResearchKnowledge,
+  recordKnowledgeAssessment: recordOutreachKnowledgeAssessment,
   getAccountProspects: getAccountProspectsDefault,
   // "Researched" for a prospect = it has at least one observation.
   prospectHasResearch: async (prospectId) =>
@@ -131,7 +157,7 @@ const defaultDeps: AccountResearchDeps = {
   },
   refreshAccountOpportunityAngles: refreshAccountOpportunityAnglesDefault,
   now: () => new Date(),
-  thresholds: DEFAULT_THRESHOLDS,
+  thresholds: (process.env.RESEARCH_SCORING?.trim() === 'vector' ? VECTOR_THRESHOLDS : DEFAULT_THRESHOLDS),
 };
 
 function lapsedDimensions(dims: DimensionDefinition[], observations: ObservationRecord[], now: Date): DimensionDefinition[] {
@@ -295,17 +321,17 @@ export async function runAccountResearch(
       }
 
       if (dimensionsToResearch.length > 0) {
-        const fresh = await d.researchDimensions(
+        const researched = await d.researchDimensions(
           dimensionsToResearch,
           { kind: 'account', id: accountId, name: account.name, commercialContext: d.commercialContext },
           runId,
           now,
+          { onActivity: d.onActivity },
         );
-        const returnedKeys = new Set(fresh.map((observation) => observation.dimensionKey));
-        const missing = dimensionsToResearch.filter((dimension) => !returnedKeys.has(dimension.key));
-        if (missing.length > 0) {
-          throw new Error(`Company research returned no result for: ${missing.map((dimension) => dimension.name).join(', ')}.`);
-        }
+        const returnedByKey = new Map(researched.map((observation) => [observation.dimensionKey, observation]));
+        const fresh = dimensionsToResearch.map((dimension) => (
+          returnedByKey.get(dimension.key) ?? insufficientObservation(dimension, runId, now)
+        ));
         await observeWorkflowStep('research.account.persist_observations', {
           kind: 'persistence',
           input: {
@@ -318,10 +344,84 @@ export async function runAccountResearch(
           },
         }, async () => {
           for (const observation of fresh) {
-            await d.upsertObservation({ kind: 'account', id: accountId, catalogItemId: d.catalogItemId }, observation);
+            await d.upsertObservation(
+              { kind: 'account', id: accountId, catalogItemId: d.catalogItemId },
+              observation,
+            );
           }
-          return { observationsWritten: fresh.length, dimensionKeys: fresh.map((observation) => observation.dimensionKey) };
+          return {
+            observationsWritten: fresh.length,
+            dimensionKeys: fresh.map((observation) => observation.dimensionKey),
+          };
         });
+        d.onActivity?.({
+          type: 'observations_persisted',
+          scope: 'account',
+          occurredAt: new Date().toISOString(),
+          observationCount: fresh.length,
+          criteriaTotal: dimensionsToResearch.length,
+          criteriaCompleted: fresh.length,
+          criteriaWithoutEvidence: fresh.filter((observation) => observation.confidence <= 0).length,
+        });
+
+        d.onActivity?.({
+          type: 'graph_enrichment_started',
+          scope: 'account',
+          occurredAt: new Date().toISOString(),
+          observationCount: fresh.length,
+        });
+        try {
+          const enrichment = await observeWorkflowStep('research.account.enrich_graph', {
+            kind: 'persistence',
+            input: { accountId, observationCount: fresh.length },
+          }, async () => {
+            const extracted = await d.extractResearchKnowledge?.({
+              entity: { kind: 'account', id: accountId, name: account.name },
+              observations: fresh,
+            });
+            for (const observation of fresh) {
+              const lineage = extracted
+                ? extracted.lineageByDimension[observation.dimensionKey] ?? { claimIds: [], evidenceIds: [] }
+                : await d.ingestObservationKnowledge?.({ entity: { kind: 'account', id: accountId, name: account.name }, observation }) ?? { claimIds: [], evidenceIds: [] };
+              if (d.updateObservationLineage) {
+                await d.updateObservationLineage(
+                  { kind: 'account', id: accountId, catalogItemId: d.catalogItemId },
+                  { dimensionKey: observation.dimensionKey, runId: observation.runId, ...lineage },
+                );
+              } else if (lineage.claimIds.length > 0 || lineage.evidenceIds.length > 0) {
+                await d.upsertObservation(
+                  { kind: 'account', id: accountId, catalogItemId: d.catalogItemId },
+                  { ...observation, ...lineage },
+                );
+              }
+            }
+            return {
+              claimCount: extracted?.reconciled.claims.length ?? 0,
+              entityCount: extracted?.entities.length ?? 0,
+              warnings: [
+                ...(extracted?.candidates.warnings ?? []),
+                ...(extracted?.reviewRequired ?? []).map((reason) => `Graph candidate required review: ${reason}`),
+              ].slice(0, 12),
+            };
+          });
+          d.onActivity?.({
+            type: 'graph_enrichment_completed',
+            scope: 'account',
+            occurredAt: new Date().toISOString(),
+            claimCount: enrichment.claimCount,
+            entityCount: enrichment.entityCount,
+            warnings: enrichment.warnings,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          log.warn('outreach.research.graph_enrichment_skipped', { account_id: accountId, error: message });
+          d.onActivity?.({
+            type: 'graph_enrichment_warning',
+            scope: 'account',
+            occurredAt: new Date().toISOString(),
+            error: message,
+          });
+        }
       }
 
       const { observations } = await reloadAccountEvidence(accountId, d);
@@ -339,6 +439,12 @@ export async function runAccountResearch(
         });
       }
 
+      d.onActivity?.({
+        type: 'scoring_started',
+        scope: 'account',
+        occurredAt: new Date().toISOString(),
+        criteriaTotal: allAccountDims.length,
+      });
       const score = await observeWorkflowStep('research.account.score', {
         kind: 'scoring',
         input: {
@@ -364,6 +470,8 @@ export async function runAccountResearch(
         };
       });
       const { icpMatches, timing, icpScore, icpScoreConfident, hardExcluded } = score;
+      const insufficientCriteria = icpMatches.filter((match) => match.classification === 'insufficient_evidence');
+      const timingWithoutEvidence = timing.breakdown.filter((entry) => entry.signalCount === 0);
 
       for (const match of icpMatches) {
         const dimension = byKey.get(match.dimensionKey);
@@ -405,6 +513,12 @@ export async function runAccountResearch(
           icpScoreConfident,
           timingScore: timing.score,
           hardExcluded,
+          ...(insufficientCriteria.length > 0 || timingWithoutEvidence.length > 0
+            ? { reviewReason: `insufficient evidence for: ${[
+                ...insufficientCriteria.map((match) => match.dimensionKey),
+                ...timingWithoutEvidence.map((entry) => entry.dimensionKey),
+              ].join(', ')}` }
+            : {}),
           timingBreakdown: timing.breakdown,
           computedAt: now.toISOString(),
         }, d.catalogItemId);
@@ -414,6 +528,41 @@ export async function runAccountResearch(
         }, d.catalogItemId);
         return { matchesWritten: icpMatches.length, scoreWritten: true, researchRunWritten: true };
       });
+
+      d.onActivity?.({
+        type: 'scoring_completed',
+        scope: 'account',
+        occurredAt: new Date().toISOString(),
+        criteriaTotal: allAccountDims.length,
+        criteriaCompleted: icpMatches.length + timing.breakdown.length,
+        criteriaWithoutEvidence: insufficientCriteria.length + timingWithoutEvidence.length,
+      });
+
+      try {
+        await d.recordKnowledgeAssessment?.({
+          entity: { kind: 'account', id: accountId, name: account.name },
+          observations,
+          matches: icpMatches,
+          policyKey: `outreach.icp.${d.catalogItemId ?? 'workspace'}`,
+          result: {
+            icpScore,
+            icpScoreConfident,
+            timingScore: timing.score,
+            hardExcluded,
+            timingBreakdown: timing.breakdown,
+            computedAt: now.toISOString(),
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.warn('outreach.research.graph_assessment_skipped', { account_id: accountId, error: message });
+        d.onActivity?.({
+          type: 'graph_enrichment_warning',
+          scope: 'account',
+          occurredAt: new Date().toISOString(),
+          error: `Research scoring was saved, but its Brain assessment could not be recorded: ${message}`,
+        });
+      }
 
       const opportunityCount = d.catalogItemId
         ? null
@@ -442,6 +591,14 @@ export async function runAccountResearch(
         icp_score: icpScore,
         timing_score: timing.score,
         hard_excluded: hardExcluded,
+      });
+      d.onActivity?.({
+        type: 'scope_completed',
+        scope: 'account',
+        occurredAt: new Date().toISOString(),
+        criteriaTotal: allAccountDims.length,
+        criteriaCompleted: icpMatches.length + timing.breakdown.length,
+        criteriaWithoutEvidence: insufficientCriteria.length + timingWithoutEvidence.length,
       });
 
       if (d.cascade !== false) {

@@ -10,10 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@content-automation/atlas": "workspace:*",
     "@content-automation/auth": "workspace:*",
     "@content-automation/config": "workspace:*",
     "@content-automation/content-generator": "workspace:*",
+    "@content-automation/knowledge": "workspace:*",
     "@content-automation/observability": "workspace:*",
     "@content-automation/outreach": "workspace:*",
     "@content-automation/platform": "workspace:*",

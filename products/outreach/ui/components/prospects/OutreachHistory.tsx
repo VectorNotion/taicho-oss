@@ -3,13 +3,12 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
 import {
@@ -19,14 +18,13 @@ import {
   Trash2,
   Copy,
   Check,
-  ChevronDown,
   ExternalLink,
   Loader2,
   Sparkles,
+  UserPlus,
 } from "lucide-react";
 import type { OutreachMessage, OutreachMedium } from "@/products/outreach/domain/types";
 import { OUTREACH_MEDIUM_CONFIG, OUTREACH_STATUS_CONFIG } from "@/products/outreach/domain/types";
-import { formatOutreachContent } from "@/products/outreach/domain/outreach-format";
 
 interface OutreachHistoryProps {
   messages: OutreachMessage[];
@@ -44,6 +42,7 @@ const MEDIUM_ICONS: Record<OutreachMedium, React.ComponentType<{ className?: str
   inmail_traditional: Linkedin,
   email: Mail,
   content_comment: MessageSquare,
+  connection_note: UserPlus,
 };
 
 export function OutreachHistory({
@@ -67,46 +66,49 @@ export function OutreachHistory({
     });
   };
 
+  // One icon per medium; click starts generation immediately (no dropdown).
+  const draftActions: Array<{
+    label: string;
+    hint: string;
+    icon: React.ComponentType<{ className?: string }>;
+    onClick: () => void;
+  }> = [
+    { label: "Personalized InMail", hint: "Custom report and deep research", icon: Sparkles, onClick: () => onGenerate("inmail") },
+    { label: "Traditional InMail", hint: "A shorter LinkedIn message", icon: Linkedin, onClick: () => onGenerate("inmail_traditional") },
+    { label: "Connection note", hint: "LinkedIn connection request note", icon: UserPlus, onClick: () => onGenerate("connection_note") },
+    { label: "Email", hint: "Customer-first cold email", icon: Mail, onClick: () => onGenerate("email") },
+    { label: "Content comment", hint: "Respond to a post or article", icon: MessageSquare, onClick: onOpenCommentDialog },
+  ];
+
   const draftAction = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button aria-label="Draft outreach" disabled={isGenerating} size="sm" variant="secondary">
-          {isGenerating ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-          {isGenerating ? "Drafting…" : "Draft outreach"}
-          <ChevronDown className="size-3" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
-        <DropdownMenuItem onClick={() => onGenerate("inmail")}>
-          <Sparkles className="mr-2 size-4" />
-          <div>
-            <div className="font-medium">Personalized InMail</div>
-            <div className="text-xs text-muted-foreground">Custom report and deep research</div>
-          </div>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onGenerate("inmail_traditional")}>
-          <Linkedin className="mr-2 size-4" />
-          <div>
-            <div className="font-medium">Traditional InMail</div>
-            <div className="text-xs text-muted-foreground">A shorter LinkedIn message</div>
-          </div>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onGenerate("email")}>
-          <Mail className="mr-2 size-4" />
-          <div>
-            <div className="font-medium">Email</div>
-            <div className="text-xs text-muted-foreground">Customer-first cold email</div>
-          </div>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onOpenCommentDialog}>
-          <MessageSquare className="mr-2 size-4" />
-          <div>
-            <div className="font-medium">Content comment</div>
-            <div className="text-xs text-muted-foreground">Respond to a post or article</div>
-          </div>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <div className="flex items-center gap-1">
+      {isGenerating ? (
+        <span className="mr-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          Drafting…
+        </span>
+      ) : null}
+      {draftActions.map((action) => (
+        <Tooltip key={action.label}>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={`Draft ${action.label}`}
+              disabled={isGenerating}
+              onClick={action.onClick}
+              size="icon"
+              variant="secondary"
+              className="size-8"
+            >
+              <action.icon className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p className="font-medium">{action.label}</p>
+            <p className="text-xs text-muted-foreground">{action.hint}</p>
+          </TooltipContent>
+        </Tooltip>
+      ))}
+    </div>
   );
 
   if (isLoading) {
@@ -156,21 +158,14 @@ export function OutreachHistory({
           const Icon = MEDIUM_ICONS[message.medium];
           const mediumConfig = OUTREACH_MEDIUM_CONFIG[message.medium];
           const statusConfig = OUTREACH_STATUS_CONFIG[message.status];
-          const displayContent = message.status === "draft"
-            ? formatOutreachContent(message.content, prospectName, message.medium)
-            : message.content;
+          // Generation normalizes its content before persistence. From this
+          // point onward the saved message is authoritative: review edits must
+          // render byte-for-byte the same in the queue and prospect history.
+          const displayContent = message.content;
 
           return (
             <ListRow
               actions={[
-                {
-                  icon: Check,
-                  label:
-                    message.status === "draft"
-                      ? "Mark as sent externally"
-                      : "Move back to drafts",
-                  onSelect: () => onToggleStatus(message),
-                },
                 {
                   icon: copiedId === message.id ? Check : Copy,
                   label: copiedId === message.id ? "Copied" : "Copy message",
@@ -179,6 +174,14 @@ export function OutreachHistory({
                     setCopiedId(message.id);
                     window.setTimeout(() => setCopiedId(null), 2_000);
                   },
+                },
+                {
+                  icon: Check,
+                  label:
+                    message.status === "draft"
+                      ? "Mark as sent externally"
+                      : "Move back to drafts",
+                  onSelect: () => onToggleStatus(message),
                 },
                 ...(message.landingPageUrl
                   ? [{
@@ -204,7 +207,7 @@ export function OutreachHistory({
                 },
               ]}
               badge={<Badge variant={statusConfig.variant}>{statusConfig.label}</Badge>}
-              className="items-start scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30"
+              className="items-start scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30 data-[prospect-source-target=true]:bg-primary/10 data-[prospect-source-target=true]:ring-2 data-[prospect-source-target=true]:ring-inset data-[prospect-source-target=true]:ring-primary/30"
               id={`outreach-${message.id}`}
               key={message.id}
               detail={(

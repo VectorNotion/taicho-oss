@@ -51,6 +51,7 @@ export const PLATFORM_OAUTH_SCOPES: readonly [
   "vn:outreach:read",
   "vn:cascade:read",
   "vn:operations:read",
+  "vn:user:write",
   "vn:intelligence:read",
   "vn:intelligence:execute",
   "vn:intelligence:outcomes:write",
@@ -198,6 +199,13 @@ export function getMcpAuthorizationContext(headers: Headers): Promise<McpAuthori
 export function getApiAuthorizationContext(headers: Headers): Promise<ExternalAuthorizationContext>;
 export const SESSION_CLIENT_ID_PREFIX: "session:";
 export function sessionScopesForRole(role: string): OAuthScope[];
+export function createInternalServiceAuthorizationContext(input: {
+  organizationId: string;
+  billingUserId: string;
+  clientId: string;
+  scopes: readonly OAuthScope[];
+  claims?: Record<string, unknown>;
+}): Promise<McpAuthorizationContext>;
 export function getSessionApiAuthorizationContext(headers: Headers): Promise<ExternalAuthorizationContext | null>;
 export function requireOAuthScopes(
   context: Pick<ExternalAuthorizationContext, "scopes">,

@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import "@/products/content-generator/publishing/adapters";
+import { canManageOrganization } from "@content-automation/auth/permissions";
+import { getAuthorizationContext } from "@content-automation/auth/server";
 import { upsertChannel } from "@/products/content-generator/publishing/channel-repository";
 import { getAdapter, hasAdapter } from "@/products/content-generator/publishing/registry";
+import {
+  decodePublishingOAuthState,
+  localPublishingOAuthChannel,
+  localPublishingOAuthEnabled,
+  PUBLISHING_OAUTH_STATE_COOKIE,
+} from "@/products/content-generator/publishing/oauth/state";
 import { publishingDb } from "../../../_publishing/db";
 
 export const runtime = "nodejs";
-
-/** Must match the connect route's cookie name. */
-const OAUTH_STATE_COOKIE = "publishing_oauth_state";
 
 function redirectToChannels(origin: string, query?: Record<string, string>) {
   const url = new URL("/content/channels", origin);
@@ -15,7 +20,7 @@ function redirectToChannels(origin: string, query?: Record<string, string>) {
     url.searchParams.set(key, value);
   }
   const response = NextResponse.redirect(url, 302);
-  response.cookies.delete(OAUTH_STATE_COOKIE);
+  response.cookies.delete(PUBLISHING_OAUTH_STATE_COOKIE);
   return response;
 }
 
@@ -34,19 +39,33 @@ export async function GET(
       return redirectToChannels(origin, { error: "oauth" });
     }
 
+    const context = await getAuthorizationContext(request.headers);
+    if (!context || !canManageOrganization(context.role)) {
+      return redirectToChannels(origin, { error: "permission" });
+    }
     const callbackParams = Object.fromEntries(request.nextUrl.searchParams.entries());
-    const stateCookie = request.cookies.get(OAUTH_STATE_COOKIE)?.value;
-    if (!stateCookie) {
+    const state = decodePublishingOAuthState(
+      request.cookies.get(PUBLISHING_OAUTH_STATE_COOKIE)?.value,
+    );
+    if (!state || state.destination !== destination) {
       return redirectToChannels(origin, { error: "state" });
+    }
+    if (state.organizationId !== context.organizationId) {
+      return redirectToChannels(origin, { error: "workspace" });
+    }
+    if (callbackParams.error) {
+      return redirectToChannels(origin, { error: "denied" });
     }
     // OAuth 1.0a callbacks (x) carry no `state` param — the oauth_token itself
     // correlates the flow, so only OAuth 2 destinations verify the round-trip.
-    if (adapter.credentialKind !== "oauth1" && callbackParams.state !== stateCookie) {
+    if (adapter.credentialKind !== "oauth1" && callbackParams.state !== state.nonce) {
       return redirectToChannels(origin, { error: "state" });
     }
 
     const redirectUri = `${origin}/api/content/channels/callback/${destination}`;
-    const connected = await adapter.oauth.exchangeCallback(callbackParams, redirectUri);
+    const connected = localPublishingOAuthEnabled()
+      ? localPublishingOAuthChannel(destination, context.organizationId, adapter.credentialKind)
+      : await adapter.oauth.exchangeCallback(callbackParams, redirectUri);
 
     const pool = await publishingDb(request.headers);
     await upsertChannel(pool, {
@@ -57,6 +76,7 @@ export async function GET(
       credentials: connected.credentials,
       tokenExpiry: connected.tokenExpiry,
       extra: connected.extra ?? {},
+      orgId: context.organizationId,
     });
 
     return redirectToChannels(origin, { connected: destination });

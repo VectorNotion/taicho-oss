@@ -22,14 +22,15 @@ type SimLink = SimulationLinkDatum<SimNode> & { kind: string };
 export type BrainCanvasHandle = {
   setGraph(g: BrainGraph): void;
   mergeGraph(g: BrainGraph, originId?: string): void;
+  remove(id: string): void;
   focus(id: string | null): void;
-  flyTo(id: string): void;
+  flyTo(id: string, notify?: boolean): boolean;
   setLens(lens: 'everything' | 'content' | 'prospects' | 'recent'): void;
   setPulse(id: string | null): void;
 };
 
-const CONTENT_TYPES = new Set<BrainNodeType>(['project', 'capability', 'topic', 'idea', 'draft', 'research-item', 'source']);
-const PROSPECT_TYPES = new Set<BrainNodeType>(['prospect', 'prospect-research', 'qualification', 'persona']);
+const CONTENT_TYPES = new Set<BrainNodeType>(['project', 'capability', 'topic', 'idea', 'draft', 'research-item', 'source', 'concept', 'event', 'place', 'fact', 'evidence', 'thing']);
+const PROSPECT_TYPES = new Set<BrainNodeType>(['prospect', 'prospect-research', 'qualification', 'persona', 'organization', 'person', 'assessment']);
 const RECENT_MS = 7 * 24 * 3600 * 1000;
 
 /** Per-type anchor seeds (fractions of viewport) for gentle clustering. */
@@ -38,6 +39,9 @@ const CLUSTER: Partial<Record<BrainNodeType, [number, number]>> = {
   idea: [0.74, 0.62], draft: [0.78, 0.68], 'research-item': [0.55, 0.25],
   source: [0.5, 0.2], prospect: [0.84, 0.3], 'prospect-research': [0.88, 0.24],
   qualification: [0.88, 0.36], persona: [0.9, 0.44],
+  organization: [0.72, 0.42], person: [0.84, 0.34], concept: [0.52, 0.34],
+  event: [0.6, 0.22], place: [0.44, 0.22], fact: [0.63, 0.46],
+  evidence: [0.52, 0.16], assessment: [0.78, 0.52], thing: [0.5, 0.5],
 };
 
 export const BrainCanvas = forwardRef<BrainCanvasHandle, {
@@ -111,7 +115,23 @@ export const BrainCanvas = forwardRef<BrainCanvasHandle, {
       const origin = originId ? s.byId.get(originId) : undefined;
       const ox = origin?.x ?? s.size.w / 2, oy = origin?.y ?? s.size.h / 2;
       for (const n of g.nodes) {
-        if (s.byId.has(n.id)) continue;
+        const existing = s.byId.get(n.id);
+        if (existing) {
+          // A neighborhood may be reloaded after extraction, cleanup, or a UI
+          // deploy. Keep the simulation coordinates but replace all server-
+          // owned presentation data; otherwise a previously leaked internal ID
+          // remains painted forever because the node ID itself did not change.
+          Object.assign(existing, {
+            label: n.label,
+            type: n.type,
+            degree: n.degree,
+            createdAt: n.createdAt,
+            meta: n.meta,
+            proofs: n.proofs,
+            knowledge: n.knowledge,
+          });
+          continue;
+        }
         const sn: SimNode = {
           ...n,
           x: ox + (Math.random() - 0.5) * 40, y: oy + (Math.random() - 0.5) * 40,
@@ -128,17 +148,32 @@ export const BrainCanvas = forwardRef<BrainCanvasHandle, {
       rebuildNeighbors();
       applyForces();
     },
+    remove(id) {
+      const s = state.current;
+      if (!s.byId.has(id)) return;
+      s.nodes = s.nodes.filter((node) => node.id !== id);
+      s.byId.delete(id);
+      s.links = s.links.filter((link) => (
+        (link.source as SimNode).id !== id && (link.target as SimNode).id !== id
+      ));
+      if (s.focusId === id) s.focusId = null;
+      if (s.pulseId === id) s.pulseId = null;
+      if (s.hoverId === id) s.hoverId = null;
+      rebuildNeighbors();
+      applyForces();
+    },
     focus(id) { state.current.focusId = id; },
-    flyTo(id) {
+    flyTo(id, notify = true) {
       const s = state.current;
       const n = s.byId.get(id);
       const canvas = canvasRef.current;
-      if (!n || !canvas) return;
+      if (!n || !canvas) return false;
       const k = Math.max(1, s.transform.k);
       const t = zoomIdentity.translate(s.size.w / 2 - n.x * k, s.size.h / 2 - n.y * k).scale(k);
       zoomBehavior.transform(select(canvas) as never, t);
       s.focusId = id;
-      callbacks.current.onSelectNode(n);
+      if (notify) callbacks.current.onSelectNode(n);
+      return true;
     },
     setLens(lens) { state.current.lens = lens; },
     setPulse(id) { state.current.pulseId = id; },
@@ -344,5 +379,5 @@ export const BrainCanvas = forwardRef<BrainCanvasHandle, {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time canvas setup
   }, []);
 
-  return <canvas ref={canvasRef} className="h-full w-full touch-none" style={{ background: '#0c0c15' }} />;
+  return <canvas ref={canvasRef} aria-label="Workspace knowledge graph" className="h-full w-full touch-none" style={{ background: '#0c0c15' }} />;
 });

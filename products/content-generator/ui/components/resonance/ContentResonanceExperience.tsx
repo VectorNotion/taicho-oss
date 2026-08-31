@@ -385,6 +385,7 @@ function ResonanceScoreChart({
       winner: candidate.id === result.winner.creativeId,
     };
   });
+  const hasScorableCandidate = rows.some((row) => row.scorable);
 
   return (
     <ChartContainer
@@ -429,13 +430,15 @@ function ResonanceScoreChart({
             formatter={(value: number) => value.toFixed(1)}
             position="insideRight"
           />
-          <ErrorBar
-            dataKey="error"
-            direction="x"
-            stroke="var(--muted-foreground)"
-            strokeWidth={1.5}
-            width={4}
-          />
+          {hasScorableCandidate ? (
+            <ErrorBar
+              dataKey="error"
+              direction="x"
+              stroke="var(--muted-foreground)"
+              strokeWidth={1.5}
+              width={4}
+            />
+          ) : null}
         </Bar>
       </BarChart>
     </ChartContainer>
@@ -462,9 +465,11 @@ function overallProgress(
 export function ContentResonanceExperience({
   draft,
   onDraftUpdated,
+  showSourceContent = true,
 }: {
   draft: ContentDraft;
   onDraftUpdated?: () => void | Promise<void>;
+  showSourceContent?: boolean;
 }) {
   const [setupOpen, setSetupOpen] = React.useState(false);
   const [confirmApplyOpen, setConfirmApplyOpen] = React.useState(false);
@@ -481,6 +486,12 @@ export function ContentResonanceExperience({
   const [pollWarning, setPollWarning] = React.useState<string | null>(null);
   const [recoveredExperiment, setRecoveredExperiment] = React.useState<ContentResonanceExperimentResult | null>(null);
   const [applying, setApplying] = React.useState(false);
+  const [applyError, setApplyError] = React.useState<string | null>(null);
+  const [appliedApplication, setAppliedApplication] = React.useState<{
+    resonanceJobId: string;
+    candidateId: string;
+    appliedAt: string;
+  } | null>(null);
   const workbenchRef = React.useRef<HTMLDivElement>(null);
   const startedRef = React.useRef(false);
 
@@ -640,6 +651,8 @@ export function ContentResonanceExperience({
     setRunResult(null);
     setRunError(null);
     setPollWarning(null);
+    setApplyError(null);
+    setAppliedApplication(null);
     setState("generating");
     setSetupOpen(false);
     stream.start(next);
@@ -672,17 +685,48 @@ export function ContentResonanceExperience({
     : judgmentsDone;
   const winnerScore = winner ? scoreById.get(winner.id)?.score ?? null : null;
   const voteSnapshot = runResult?.voteSnapshot ?? runProgress?.voteSnapshot ?? null;
+  const persistedApplication = experiment?.resonanceJobId === draft.resonanceAppliedJobId
+    && draft.resonanceAppliedCandidateId
+    && draft.resonanceAppliedAt
+    ? {
+        resonanceJobId: draft.resonanceAppliedJobId,
+        candidateId: draft.resonanceAppliedCandidateId,
+        appliedAt: draft.resonanceAppliedAt,
+      }
+    : null;
+  const application = appliedApplication ?? persistedApplication;
+  const appliedCandidate = candidateById(candidates, application?.candidateId ?? null);
+  const winnerApplied = Boolean(
+    application
+    && winner
+    && application.resonanceJobId === experiment?.resonanceJobId
+    && application.candidateId === winner.id,
+  );
 
   const applyWinner = async () => {
-    if (!winner || winner.original) return;
+    if (!winner || winner.original || !experiment || runResult?.winner.tooCloseToCall) return;
     setApplying(true);
+    setApplyError(null);
     try {
-      await apiMutate("PATCH", `/content/drafts/${draft.id}`, { title: winner.title, content: winner.content });
+      const response = await apiMutate<{
+        draft: ContentDraft;
+        application: { resonanceJobId: string; candidateId: string; appliedAt: string };
+      }>("POST", `/content/drafts/${draft.id}/resonance/apply`, {
+        resonanceJobId: experiment.resonanceJobId,
+        candidateId: winner.id,
+      }, {
+        idempotencyKey: `content-resonance-apply:${draft.id}:${experiment.resonanceJobId}:${winner.id}`,
+      });
+      setAppliedApplication(response.data.application);
       toast.success("Winning variation applied");
       setConfirmApplyOpen(false);
       await onDraftUpdated?.();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not apply the winning variation.");
+      const message = error instanceof ApiError
+        ? error.message
+        : "Could not reach the content service. Your Post was not changed; try again.";
+      setApplyError(message);
+      toast.error(message);
     } finally {
       setApplying(false);
     }
@@ -694,9 +738,9 @@ export function ContentResonanceExperience({
         <CardHeader className="border-b p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <CardTitle className="text-base">Content</CardTitle>
+              <CardTitle className="text-base">Audience resonance</CardTitle>
               <CardDescription>
-                Generated {profile.label.toLowerCase()} · ready for a format-aware audience comparison
+                Compare this {profile.label.toLowerCase()} control against newly generated variations, then apply only a clear winner.
               </CardDescription>
             </div>
             <Button
@@ -712,15 +756,17 @@ export function ContentResonanceExperience({
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="max-h-[38rem] overflow-auto bg-muted/30 p-6">
-            {draft.type === "blog_post" ? (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.content}</ReactMarkdown>
-              </div>
-            ) : (
-              <pre className="whitespace-pre-wrap font-sans text-sm leading-6">{draft.content}</pre>
-            )}
-          </div>
+          {showSourceContent ? (
+            <div className="max-h-[38rem] overflow-auto bg-muted/30 p-6">
+              {draft.type === "blog_post" ? (
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.content}</ReactMarkdown>
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap font-sans text-sm leading-6">{draft.content}</pre>
+              )}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -1033,7 +1079,7 @@ export function ContentResonanceExperience({
                           </CardTitle>
                           {winner ? (
                             <Badge variant={runResult.winner.tooCloseToCall ? "secondary" : "tint"}>
-                              {runResult.winner.tooCloseToCall ? `${winner.label} prospects` : "Winner"}
+                              {runResult.winner.tooCloseToCall ? `${winner.label} leads` : "Winner"}
                             </Badge>
                           ) : null}
                         </div>
@@ -1051,10 +1097,15 @@ export function ContentResonanceExperience({
                         <RotateCcw className="h-4 w-4" />
                         Run again
                       </Button>
-                      {winner && !winner.original ? (
+                      {winnerApplied ? (
+                        <Button disabled size="sm" variant="secondary">
+                          <Check className="h-4 w-4" />
+                          Winner applied
+                        </Button>
+                      ) : winner && !winner.original && !runResult.winner.tooCloseToCall ? (
                         <Button onClick={() => setConfirmApplyOpen(true)} size="sm">
                           <Check className="h-4 w-4" />
-                          {runResult.winner.tooCloseToCall ? "Use leader" : "Use winner"}
+                          Use winner
                         </Button>
                       ) : null}
                     </div>
@@ -1076,6 +1127,27 @@ export function ContentResonanceExperience({
                   </div>
                 </CardContent>
               </Card>
+
+              {application ? (
+                <Card className="border-primary/25 bg-primary/5" data-testid="resonance-application-receipt">
+                  <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="flex items-center gap-2 text-sm font-medium">
+                        <Check className="size-4 text-primary" />
+                        Resonance variation applied
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {appliedCandidate?.label ?? application.candidateId} replaced only the Post title and content. Publishing status and history were preserved.
+                      </p>
+                    </div>
+                    <div className="min-w-0 text-xs text-muted-foreground sm:text-right">
+                      <p><span className="font-medium text-foreground">Run</span> <code className="break-all">{application.resonanceJobId}</code></p>
+                      <p className="mt-1"><span className="font-medium text-foreground">Candidate</span> {application.candidateId}</p>
+                      <p className="mt-1">Applied {new Date(application.appliedAt).toLocaleString()}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
 
               {runResult.partial ? (
                 <Card className="bg-muted/20">
@@ -1223,6 +1295,15 @@ export function ContentResonanceExperience({
               This replaces the current draft content with the selected variation. Publishing status and history stay unchanged.
             </DialogDescription>
           </DialogHeader>
+          {applyError ? (
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3" role="alert">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
+              <div>
+                <p className="text-sm font-medium">The variation was not applied</p>
+                <p className="mt-1 text-xs text-muted-foreground">{applyError}</p>
+              </div>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button disabled={applying} onClick={() => setConfirmApplyOpen(false)} variant="outline">Cancel</Button>
             <Button disabled={applying} onClick={() => void applyWinner()}>

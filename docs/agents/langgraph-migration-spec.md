@@ -15,7 +15,7 @@ Compiled 2026-07-20 from the deleted Python service (`git show de2ac97^:graph/..
 - Every action was a single LangGraph node, stateless (no checkpoints), dispatched by `action` string with an `action_payload`.
 - All LLM calls: Anthropic via `model_name` (default `claude-sonnet-4-5-20250929`), structured output (Pydantic → migrate to Mastra `structuredOutput` zod schemas).
 - Prompt preambles inject `{mission}{identity}{voice}` loaded from Neo4j `Settings {id:"global"}` via `packages/platform/settings/repository.ts` (`getSettings`, falls back to defaults).
-- Env: `ANTHROPIC_API_KEY` (all), `TAVILY_API_KEY` (do_research, research_lead), `OPENAI_API_KEY` (extract_topics embeddings only), `NEO4J_*`, `MODEL_NAME`.
+- Env: `OPENROUTER_API_KEY` (fixed language runtime), `TAVILY_API_KEY` (do_research, research_lead), `OPENAI_API_KEY` (extract_topics embeddings only), and graph credentials.
 - Historical calling chain: route → `createJob` → Bree `scheduleJob` → worker → LangGraph. Product routes now invoke the TypeScript orchestrators directly.
 
 ## Actions

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { apiMutate } from "@content-automation/platform/network/api-client";
+import { ApiError, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import type {
   DimensionAppliesTo,
   DimensionDefinition,
@@ -42,6 +43,7 @@ type FormState = {
   freshnessWindowDays: string;
   halfLifeDays: string;
   hardExclusionRule: string;
+  isActive: boolean;
 };
 
 function emptyForm(): FormState {
@@ -54,6 +56,7 @@ function emptyForm(): FormState {
     freshnessWindowDays: DEFAULT_FRESHNESS,
     halfLifeDays: DEFAULT_HALF_LIFE,
     hardExclusionRule: "",
+    isActive: true,
   };
 }
 
@@ -67,6 +70,7 @@ function toForm(dimension: DimensionDefinition): FormState {
     freshnessWindowDays: dimension.freshnessWindowDays.toString(),
     halfLifeDays: dimension.halfLifeDays?.toString() ?? DEFAULT_HALF_LIFE,
     hardExclusionRule: dimension.hardExclusionRule ?? "",
+    isActive: dimension.isActive,
   };
 }
 
@@ -98,11 +102,13 @@ export function DimensionEditorDialog({
   const [form, setForm] = useState<FormState>(emptyForm);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setForm(dimension ? toForm(dimension) : emptyForm());
     setErrors({});
+    setActionError(null);
   }, [open, dimension]);
 
   // Persona (prospect) dimensions are always fit; the type control is hidden.
@@ -118,33 +124,45 @@ export function DimensionEditorDialog({
     if (!form.researchInstruction.trim()) {
       nextErrors.researchInstruction = "Describe what researchers should investigate.";
     }
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0) return;
-
     const weight = Number(form.weight);
     const freshnessWindowDays = Number(form.freshnessWindowDays);
     const halfLifeDays = Number(form.halfLifeDays);
+    if (!form.weight.trim() || !Number.isFinite(weight) || weight <= 0 || weight > 1) {
+      nextErrors.weight = "Weight must be greater than 0 and at most 1.";
+    }
+    if (
+      !form.freshnessWindowDays.trim()
+      || !Number.isInteger(freshnessWindowDays)
+      || freshnessWindowDays <= 0
+    ) {
+      nextErrors.freshnessWindowDays = "Freshness window must be a positive whole number of days.";
+    }
+    if (
+      isTiming
+      && (!form.halfLifeDays.trim() || !Number.isInteger(halfLifeDays) || halfLifeDays <= 0)
+    ) {
+      nextErrors.halfLifeDays = "Half-life must be a positive whole number of days.";
+    }
+    setErrors(nextErrors);
+    setActionError(null);
+    if (Object.keys(nextErrors).length > 0) return;
 
     const body: Record<string, unknown> = {
       name: form.name.trim(),
       dimensionType,
       appliesTo,
       researchInstruction: form.researchInstruction.trim(),
-      weight: Number.isFinite(weight) && weight > 0 ? weight : Number(DEFAULT_WEIGHT),
-      freshnessWindowDays:
-        Number.isFinite(freshnessWindowDays) && freshnessWindowDays > 0
-          ? freshnessWindowDays
-          : Number(DEFAULT_FRESHNESS),
+      weight,
+      freshnessWindowDays,
       idealValue: isFit && form.idealValue.trim() ? form.idealValue.trim() : undefined,
       hardExclusionRule:
         isFit && form.hardExclusionRule.trim() ? form.hardExclusionRule.trim() : undefined,
-      halfLifeDays:
-        isTiming && Number.isFinite(halfLifeDays) && halfLifeDays > 0
-          ? halfLifeDays
-          : undefined,
+      halfLifeDays: isTiming ? halfLifeDays : undefined,
+      isActive: form.isActive,
     };
     if (!isEdit) body.key = toKey(form.name);
     if (!isEdit && catalogItemId) body.catalogItemId = catalogItemId;
+    if (isEdit) body.expectedRevision = dimension!.revision;
 
     setSaving(true);
     try {
@@ -154,8 +172,12 @@ export function DimensionEditorDialog({
       onOpenChange(false);
       onSaved();
     } catch (error) {
-      console.error("Failed to save dimension:", error);
-      toast.error("Could not save the dimension. Try again.");
+      const message = error instanceof ApiError
+        ? error.message
+        : "Could not save the dimension. Try again.";
+      if (!(error instanceof ApiError)) console.error("Failed to save dimension:", error);
+      setActionError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -258,6 +280,7 @@ export function DimensionEditorDialog({
                 value={form.weight}
               />
               <p className="text-xs text-muted-foreground">Relative weight, 0–1.</p>
+              {errors.weight && <p className="text-xs text-destructive">{errors.weight}</p>}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="dimension-freshness">Freshness window (days)</Label>
@@ -273,6 +296,9 @@ export function DimensionEditorDialog({
               <p className="text-xs text-muted-foreground">
                 Days before a finding is re-researched.
               </p>
+              {errors.freshnessWindowDays && (
+                <p className="text-xs text-destructive">{errors.freshnessWindowDays}</p>
+              )}
             </div>
           </div>
 
@@ -289,6 +315,9 @@ export function DimensionEditorDialog({
               <p className="text-xs text-muted-foreground">
                 How fast a timing signal decays in the ranking.
               </p>
+              {errors.halfLifeDays && (
+                <p className="text-xs text-destructive">{errors.halfLifeDays}</p>
+              )}
             </div>
           )}
 
@@ -305,6 +334,24 @@ export function DimensionEditorDialog({
                 value={form.hardExclusionRule}
               />
             </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <Switch
+              checked={form.isActive}
+              id="dimension-active"
+              onCheckedChange={(isActive) => setForm({ ...form, isActive })}
+            />
+            <div>
+              <Label htmlFor="dimension-active">Active for qualification</Label>
+              <p className="text-xs text-muted-foreground">
+                Inactive dimensions stay configured but are excluded from new qualification runs.
+              </p>
+            </div>
+          </div>
+
+          {actionError && (
+            <p className="text-sm text-destructive" role="alert">{actionError}</p>
           )}
         </div>
 

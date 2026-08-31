@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  CircleStop,
   Globe2,
   ListChecks,
   Search,
@@ -14,7 +15,7 @@ import {
 import { useAssistantState } from '@assistant-ui/react';
 import { Badge } from '@/components/ui/badge';
 
-type WorkStatus = 'queued' | 'running' | 'partial' | 'complete' | 'failed';
+type WorkStatus = 'queued' | 'running' | 'partial' | 'complete' | 'failed' | 'stopped';
 type WorkCategory = 'knowledge' | 'web' | 'synthesis' | 'action';
 
 type ChatEvent = {
@@ -156,6 +157,7 @@ function viewFromEvents(events: ChatEvent[]) {
 function ActivityIcon({ activity }: { activity: ActivityView }) {
   if (activity.status === 'complete') return <Check className="size-3.5" />;
   if (activity.status === 'failed') return <CircleAlert className="size-3.5" />;
+  if (activity.status === 'stopped') return <CircleStop className="size-3.5" />;
   if (activity.category === 'web') return <Globe2 className="size-3.5" />;
   if (activity.category === 'action') return <Sparkles className="size-3.5" />;
   return <Search className="size-3.5" />;
@@ -166,7 +168,9 @@ function WorkReceipt({ activities, onExpand }: {
   onExpand: () => void;
 }) {
   const results = activities.reduce((sum, activity) => sum + (activity.resultCount ?? 0), 0);
-  const failed = activities.filter((activity) => activity.status === 'failed').length;
+  const failed = activities.filter((activity) => (
+    activity.status === 'failed' || activity.status === 'stopped'
+  )).length;
   return (
     <button
       className="flex w-full items-center gap-3 rounded-xl border bg-muted/20 px-3 py-2.5 text-left transition-colors hover:bg-muted/35"
@@ -190,8 +194,9 @@ function WorkReceipt({ activities, onExpand }: {
   );
 }
 
-function ActivityRail({ activities, running }: {
+function ActivityRail({ activities, interrupted, running }: {
   activities: ActivityView[];
+  interrupted: boolean;
   running: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -201,11 +206,11 @@ function ActivityRail({ activities, running }: {
     || activity.status === 'queued'
   ));
   useEffect(() => {
-    if (running || hasActive) return;
+    if (interrupted || running || hasActive) return;
     const timer = window.setTimeout(() => setExpanded(false), 700);
     return () => window.clearTimeout(timer);
-  }, [hasActive, running]);
-  const displayExpanded = running || hasActive || expanded;
+  }, [hasActive, interrupted, running]);
+  const displayExpanded = interrupted || running || hasActive || expanded;
   if (activities.length === 0) return null;
   if (!displayExpanded) {
     return <WorkReceipt activities={activities} onExpand={() => setExpanded(true)} />;
@@ -219,13 +224,15 @@ function ActivityRail({ activities, running }: {
       >
         <span className="relative grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
           <Activity className="size-3.5" />
-          {hasActive ? <span className="absolute -right-0.5 -top-0.5 size-2 animate-pulse rounded-full bg-primary" /> : null}
+          {hasActive && !interrupted ? <span className="absolute -right-0.5 -top-0.5 size-2 animate-pulse rounded-full bg-primary" /> : null}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium">{hasActive ? 'Running tools' : 'Tool activity complete'}</p>
+          <p className="text-xs font-medium">
+            {interrupted ? 'Tool activity stopped' : hasActive ? 'Running tools' : 'Tool activity complete'}
+          </p>
         </div>
-        <Badge variant={hasActive ? 'secondary' : 'outline'}>
-          {hasActive ? 'Live' : `${activities.length} step${activities.length === 1 ? '' : 's'}`}
+        <Badge variant={hasActive && !interrupted ? 'secondary' : 'outline'}>
+          {interrupted ? 'Stopped' : hasActive ? 'Live' : `${activities.length} step${activities.length === 1 ? '' : 's'}`}
         </Badge>
       </button>
       <div className="space-y-1 border-t px-3 py-2.5">
@@ -233,7 +240,7 @@ function ActivityRail({ activities, running }: {
           const active = activity.status === 'running' || activity.status === 'partial';
           return (
             <div className="flex items-start gap-3 rounded-lg px-2 py-2" key={activity.id}>
-              <span className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border ${activity.status === 'complete' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-400' : activity.status === 'failed' ? 'border-destructive/25 bg-destructive/10 text-destructive' : 'border-primary/25 bg-primary/7 text-primary'}`}>
+              <span className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border ${activity.status === 'complete' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-400' : activity.status === 'failed' || activity.status === 'stopped' ? 'border-destructive/25 bg-destructive/10 text-destructive' : 'border-primary/25 bg-primary/7 text-primary'}`}>
                 <ActivityIcon activity={activity} />
               </span>
               <div className="min-w-0 flex-1">
@@ -252,15 +259,28 @@ function ActivityRail({ activities, running }: {
   );
 }
 
-export function GenerativeMessageSurface() {
+export function GenerativeMessageSurface({ interrupted = false }: { interrupted?: boolean }) {
   const parts = useAssistantState(({ message }) => message.parts as AssistantPart[]);
   const status = useAssistantState(({ message }) => message.status?.type);
   const activities = useMemo(() => viewFromEvents(eventsFromParts(parts)), [parts]);
+  const displayedActivities = useMemo(() => (
+    interrupted
+      ? activities.map((activity) => (
+        activity.status === 'running' || activity.status === 'partial' || activity.status === 'queued'
+          ? { ...activity, status: 'stopped' as const }
+          : activity
+      ))
+      : activities
+  ), [activities, interrupted]);
   const running = status === 'running' || status === 'requires-action';
-  if (activities.length === 0) return null;
+  if (displayedActivities.length === 0) return null;
   return (
     <div className="mb-3" data-component="CHAT-04 Assistant Message Block">
-      <ActivityRail activities={activities} running={running} />
+      <ActivityRail
+        activities={displayedActivities}
+        interrupted={interrupted}
+        running={running && !interrupted}
+      />
     </div>
   );
 }

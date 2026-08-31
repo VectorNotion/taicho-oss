@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import test from "node:test";
+import test, { after } from "node:test";
+import { migrationPoolConfig } from "@content-automation/database";
+import { Pool } from "pg";
 import { getActionProduct } from "../agents/contracts";
 import {
   closePool,
@@ -9,7 +11,6 @@ import {
   listReconcilableJobIds,
   transitionJobStatus,
 } from "../jobs/repository";
-import { getJobAdminPool } from "../jobs/pool";
 import {
   clearJobReconcilers,
   kickJobReconcilers,
@@ -23,6 +24,13 @@ import {
 const suffix = randomUUID().replaceAll("-", "");
 const TEST_ORG = `resonance_test_${suffix}`;
 const TEST_USER = `resonance-user-${suffix}`;
+const fixturePool = new Pool({ ...migrationPoolConfig(), max: 1 });
+
+after(async () => {
+  await fixturePool.query("DELETE FROM jobs WHERE organization_id = $1", [TEST_ORG]).catch(() => undefined);
+  await fixturePool.end();
+  await closePool();
+});
 
 test("resonance_run maps to the resonance product", () => {
   assert.equal(getActionProduct("resonance_run"), "resonance");
@@ -60,7 +68,7 @@ test("transitionJobStatus completes a queued job exactly once", async () => {
 });
 
 async function backdateProcessingJob(jobId: string, minutesAgo: number): Promise<void> {
-  await getJobAdminPool().query(
+  await fixturePool.query(
     `UPDATE jobs
      SET status = 'processing', started_at = NOW() - make_interval(mins => $2::int)
      WHERE id = $1`,
@@ -88,11 +96,11 @@ test("listReconcilableJobIds finds processing runs carrying a modalCallId, and n
   const withoutHandle = await createProcessingJob("resonance_run", 1, randomUUID());
   const completedWithHandle = await createProcessingJob("resonance_run", 1, randomUUID());
 
-  await getJobAdminPool().query(
+  await fixturePool.query(
     `UPDATE jobs SET result = '{"modalCallId":"fc-123"}'::jsonb WHERE id = ANY($1::uuid[])`,
     [[withHandle, completedWithHandle]],
   );
-  await getJobAdminPool().query(
+  await fixturePool.query(
     `UPDATE jobs SET status = 'completed' WHERE id = $1`,
     [completedWithHandle],
   );

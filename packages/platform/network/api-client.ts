@@ -52,13 +52,18 @@ async function unwrap<T>(response: Response): Promise<Envelope<T>> {
 }
 
 /** GET a query capability. Input travels as query parameters. */
-export async function apiGet<T>(path: string, query?: Record<string, string | number | boolean | undefined>): Promise<T> {
+export async function apiGet<T>(
+  path: string,
+  query?: Record<string, string | number | boolean | undefined>,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
   const url = new URL(`/api/v1${path}`, window.location.origin);
   for (const [name, value] of Object.entries(query ?? {})) {
     if (value !== undefined) url.searchParams.set(name, String(value));
   }
   const envelope = await unwrap<T>(await fetch(url, {
     headers: { Accept: "application/json", [REQUEST_ID_HEADER]: crypto.randomUUID() },
+    signal: options?.signal,
   }));
   return envelope.data;
 }

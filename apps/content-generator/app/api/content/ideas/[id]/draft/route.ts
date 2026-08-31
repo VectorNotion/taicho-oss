@@ -3,7 +3,10 @@ import { getContentIdeaById, getContentDraftByIdeaId } from '@/products/content-
 import { commercialErrorResponse, reserveBackgroundAction } from '@content-automation/auth/commercial';
 import { releaseReservation, settleReservation } from '@content-automation/platform/commercial';
 import { CONTENT_TYPES, isContentType } from '@/products/content-generator/domain/content';
-import { runGenerateContentDraft } from '@/products/content-generator/agent/actions/draft';
+import {
+  CreativeMediaError,
+  generatePostFromCreativeAssets,
+} from '@/products/content-generator/media/service';
 
 export const maxDuration = 600;
 
@@ -32,6 +35,15 @@ export async function POST(
       );
     }
 
+    const mediaAssetIds = body.mediaAssetIds;
+    if (!Array.isArray(mediaAssetIds) || mediaAssetIds.length < 1 || mediaAssetIds.length > 4
+      || mediaAssetIds.some((assetId) => typeof assetId !== 'string' || !assetId.trim())) {
+      return NextResponse.json(
+        { error: 'Select between one and four Content Base images before generating a Post.' },
+        { status: 400 },
+      );
+    }
+
     // Verify idea exists
     const idea = await getContentIdeaById(id);
     if (!idea) {
@@ -48,9 +60,12 @@ export async function POST(
 
     const billing = await reserveBackgroundAction(request, 'generate_content_draft');
     reservationId = billing.commercial.creditReservationId;
-    const result = await runGenerateContentDraft({
-      ideaId: id,
+    const result = await generatePostFromCreativeAssets({
+      organizationId: billing.commercial.organizationId,
+      userId: billing.commercial.initiatingUserId,
+      assetIds: mediaAssetIds,
       contentType,
+      expectedContentBaseId: id,
     });
     await settleReservation({
       reservationId,
@@ -68,6 +83,9 @@ export async function POST(
   } catch (error) {
     if (reservationId) await releaseReservation(reservationId, error instanceof Error ? error.message : String(error)).catch(() => undefined);
     const commercial = commercialErrorResponse(error); if (commercial) return commercial;
+    if (error instanceof CreativeMediaError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
     console.error('Error triggering draft generation:', error);
     return NextResponse.json(
       { error: 'Failed to trigger draft generation' },

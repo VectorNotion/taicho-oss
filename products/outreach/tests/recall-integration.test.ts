@@ -21,10 +21,12 @@ const secret = `whsec_${Buffer.from('recall-webhook-secret-for-tests-32-bytes').
 test('Recall bot creation requests transcription and signed workspace metadata', async (context) => {
   const previousFetch = globalThis.fetch;
   const previousApiKey = process.env.RECALL_API_KEY;
+  const previousApiUrl = process.env.RECALL_API_URL;
   const previousRegion = process.env.RECALL_REGION;
   const previousWebhookSecret = process.env.RECALL_WEBHOOK_SECRET;
   const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
   process.env.RECALL_API_KEY = 'recall-api-key-for-tests';
+  process.env.RECALL_API_URL = 'http://127.0.0.1:4018';
   process.env.RECALL_REGION = 'us-east-1';
   process.env.RECALL_WEBHOOK_SECRET = secret;
   process.env.PUBLIC_APP_URL = 'https://cloud-dev.taicho.test';
@@ -37,6 +39,8 @@ test('Recall bot creation requests transcription and signed workspace metadata',
     globalThis.fetch = previousFetch;
     if (previousApiKey === undefined) delete process.env.RECALL_API_KEY;
     else process.env.RECALL_API_KEY = previousApiKey;
+    if (previousApiUrl === undefined) delete process.env.RECALL_API_URL;
+    else process.env.RECALL_API_URL = previousApiUrl;
     if (previousRegion === undefined) delete process.env.RECALL_REGION;
     else process.env.RECALL_REGION = previousRegion;
     if (previousWebhookSecret === undefined) delete process.env.RECALL_WEBHOOK_SECRET;
@@ -51,7 +55,7 @@ test('Recall bot creation requests transcription and signed workspace metadata',
     meetingUrl: 'https://meet.google.com/abc-defg-hij',
   });
   assert.equal(created.id, 'bot_123');
-  assert.equal(captured?.url, 'https://us-east-1.recall.ai/api/v1/bot/');
+  assert.equal(captured?.url, 'http://127.0.0.1:4018/api/v1/bot/');
   assert.equal(captured?.init?.method, 'POST');
   assert.equal(new Headers(captured?.init?.headers).get('Authorization'), 'recall-api-key-for-tests');
   const body = JSON.parse(String(captured?.init?.body)) as Record<string, unknown>;
@@ -74,6 +78,63 @@ test('Recall bot creation requests transcription and signed workspace metadata',
       diarization: { use_separate_streams_when_available: true },
     },
   });
+});
+
+test('Recall API URL accepts only provider origins and limits HTTP to loopback development', async (context) => {
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.RECALL_API_KEY;
+  const previousApiUrl = process.env.RECALL_API_URL;
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousWebhookSecret = process.env.RECALL_WEBHOOK_SECRET;
+  const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
+  process.env.RECALL_API_KEY = 'recall-api-key-for-tests';
+  process.env.RECALL_WEBHOOK_SECRET = secret;
+  process.env.PUBLIC_APP_URL = 'https://cloud-dev.taicho.test';
+  context.after(() => {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.RECALL_API_KEY;
+    else process.env.RECALL_API_KEY = previousApiKey;
+    if (previousApiUrl === undefined) delete process.env.RECALL_API_URL;
+    else process.env.RECALL_API_URL = previousApiUrl;
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousWebhookSecret === undefined) delete process.env.RECALL_WEBHOOK_SECRET;
+    else process.env.RECALL_WEBHOOK_SECRET = previousWebhookSecret;
+    if (previousPublicAppUrl === undefined) delete process.env.PUBLIC_APP_URL;
+    else process.env.PUBLIC_APP_URL = previousPublicAppUrl;
+  });
+
+  const create = () => createRecallBot({
+    organizationId: 'workspace_test',
+    meetingId: '9be4a2ad-bd99-4622-9e3f-7ff5e4ce7793',
+    meetingUrl: 'https://meet.google.com/abc-defg-hij',
+  });
+  for (const invalidUrl of [
+    'http://recall.example.test',
+    'https://user:password@recall.example.test',
+    'https://recall.example.test/api',
+    'https://recall.example.test?token=secret',
+    'https://recall.example.test/#fragment',
+  ]) {
+    process.env.NODE_ENV = 'test';
+    process.env.RECALL_API_URL = invalidUrl;
+    await assert.rejects(create, /RECALL_API_URL must be an HTTPS origin/);
+  }
+
+  process.env.NODE_ENV = 'production';
+  process.env.RECALL_API_URL = 'http://127.0.0.1:4018';
+  await assert.rejects(create, /RECALL_API_URL must be an HTTPS origin/);
+
+  let requestedUrl = '';
+  process.env.NODE_ENV = 'production';
+  process.env.RECALL_API_URL = 'https://recall.example.test';
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    return Response.json({ id: 'bot_secure_origin' });
+  };
+  const created = await create();
+  assert.equal(created.id, 'bot_secure_origin');
+  assert.equal(requestedUrl, 'https://recall.example.test/api/v1/bot/');
 });
 
 test('Recall webhook signatures bind the delivery ID, timestamp, and raw body', () => {

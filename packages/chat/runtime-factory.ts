@@ -24,12 +24,18 @@ export function createAssistantRuntime(
   const operations = config.payloadGatewayUrl && payloadSecret
     ? new PayloadAssistantOperations(config.payloadGatewayUrl, payloadSecret)
     : null
+  const stubScenario = process.env.ASSISTANT_STUB_SCENARIO?.trim() || 'success'
   const model = process.env.NODE_ENV !== 'production' && process.env.ASSISTANT_MODEL_MODE === 'stub'
     ? new StubAssistantModel(({ system }) => (
         system.includes('public sales assistant')
           ? 'Based on the approved product information, that option is available. I can help you compare the plans.'
           : 'Follow the documented steps shown in the cited source. [S1]'
-      ))
+      ), {
+        chunkSize: 16,
+        delayMs: 120,
+        failBeforeStart: stubScenario === 'unavailable',
+        failAfterChunks: stubScenario === 'interrupted' ? 2 : undefined,
+      })
     : new OpenRouterAssistantModel()
   const qdrantConfig = qdrantSalesKnowledgeConfigFromEnvironment()
   if (

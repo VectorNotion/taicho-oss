@@ -3,6 +3,8 @@ export interface AccountOpportunityAngle {
   accountId: string;
   angle: string;
   sourceDimensionKeys: string[];
+  sourceClaimIds?: string[];
+  sourceEvidenceIds?: string[];
   evidence: string[];
   evidenceConfidence: number;
   researchRunId: string;

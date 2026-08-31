@@ -38,6 +38,8 @@ const INPUT: RefreshAccountOpportunitiesInput = {
     confidence: 0.8,
     researchedAt: "2026-08-16T00:00:00.000Z",
     runId: "research-1",
+    claimIds: ["claim-1"],
+    evidenceIds: ["evidence-1"],
   }],
   matches: [{
     dimensionKey: "human_process_intensity",
@@ -89,6 +91,8 @@ test("opportunity generation grounds angles in account dimension evidence", asyn
   assert.equal(stored.length, 1);
   assert.equal(stored[0]?.id, "opportunity-1");
   assert.deepEqual(stored[0]?.evidence, ["https://example.test/operations"]);
+  assert.deepEqual(stored[0]?.sourceClaimIds, ["claim-1"]);
+  assert.deepEqual(stored[0]?.sourceEvidenceIds, ["evidence-1"]);
   assert.equal(stored[0]?.evidenceConfidence, 0.8);
 });
 

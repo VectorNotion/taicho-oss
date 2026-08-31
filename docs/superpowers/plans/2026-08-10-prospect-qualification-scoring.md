@@ -177,7 +177,7 @@ export async function getTouchList(limit: number): Promise<Array<{ leadId; name;
 ```ts
 export interface DimensionResearchDeps {
   search?: typeof searchTavily;                      // default real
-  completeJson?: (args: { schemaName: string; schema: z.ZodType; system: string; prompt: string }) => Promise<unknown>;  // default: raw OpenRouter fetch, json_schema strict, model OUTREACH_RESEARCH_MODEL ?? DEFAULT_LEAD_RESEARCH_MODEL, temp 0.2 — same pattern as lead-research.ts L105
+  completeJson?: (args: { schemaName: string; schema: z.ZodType; system: string; prompt: string }) => Promise<unknown>;  // default: raw OpenRouter fetch, strict json_schema, release-owned fixed model, temp 0.2
 }
 export const fitObservationSchema: z.ZodType   // { dimensionKey, observedValue: string, evidence: string[], confidence: 0..1 }
 export const timingObservationSchema: z.ZodType // { dimensionKey, signals: [{signal, date: ISO yyyy-mm-dd, evidence: string[], confidence}] }

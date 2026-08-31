@@ -49,6 +49,16 @@ test('Postgres repository enforces tenant ownership, retrieval, identity links, 
     accountId: 'organization-1',
     userId: 'user-1',
   })
+  await repositoryA.appendMessage({
+    conversationId: supportConversation.id,
+    requestId: crypto.randomUUID(),
+    role: 'assistant',
+    content: 'A durable support answer.',
+    citations: [],
+    metadata: {},
+  })
+  const storedSupportMessage = (await repositoryA.listMessages(supportConversation.id))[0]
+  assert.equal(new Date(storedSupportMessage.createdAt).toISOString(), storedSupportMessage.createdAt)
   assert.equal(await repositoryA.recordSupportFeedback(supportConversation.id, {
     helpful: false,
     createdAt: new Date().toISOString(),

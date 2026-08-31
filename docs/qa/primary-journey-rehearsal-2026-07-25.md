@@ -1,11 +1,15 @@
 # Primary journey release rehearsal
 
+> Historical launch snapshot. The current policy keeps browser execution out of
+> CI: the production-release agent runs the relevant flows against development,
+> commits the evidence under `tests/browser-qa/`, and the production workflow
+> validates those records without launching a browser.
+
 Date: 25 July 2026
 Ticket: UX-05
 Environment: isolated local launch graph and PostgreSQL schemas, Node 24,
 Chromium and the unified app plus its product workers
-Candidate status: implementation evidence only; the immutable CI candidate must
-repeat the same gates before UX-05 can close
+Candidate status: historical implementation evidence only
 
 ## Coverage
 
@@ -50,6 +54,7 @@ contract.
 
 ## Release-candidate closure gate
 
-UX-05 closes only when the immutable launch commit runs the deterministic E2E
-job and required live-provider job successfully, publishes their Playwright
-evidence, and the deployed digest matches that commit.
+Under the current release policy, closure requires the release agent to run the
+deterministic and required provider flows against development, commit their
+Browser QA evidence to the immutable launch commit, and pass the production
+record-integrity gate. The deployed digest must match that commit.

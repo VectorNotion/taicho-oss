@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useDimensionResearch } from "../research/useDimensionResearch";
+import { useDurableDimensionResearch } from "../research/useDurableDimensionResearch";
 import { ResearchProgressPanel } from "../research/ResearchProgressPanel";
 import { DueBadge } from "../action-items/DueBadge";
 
@@ -101,52 +101,70 @@ const EMPTY_FORM = { name: "", title: "", email: "", linkedinUrl: "" };
 function ProspectResearchSurface({
   prospectId,
   prospectName,
+  accountName,
   onComplete,
 }: {
   prospectId: string;
   prospectName: string;
+  accountName: string;
   onComplete: () => void;
 }) {
-  const { start, final, error, isStreaming, isComplete, dimensions } = useDimensionResearch(
-    `/outreach/prospects/${prospectId}/research`,
-  );
+  const research = useDurableDimensionResearch({
+    action: "research_prospect",
+    entityId: prospectId,
+    startApi: "/outreach/operations/prospect-research",
+    body: { prospectId },
+    primaryScope: "person",
+  });
   const completed = useRef(false);
 
   useEffect(() => {
-    start();
+    void research.start();
     // Runs once per mount; the row remounts this component by key to re-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (final && !completed.current) {
+    if (research.final && !completed.current) {
       completed.current = true;
       toast.success(`Research complete for ${prospectName}`);
       onComplete();
     }
-  }, [final, prospectName, onComplete]);
+  }, [research.final, prospectName, onComplete]);
 
   useEffect(() => {
-    if (error) toast.error(error);
-  }, [error]);
+    if (research.error) toast.error(research.error);
+  }, [research.error]);
 
-  if (isComplete && !error) return null;
+  if (research.isComplete && !research.error) return null;
 
   return (
     <ResearchProgressPanel
-      error={error}
+      error={research.error}
       groups={[
         {
           id: prospectId,
           entityName: prospectName,
           kind: "person",
           label: "Person research",
-          dimensions,
+          dimensions: research.personDimensions,
           pendingLabel: "Loading the persona criteria for this person.",
         },
+        {
+          id: `${prospectId}-account`,
+          entityName: accountName,
+          kind: "account",
+          label: "Company research",
+          dimensions: research.accountDimensions,
+          pendingLabel: "Queued after person research.",
+        },
       ]}
-      isComplete={isComplete}
-      isStreaming={isStreaming}
+      isComplete={research.isComplete}
+      isRetrying={research.isRetrying}
+      isStreaming={research.isStreaming}
+      onRetry={() => void research.retry()}
+      operationId={research.operationId}
+      persistedProgress={research.progress}
     />
   );
 }
@@ -298,6 +316,7 @@ export function AccountProspectsSection({
 
       {activeResearch ? (
         <ProspectResearchSurface
+          accountName={accountName}
           key={activeResearch.id}
           onComplete={onRefresh}
           prospectId={activeResearch.id}

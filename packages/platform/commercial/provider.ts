@@ -130,30 +130,40 @@ export class UnmeteredCommercialProvider implements CommercialProvider {
   }
 }
 
-let activeProvider: CommercialProvider = new UnmeteredCommercialProvider();
+// Next.js can evaluate this module in more than one server bundle inside the
+// same process. Module-local state lets one bundle install metered billing
+// while a background reconciler imported by another bundle silently keeps the
+// unmetered default. Store the provider on the process-wide symbol registry so
+// request handlers and reconcilers always settle/release the same reservations.
+const commercialProviderKey = Symbol.for("content-automation.commercial-provider");
+
+function providerRegistry(): Record<symbol, CommercialProvider | undefined> {
+  return globalThis as typeof globalThis & Record<symbol, CommercialProvider | undefined>;
+}
 
 export function setCommercialProvider(provider: CommercialProvider) {
-  activeProvider = provider;
+  providerRegistry()[commercialProviderKey] = provider;
 }
 
 export function commercialProvider(): CommercialProvider {
-  return activeProvider;
+  const registry = providerRegistry();
+  return registry[commercialProviderKey] ??= new UnmeteredCommercialProvider();
 }
 
 // Drop-in delegates matching the historical `@content-automation/commerce/server`
 // signatures, so call sites swap an import path and nothing else.
 export const getCommercialSummary: CommercialProvider["getCommercialSummary"] = (...args) =>
-  activeProvider.getCommercialSummary(...args);
+  commercialProvider().getCommercialSummary(...args);
 export const requireCapability: CommercialProvider["requireCapability"] = (...args) =>
-  activeProvider.requireCapability(...args);
+  commercialProvider().requireCapability(...args);
 export const estimateAndReserve: CommercialProvider["estimateAndReserve"] = (...args) =>
-  activeProvider.estimateAndReserve(...args);
+  commercialProvider().estimateAndReserve(...args);
 export const settleReservation: CommercialProvider["settleReservation"] = (...args) =>
-  activeProvider.settleReservation(...args);
+  commercialProvider().settleReservation(...args);
 export const releaseReservation: CommercialProvider["releaseReservation"] = (...args) =>
-  activeProvider.releaseReservation(...args);
+  commercialProvider().releaseReservation(...args);
 export const isPlatformOperator: CommercialProvider["isPlatformOperator"] = (...args) =>
-  activeProvider.isPlatformOperator(...args);
+  commercialProvider().isPlatformOperator(...args);
 export const provisionCommercialOrganization: CommercialProvider["provisionCommercialOrganization"] = (
   ...args
-) => activeProvider.provisionCommercialOrganization(...args);
+) => commercialProvider().provisionCommercialOrganization(...args);

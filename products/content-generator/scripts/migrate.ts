@@ -1,11 +1,13 @@
 import { publishingSchemaName } from "../publishing/pool";
-import { adminPoolConfig, databaseFor, organization } from "@content-automation/database";
+import { databaseFor, migrationPoolConfig, organization } from "@content-automation/database";
 import { runMigrations } from "@content-automation/database/migrate";
 import { eq } from "drizzle-orm";
 import { Pool } from "pg";
 import { repairLegacyContentIdeaStatuses } from "../data/content-repository";
 import { closeDriver, runWithGraphOrganization } from "@content-automation/platform/data/graph";
 import { ensureWorkspaceContactLabels } from "@content-automation/platform/workspace/contacts";
+import { backfillAllLegacyMediaOwnership } from "../media/backfill";
+import { closePublishingPools } from "../publishing/pool";
 
 const GRAPH_CLOSE_TIMEOUT_MS = 5_000;
 
@@ -23,7 +25,7 @@ async function main() {
   // Cross-schema identity lookup must use the canonical admin connection.
   // The publishing admin pool intentionally restricts search_path to the
   // publishing schema and therefore cannot resolve public.organization.
-  const pool = new Pool({ ...adminPoolConfig(), max: 1 });
+  const pool = new Pool({ ...migrationPoolConfig(), max: 1 });
   const e2eOrganizationSlug =
     process.env.NODE_ENV !== "production"
       ? process.env.CONTENT_MIGRATION_ORGANIZATION_SLUG
@@ -56,6 +58,15 @@ async function main() {
   }
 
   try {
+    const media = await backfillAllLegacyMediaOwnership();
+    console.log(
+      `Content Base media ownership is current (${media.posts} legacy Posts across ${media.bases} Content Bases).`,
+    );
+    if (media.orphans) {
+      console.warn(
+        `Preserved ${media.orphans} legacy media row(s) whose deleted Post has no Content Base mapping.`,
+      );
+    }
     const [repairedIdeas, promotedContacts] = await runWithGraphOrganization(
       organizationId,
       () => Promise.all([
@@ -67,7 +78,7 @@ async function main() {
       `Workspace graph is current (${repairedIdeas} legacy idea statuses repaired, ${promotedContacts} contacts promoted).`,
     );
   } finally {
-    await closeGraphConnection();
+    await Promise.all([closePublishingPools(), closeGraphConnection()]);
   }
 }
 

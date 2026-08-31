@@ -117,6 +117,10 @@ export interface RunResult {
   partial?: boolean
   /** Human-readable description of what was lost, e.g. "1/12 shards failed to score". */
   degradedReason?: string
+  /** Whether the audience was fitted from real graph anchors or fell back to default descriptors. */
+  audienceGrounding?: 'graph' | 'default'
+  /** The Monte Carlo audience draws actually computed (≤ audienceSize) — see spec 2026-08-31 §3.1. */
+  computedAudienceSize?: number
 }
 
 /**

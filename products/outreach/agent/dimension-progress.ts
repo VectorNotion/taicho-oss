@@ -28,6 +28,54 @@ export interface DimensionProgress {
   entityName?: string;
 }
 
+export interface ResearchPageActivity {
+  title: string;
+  url: string;
+  /** A bounded Markdown excerpt of the text supplied to synthesis. */
+  contentPreview: string;
+  status: 'extracted' | 'snippet' | 'failed';
+  error?: string;
+}
+
+/**
+ * Provider-level activity that is persisted with durable research operations.
+ * This deliberately describes real work (queries, pages, and synthesis), not
+ * presentation steps invented by the frontend.
+ */
+export interface ResearchActivity {
+  type:
+    | 'query_started'
+    | 'query_completed'
+    | 'query_failed'
+    | 'synthesis_started'
+    | 'synthesis_completed'
+    | 'observations_persisted'
+    | 'graph_enrichment_started'
+    | 'graph_enrichment_completed'
+    | 'graph_enrichment_warning'
+    | 'scoring_started'
+    | 'scoring_completed'
+    | 'scope_completed';
+  scope: 'person' | 'account';
+  occurredAt: string;
+  dimensionKey?: string;
+  dimensionName?: string;
+  query?: string;
+  pagesFound?: number;
+  pagesRead?: number;
+  pagesFailed?: number;
+  durationMs?: number;
+  pages?: ResearchPageActivity[];
+  criteriaTotal?: number;
+  criteriaCompleted?: number;
+  criteriaWithoutEvidence?: number;
+  observationCount?: number;
+  claimCount?: number;
+  entityCount?: number;
+  warnings?: string[];
+  error?: string;
+}
+
 /** Adapt dimension progress into a `data-dimension-progress` stream part. */
 export function streamingDimensionProgress(emit: StreamEmit): (part: DimensionProgress) => void {
   return (part) =>

@@ -1,9 +1,24 @@
 import { getSession } from '@content-automation/platform/data/graph';
 
+function graphTimestamp(value: unknown): string {
+  const serialized = String(value);
+  if (
+    /^\d{4}-\d{2}-\d{2}T/.test(serialized)
+    && !/(?:Z|[+-]\d{2}:\d{2})(?:\[.*\])?$/.test(serialized)
+  ) {
+    // Legacy project rows used FalkorDB localdatetime(), whose timezone-free
+    // value represents the database's UTC clock. Make that contract explicit
+    // before the browser parses it.
+    return `${serialized}Z`;
+  }
+  return serialized;
+}
+
 // Project operations
 export async function createProject(data: {
   title: string;
   description: string;
+  kind?: string;
   tags: string[];
   demoUrl?: string;
   githubUrl?: string;
@@ -19,6 +34,7 @@ export async function createProject(data: {
         id: randomUUID(),
         title: $title,
         description: $description,
+        kind: $kind,
         tags: $tags,
         demoUrl: $demoUrl,
         githubUrl: $githubUrl,
@@ -32,6 +48,7 @@ export async function createProject(data: {
       {
         title: data.title,
         description: data.description,
+        kind: data.kind || 'project',
         tags: data.tags,
         demoUrl: data.demoUrl || null,
         githubUrl: data.githubUrl || null,
@@ -47,13 +64,14 @@ export async function createProject(data: {
       id: project.id,
       title: project.title,
       description: project.description,
+      kind: project.kind || 'project',
       tags: project.tags,
       demoUrl: project.demoUrl,
       githubUrl: project.githubUrl,
       liveUrl: project.liveUrl,
       docsUrl: project.docsUrl,
-      createdAt: project.createdAt.toString(),
-      updatedAt: project.updatedAt.toString(),
+      createdAt: graphTimestamp(project.createdAt),
+      updatedAt: graphTimestamp(project.updatedAt),
     };
   } finally {
     await session.close();
@@ -67,9 +85,7 @@ export async function getProjects() {
     const result = await session.run(
       `
       MATCH (p:Project)
-      OPTIONAL MATCH (p)-[r]->(e)
-      WHERE e:Framework OR e:Database OR e:Cloud OR e:Language
-         OR e:AIComponent OR e:Feature OR e:Integration OR e:BusinessValue
+      OPTIONAL MATCH (p)-[r:KNOWLEDGE_HAS]->(e:CanonicalEntity {schemaVersion: 'knowledge.v1'})
       WITH p, count(DISTINCT e) as entityCount
       RETURN p, entityCount
       ORDER BY p.createdAt DESC
@@ -83,13 +99,14 @@ export async function getProjects() {
         id: project.id,
         title: project.title,
         description: project.description,
+        kind: project.kind || 'project',
         tags: project.tags,
         demoUrl: project.demoUrl,
         githubUrl: project.githubUrl,
         liveUrl: project.liveUrl,
         docsUrl: project.docsUrl,
-        createdAt: project.createdAt.toString(),
-        updatedAt: project.updatedAt.toString(),
+        createdAt: graphTimestamp(project.createdAt),
+        updatedAt: graphTimestamp(project.updatedAt),
         entityCount: entityCount,
         processed: project.processed || false,
       };
@@ -120,13 +137,14 @@ export async function getProjectById(id: string) {
       id: project.id,
       title: project.title,
       description: project.description,
+      kind: project.kind || 'project',
       tags: project.tags,
       demoUrl: project.demoUrl,
       githubUrl: project.githubUrl,
       liveUrl: project.liveUrl,
       docsUrl: project.docsUrl,
-      createdAt: project.createdAt.toString(),
-      updatedAt: project.updatedAt.toString(),
+      createdAt: graphTimestamp(project.createdAt),
+      updatedAt: graphTimestamp(project.updatedAt),
     };
   } finally {
     await session.close();
@@ -138,6 +156,7 @@ export async function updateProject(
   data: {
     title?: string;
     description?: string;
+    kind?: string;
     tags?: string[];
     demoUrl?: string;
     githubUrl?: string;
@@ -153,6 +172,7 @@ export async function updateProject(
       MATCH (p:Project {id: $id})
       SET p.title = $title,
           p.description = $description,
+          p.kind = $kind,
           p.tags = $tags,
           p.demoUrl = $demoUrl,
           p.githubUrl = $githubUrl,
@@ -165,6 +185,7 @@ export async function updateProject(
         id,
         title: data.title,
         description: data.description,
+        kind: data.kind || 'project',
         tags: data.tags || [],
         demoUrl: data.demoUrl || null,
         githubUrl: data.githubUrl || null,
@@ -182,13 +203,14 @@ export async function updateProject(
       id: project.id,
       title: project.title,
       description: project.description,
+      kind: project.kind || 'project',
       tags: project.tags,
       demoUrl: project.demoUrl,
       githubUrl: project.githubUrl,
       liveUrl: project.liveUrl,
       docsUrl: project.docsUrl,
-      createdAt: project.createdAt.toString(),
-      updatedAt: project.updatedAt.toString(),
+      createdAt: graphTimestamp(project.createdAt),
+      updatedAt: graphTimestamp(project.updatedAt),
     };
   } finally {
     await session.close();
@@ -215,22 +237,7 @@ export async function deleteProject(id: string) {
   }
 }
 
-// ============= AGENT MIGRATION: PROJECT GRAPH (build_project_graph) =============
-
-/**
- * Entity type → project relationship type. Source of truth for the typed
- * project→entity edges written by the build_project_graph action.
- */
-const ENTITY_RELATIONSHIP_MAP: Record<string, string> = {
-  Framework: 'USES_FRAMEWORK',
-  Database: 'USES_DATABASE',
-  Cloud: 'DEPLOYED_ON',
-  Language: 'WRITTEN_IN',
-  AIComponent: 'IMPLEMENTS',
-  Feature: 'HAS_FEATURE',
-  Integration: 'INTEGRATES_WITH',
-  BusinessValue: 'ACHIEVES',
-};
+// ============= PROJECT KNOWLEDGE EXTRACTION =============
 
 /**
  * Read a project's processing state for the build_project_graph guard.
@@ -266,69 +273,16 @@ export async function getProjectProcessingState(
 }
 
 /**
- * Store an extracted entity with dedup and a typed project→entity relationship.
- *
- * Dedup is by (label, name): an existing entity of the same type/name is reused
- * (its last_mentioned bumped); otherwise a new `{type_lower}-<uuid>` node is
- * created. The typed edge (per ENTITY_RELATIONSHIP_MAP) is MERGE'd either way.
+ * Removed compatibility shim. Callers must reconcile the complete registered
+ * extraction profile so stale extraction-owned claims can be superseded.
  */
 export async function storeProjectEntity(
   projectId: string,
   entity: { name: string; type: string }
 ): Promise<void> {
-  const relationship = ENTITY_RELATIONSHIP_MAP[entity.type];
-  if (!relationship) {
-    throw new Error(`Unknown project entity type: ${entity.type}`);
-  }
-
-  const session = await getSession();
-
-  try {
-    // Dedup check by label + name (label cannot be parameterized).
-    const existing = await session.run(
-      `MATCH (e:${entity.type} {name: $name}) RETURN e.id as id`,
-      { name: entity.name }
-    );
-
-    let entityId: string;
-    if (existing.records.length > 0) {
-      entityId = existing.records[0].get('id');
-      await session.run(
-        `
-        MATCH (e:${entity.type} {id: $entityId})
-        SET e.last_mentioned = localdatetime()
-        `,
-        { entityId }
-      );
-    } else {
-      const created = await session.run(
-        `
-        CREATE (e:${entity.type} {
-          id: $typeLower + '-' + randomUUID(),
-          name: $name,
-          first_mentioned: localdatetime(),
-          last_mentioned: localdatetime()
-        })
-        RETURN e.id as id
-        `,
-        { typeLower: entity.type.toLowerCase(), name: entity.name }
-      );
-      entityId = created.records[0].get('id');
-    }
-
-    // Typed relationship is the source of truth for project↔entity connections.
-    await session.run(
-      `
-      MATCH (p:Project {id: $projectId})
-      MATCH (e:${entity.type} {id: $entityId})
-      MERGE (p)-[r:${relationship}]->(e)
-      SET r.created_at = localdatetime()
-      `,
-      { projectId, entityId }
-    );
-  } finally {
-    await session.close();
-  }
+  void projectId;
+  void entity;
+  throw new Error('storeProjectEntity was removed; reconcile the complete content.project_extraction profile instead.');
 }
 
 /**
@@ -357,7 +311,7 @@ export async function markProjectProcessed(
 
 /**
  * Aggregate entities by how many projects reference them, for topic extraction.
- * Restricted to AIComponent / Feature / BusinessValue (the topic-bearing types).
+ * The registered projection decides which entity roles are topic-bearing.
  */
 export async function getEntitiesByProjectCount(): Promise<
   Array<{
@@ -373,9 +327,8 @@ export async function getEntitiesByProjectCount(): Promise<
   try {
     const result = await session.run(
       `
-      MATCH (p:Project)-[r]->(e)
-      WHERE labels(e)[0] IN ['AIComponent', 'Feature', 'BusinessValue']
-      WITH labels(e)[0] as entity_type, e.name as name, e.id as id,
+      MATCH (p:Project)-[r:KNOWLEDGE_HAS]->(e:CanonicalEntity {schemaVersion: 'knowledge.v1'})
+      WITH r.typeKey as entity_type, r.name as name, e.id as id,
            collect(p.title) as project_names, count(p) as project_count
       RETURN entity_type, name, id, project_names, project_count
       ORDER BY project_count DESC
@@ -395,9 +348,31 @@ export async function getEntitiesByProjectCount(): Promise<
 }
 
 export interface ProjectEntity {
+  entityId: string;
+  claimId: string | null;
   relationship: string;
   name: string;
   type: string;
+  statement: string | null;
+  evidence: {
+    id: string;
+    excerpt: string;
+    source: {
+      id: string;
+      kind: string;
+      canonicalUri: string;
+      title: string | null;
+    } | null;
+  } | null;
+}
+
+function parseKnowledgeJson<T>(value: unknown): T | null {
+  if (typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }
 
 export async function getProjectEntities(projectId: string): Promise<ProjectEntity[]> {
@@ -406,22 +381,46 @@ export async function getProjectEntities(projectId: string): Promise<ProjectEnti
   try {
     const result = await session.run(
       `
-      MATCH (p:Project {id: $projectId})-[r]->(e)
-      WHERE e:Framework OR e:Database OR e:Cloud OR e:Language
-         OR e:AIComponent OR e:Feature OR e:Integration OR e:BusinessValue
-      RETURN type(r) as relationship,
-             e.name as name,
-             labels(e)[0] as type
-      ORDER BY type(r), e.name
+      MATCH (p:Project {id: $projectId})-[r:KNOWLEDGE_HAS]->(e:CanonicalEntity {schemaVersion: 'knowledge.v1'})
+      OPTIONAL MATCH (claim:Claim {id: r.claimId, schemaVersion: 'knowledge.v1'})-[:SUPPORTED_BY]->(evidence:Evidence {schemaVersion: 'knowledge.v1'})
+      OPTIONAL MATCH (revision:SourceRevision {id: evidence.revisionId, schemaVersion: 'knowledge.v1'})
+      OPTIONAL MATCH (source:KnowledgeSource {id: revision.sourceId, schemaVersion: 'knowledge.v1'})
+      RETURN 'KNOWLEDGE_HAS' as relationship,
+             e.id as entityId,
+             r.claimId as claimId,
+             r.name as name,
+             r.typeKey as type,
+             claim.json as claimJson,
+             evidence.json as evidenceJson,
+             source.json as sourceJson
+      ORDER BY r.typeKey, r.name
       `,
       { projectId }
     );
 
-    return result.records.map((record) => ({
-      relationship: record.get('relationship'),
-      name: record.get('name'),
-      type: record.get('type'),
-    }));
+    return result.records.map((record) => {
+      const claim = parseKnowledgeJson<{ statement?: string }>(record.get('claimJson'));
+      const evidence = parseKnowledgeJson<{ id: string; excerpt: string }>(record.get('evidenceJson'));
+      const source = parseKnowledgeJson<{ id: string; kind: string; canonicalUri: string; title?: string }>(record.get('sourceJson'));
+      return {
+        entityId: record.get('entityId'),
+        claimId: record.get('claimId') ?? null,
+        relationship: record.get('relationship'),
+        name: record.get('name'),
+        type: record.get('type'),
+        statement: claim?.statement ?? null,
+        evidence: evidence ? {
+          id: evidence.id,
+          excerpt: evidence.excerpt,
+          source: source ? {
+            id: source.id,
+            kind: source.kind,
+            canonicalUri: source.canonicalUri,
+            title: source.title ?? null,
+          } : null,
+        } : null,
+      };
+    });
   } finally {
     await session.close();
   }

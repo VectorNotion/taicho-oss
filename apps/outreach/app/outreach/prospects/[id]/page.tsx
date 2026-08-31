@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -18,9 +19,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
-import { useDimensionResearch } from "@/products/outreach/ui/components/research/useDimensionResearch";
+import { useDurableDimensionResearch } from "@/products/outreach/ui/components/research/useDurableDimensionResearch";
 
 import {
   ProspectHero,
@@ -35,12 +36,11 @@ import {
   ProspectDossierCard,
   ProspectResearchInsights,
   OutreachGenerationPanel,
-  type OutreachDraftPartial,
   type ProspectNavigation,
   type Activity,
 } from "@/components/prospects";
 import type { ActionItem } from "@/products/outreach/domain/action-items";
-import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
+import { useDurableOperation } from "@content-automation/ui/hooks/use-durable-operation";
 import {
   Select,
   SelectContent,
@@ -63,9 +63,36 @@ import type { CatalogItem } from "@/products/outreach/domain/catalog";
 type ConfirmDelete =
   | { type: "prospect" }
   | { type: "activity"; id: string }
+  | { type: "action"; id: string }
   | { type: "message"; id: string };
 
-type NurtureFunnel = { id: string; name: string };
+type NurtureFunnel = {
+  id: string;
+  name: string;
+  currentMembership: {
+    id: string;
+    contactId: string;
+    currentNodeId: string | null;
+    status: string;
+    enteredNodeAt: string | null;
+  } | null;
+};
+
+export function ProspectMissingState() {
+  return (
+    <div className="w-full min-w-0">
+      <div className="flex flex-col items-center gap-3 py-24 text-center">
+        <UserX className="h-8 w-8 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">
+          This person is not currently in the Outreach prospects list
+        </p>
+        <Button variant="outline" asChild>
+          <Link href="/outreach/prospects">Back to prospects</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function ProspectDetailPage({
   params,
@@ -75,6 +102,7 @@ export function ProspectDetailPage({
   assistantAction?: ReactNode;
 }) {
   const { id: routeProspectId } = use(params);
+  const pathname = usePathname();
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -88,8 +116,7 @@ export function ProspectDetailPage({
   const [outreachMessages, setOutreachMessages] = useState<OutreachMessage[]>([]);
   const [outreachLoading, setOutreachLoading] = useState(true);
   const [outreachMedium, setOutreachMedium] = useState<OutreachMedium | null>(null);
-  const generationAttemptRef = useRef<{ key: string; id: string } | null>(null);
-  const [showOutreachCompletion, setShowOutreachCompletion] = useState(false);
+  const generationStartedHereRef = useRef(false);
   const [contentCommentDialogOpen, setContentCommentDialogOpen] = useState(false);
   const [targetContent, setTargetContent] = useState("");
   const [addActivityDialogOpen, setAddActivityDialogOpen] = useState(false);
@@ -111,56 +138,109 @@ export function ProspectDetailPage({
   const [selectedFunnelId, setSelectedFunnelId] = useState("");
   const [enrollEmail, setEnrollEmail] = useState("");
   const [isEnrolling, setIsEnrolling] = useState(false);
-  const qualifyStream = useCapabilityStream<{ score?: number; notes?: string }, { score?: number }>({
-    api: `/outreach/prospects/${prospectId}/qualify`,
+  const [nurtureError, setNurtureError] = useState("");
+  const qualificationOperation = useDurableOperation<{
+    status: "success" | "skipped";
+    qualification?: Record<string, unknown>;
+    reason?: string;
+  }, {
+    kind: "qualification";
+    phase: "loading" | "persisted";
+    label: string;
+    updatedAt: string;
+  }>({
+    action: "qualify_prospect",
+    entityId: prospectId,
+    startApi: "/outreach/operations/prospect-qualification",
+    body: { prospectId },
   });
-  const personResearch = useDimensionResearch(
-    `/outreach/prospects/${prospectId}/research/person`,
-    { primaryScope: "person" },
-  );
-  const accountResearch = useDimensionResearch(
-    `/outreach/prospects/${prospectId}/research/account`,
-    { primaryScope: "account" },
-  );
-  const outreachGeneration = useCapabilityStream<OutreachDraftPartial, OutreachMessage>({
-    api: `/outreach/prospects/${prospectId}/outreach`,
+  const prospectResearch = useDurableDimensionResearch({
+    action: "research_prospect",
+    entityId: prospectId,
+    startApi: "/outreach/operations/prospect-research",
+    body: { prospectId },
+    primaryScope: "person",
   });
-  const isGeneratingOutreach = outreachGeneration.isStreaming;
+  const accountResearch = useDurableDimensionResearch({
+    action: "research_account",
+    entityId: `prospect:${prospectId}`,
+    startApi: "/outreach/operations/account-research",
+    body: {
+      prospectId,
+      ...(dossier?.account?.id ? { accountId: dossier.account.id } : {}),
+    },
+    primaryScope: "account",
+  });
+  const outreachGeneration = useDurableOperation<{
+    messageId: string;
+    prospectId: string;
+    medium: OutreachMedium;
+    subject: string | null;
+    content: string;
+    message: OutreachMessage;
+    simulation: "sandbox" | null;
+  }, {
+    kind: "outreach-generation";
+    phase: "context" | "draft" | "save";
+    label: string;
+    state: "running" | "complete";
+    updatedAt: string;
+  }>({
+    action: "generate_outreach",
+    entityId: prospectId,
+    startApi: "/outreach/operations/message-generation",
+    body: { prospectId, medium: outreachMedium ?? "email" },
+  });
+  const isGeneratingOutreach = outreachGeneration.isRunning;
 
-  const fetchDossier = useCallback(async (options?: { silent?: boolean }) => {
+  const fetchDossier = useCallback(async (options?: { signal?: AbortSignal; silent?: boolean }) => {
     if (!prospectId) return;
     if (!options?.silent) setDossierLoading(true);
     try {
-      const { dossier: loaded } = await apiGet<{ dossier: ProspectDossier }>(`/outreach/prospects/${prospectId}/dossier`);
-      setDossier(loaded);
+      const { dossier: loaded } = await apiGet<{ dossier: ProspectDossier }>(
+        `/outreach/prospects/${prospectId}/dossier`,
+        undefined,
+        { signal: options?.signal },
+      );
+      if (!options?.signal?.aborted) setDossier(loaded);
     } catch (error) {
+      if (options?.signal?.aborted) return;
       console.error("Error fetching dossier:", error);
       toast.error("Could not load the sales-intelligence dossier — refresh to try again");
     } finally {
-      if (!options?.silent) setDossierLoading(false);
+      if (!options?.silent && !options?.signal?.aborted) setDossierLoading(false);
     }
   }, [prospectId]);
 
   // Fetch prospect data
   useEffect(() => {
-    let cancelled = false;
+    if (pathname !== `/outreach/prospects/${routeProspectId}`) return;
+    const controller = new AbortController();
     async function fetchProspect() {
       setIsLoading(true);
       setProspect(null);
       try {
-        const data = await apiGet<{ prospect: Prospect }>(`/outreach/prospects/${routeProspectId}`);
-        if (!cancelled) setProspect(data.prospect);
+        const data = await apiGet<{ prospect: Prospect }>(
+          `/outreach/prospects/${routeProspectId}`,
+          undefined,
+          { signal: controller.signal },
+        );
+        if (!controller.signal.aborted) setProspect(data.prospect);
       } catch (error) {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiError && error.status === 404) {
+          setProspect(null);
+          return;
+        }
         console.error("Error fetching prospect:", error);
         toast.error("Could not load this person — refresh to try again");
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     }
     void fetchProspect();
-    return () => { cancelled = true; };
-  }, [routeProspectId]);
+    return () => controller.abort();
+  }, [pathname, routeProspectId]);
 
   useEffect(() => {
     void apiGet<{ items: CatalogItem[] }>("/outreach/catalog")
@@ -210,7 +290,11 @@ export function ProspectDetailPage({
     setNavigationLoading(true);
     setNavigationError(false);
     setNavigation(null);
-    void apiGet<{ navigation: ProspectNavigation }>(`/outreach/prospects/${routeProspectId}/navigation`)
+    void apiGet<{ navigation: ProspectNavigation }>(
+      `/outreach/prospects/${routeProspectId}/navigation`,
+      undefined,
+      { signal: controller.signal },
+    )
       .then(({ navigation: data }) => {
         if (!controller.signal.aborted) setNavigation(data);
       })
@@ -229,65 +313,102 @@ export function ProspectDetailPage({
   // Nurture is an optional entitlement and does not exist in the standalone
   // Outreach shell. A successful response enables the cross-product handoff;
   // 403/404 deliberately leave the action hidden.
+  const refreshNurtureFunnels = useCallback(async () => {
+    try {
+      const data = await apiGet<{ funnels: NurtureFunnel[] }>(
+        "/cascade/funnels",
+        { workspaceContactId: prospectId },
+      );
+      setNurtureFunnels(data.funnels);
+      return data.funnels;
+    } catch {
+      setNurtureFunnels(null);
+      return null;
+    }
+  }, [prospectId]);
+
   useEffect(() => {
-    void apiGet<{ funnels: NurtureFunnel[] }>("/cascade/funnels")
-      .then((data) => setNurtureFunnels(data.funnels))
-      .catch(() => setNurtureFunnels(null));
-  }, []);
+    void refreshNurtureFunnels();
+  }, [refreshNurtureFunnels]);
 
   // Fetch outreach messages
   useEffect(() => {
+    const controller = new AbortController();
     async function fetchOutreach() {
       if (!prospectId) return;
 
       setOutreachLoading(true);
       try {
-        const data = await apiGet<{ messages: OutreachMessage[] }>(`/outreach/prospects/${prospectId}/messages`);
-        setOutreachMessages(data.messages);
+        const data = await apiGet<{ messages: OutreachMessage[] }>(
+          `/outreach/prospects/${prospectId}/messages`,
+          undefined,
+          { signal: controller.signal },
+        );
+        if (!controller.signal.aborted) setOutreachMessages(data.messages);
       } catch (error) {
+        if (controller.signal.aborted) return;
         console.error("Error fetching outreach:", error);
         toast.error("Could not load outreach history — refresh to try again");
       } finally {
-        setOutreachLoading(false);
+        if (!controller.signal.aborted) setOutreachLoading(false);
       }
     }
-    fetchOutreach();
+    void fetchOutreach();
+    return () => controller.abort();
   }, [prospectId]);
 
   useEffect(() => {
-    if (!qualifyStream.final || !prospectId) return;
+    if (!qualificationOperation.final || !prospectId) return;
     void fetchDossier({ silent: true });
-  }, [qualifyStream.final, fetchDossier, prospectId]);
-  useEffect(() => { if (qualifyStream.error) toast.error(qualifyStream.error); }, [qualifyStream.error]);
+  }, [qualificationOperation.final, fetchDossier, prospectId]);
 
   // One endpoint provides the account, person, and qualification snapshot so
   // scores from different refreshes are never stitched together in the UI.
   useEffect(() => {
-    void fetchDossier();
+    const controller = new AbortController();
+    void fetchDossier({ signal: controller.signal });
+    return () => controller.abort();
   }, [fetchDossier]);
 
   useEffect(() => {
-    if (!personResearch.final || !prospectId) return;
-    toast.success("Person research complete");
+    if (prospectResearch.operationStatus !== "succeeded" || !prospectResearch.operationId || !prospectId) return;
+    toast.success("Prospect research complete");
     void fetchDossier({ silent: true });
-  }, [personResearch.final, fetchDossier, prospectId]);
-  useEffect(() => { if (personResearch.error) toast.error(personResearch.error); }, [personResearch.error]);
+  }, [prospectResearch.operationId, prospectResearch.operationStatus, fetchDossier, prospectId]);
+  useEffect(() => { if (prospectResearch.error) toast.error(prospectResearch.error); }, [prospectResearch.error]);
 
   useEffect(() => {
-    if (!accountResearch.final || !prospectId) return;
+    if (accountResearch.operationStatus !== "succeeded" || !accountResearch.operationId || !prospectId) return;
     toast.success("Account research complete");
     void fetchDossier({ silent: true });
-  }, [accountResearch.final, fetchDossier, prospectId]);
+  }, [accountResearch.operationId, accountResearch.operationStatus, fetchDossier, prospectId]);
   useEffect(() => { if (accountResearch.error) toast.error(accountResearch.error); }, [accountResearch.error]);
+
+  const prospectScopeCompletedAt = prospectResearch.telemetry?.activities.findLast((activity) => (
+    activity.scope === "person" && activity.type === "scope_completed"
+  ))?.occurredAt ?? null;
+  const accountScopeCompletedAt = accountResearch.telemetry?.activities.findLast((activity) => (
+    activity.scope === "account" && activity.type === "scope_completed"
+  ))?.occurredAt ?? null;
+
+  // Each research execution publishes its saved criteria as soon as its own
+  // completion receipt arrives. It never waits for the other execution.
+  useEffect(() => {
+    if (!prospectScopeCompletedAt || !prospectId) return;
+    void fetchDossier({ silent: true });
+  }, [fetchDossier, prospectScopeCompletedAt, prospectId]);
+  useEffect(() => {
+    if (!accountScopeCompletedAt || !prospectId) return;
+    void fetchDossier({ silent: true });
+  }, [accountScopeCompletedAt, fetchDossier, prospectId]);
 
   // The AI SDK stream saves the completed artifact before emitting `final`.
   // Move that durable message into the visible draft history immediately; the
   // operational generation surface then yields back to the saved draft.
   useEffect(() => {
-    const message = outreachGeneration.final;
+    const message = outreachGeneration.final?.message;
     if (!message) return;
-    generationAttemptRef.current = null;
-    setShowOutreachCompletion(true);
+    setOutreachMedium(message.medium);
     setOutreachMessages((current) => [
       message,
       ...current.filter(({ id }) => id !== message.id),
@@ -301,9 +422,10 @@ export function ProspectDetailPage({
       ]);
       setActionItemsLoading(false);
     }
-    toast.success("Customer-first outreach draft ready");
-    const completionTimer = window.setTimeout(() => setShowOutreachCompletion(false), 1_800);
-    return () => window.clearTimeout(completionTimer);
+    if (generationStartedHereRef.current) {
+      toast.success("Customer-first outreach draft ready");
+      generationStartedHereRef.current = false;
+    }
   }, [outreachGeneration.final]);
   useEffect(() => {
     if (outreachGeneration.error) toast.error(outreachGeneration.error);
@@ -311,40 +433,54 @@ export function ProspectDetailPage({
 
   // Fetch notes
   useEffect(() => {
+    const controller = new AbortController();
     async function fetchNotes() {
       if (!prospectId) return;
 
       setNotesLoading(true);
       try {
-        const data = await apiGet<{ notes: ProspectNote[] }>(`/outreach/prospects/${prospectId}/notes`);
-        setNotes(data.notes);
+        const data = await apiGet<{ notes: ProspectNote[] }>(
+          `/outreach/prospects/${prospectId}/notes`,
+          undefined,
+          { signal: controller.signal },
+        );
+        if (!controller.signal.aborted) setNotes(data.notes);
       } catch (error) {
+        if (controller.signal.aborted) return;
         console.error("Error fetching notes:", error);
         toast.error("Could not load notes — refresh to try again");
       } finally {
-        setNotesLoading(false);
+        if (!controller.signal.aborted) setNotesLoading(false);
       }
     }
-    fetchNotes();
+    void fetchNotes();
+    return () => controller.abort();
   }, [prospectId]);
 
   // Fetch activities
   useEffect(() => {
+    const controller = new AbortController();
     async function fetchActivities() {
       if (!prospectId) return;
 
       setActivitiesLoading(true);
       try {
-        const data = await apiGet<{ activities: ProspectActivity[] }>(`/outreach/prospects/${prospectId}/activities`);
-        setActivities(data.activities);
+        const data = await apiGet<{ activities: ProspectActivity[] }>(
+          `/outreach/prospects/${prospectId}/activities`,
+          undefined,
+          { signal: controller.signal },
+        );
+        if (!controller.signal.aborted) setActivities(data.activities);
       } catch (error) {
+        if (controller.signal.aborted) return;
         console.error("Error fetching activities:", error);
         toast.error("Could not load activities — refresh to try again");
       } finally {
-        setActivitiesLoading(false);
+        if (!controller.signal.aborted) setActivitiesLoading(false);
       }
     }
-    fetchActivities();
+    void fetchActivities();
+    return () => controller.abort();
   }, [prospectId]);
 
   const refreshActivities = async () => {
@@ -356,22 +492,36 @@ export function ProspectDetailPage({
     }
   };
 
-  const refreshActionItems = async () => {
+  const refreshActionItems = async (signal?: AbortSignal) => {
     try {
-      const data = await apiGet<{ items: ActionItem[] }>("/outreach/action-items", { prospectId });
-      setActionItems(data.items);
+      const data = await apiGet<{ items: ActionItem[] }>(
+        "/outreach/action-items",
+        { prospectId },
+        { signal },
+      );
+      if (!signal?.aborted) setActionItems(data.items);
     } catch (error) {
+      if (signal?.aborted) return;
       console.error("Error fetching action items:", error);
       toast.error("Could not load the next action — refresh to try again");
     } finally {
-      setActionItemsLoading(false);
+      if (!signal?.aborted) setActionItemsLoading(false);
     }
+  };
+
+  const recoverDeletedProspect = (error: unknown): boolean => {
+    if (!(error instanceof ApiError) || error.status !== 404) return false;
+    setProspect(null);
+    toast.error("This person is no longer in the Outreach prospects list.");
+    return true;
   };
 
   // Fetch action items
   useEffect(() => {
     if (!prospectId) return;
-    void refreshActionItems();
+    const controller = new AbortController();
+    void refreshActionItems(controller.signal);
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prospectId]);
 
@@ -382,7 +532,7 @@ export function ProspectDetailPage({
       await Promise.all([refreshActionItems(), refreshActivities()]);
     } catch (error) {
       console.error("Error completing action item:", error);
-      toast.error("Could not complete the action");
+      toast.error(error instanceof Error ? error.message : "Could not complete the action");
     }
   };
 
@@ -393,7 +543,7 @@ export function ProspectDetailPage({
       await refreshActionItems();
     } catch (error) {
       console.error("Error deleting action item:", error);
-      toast.error("Could not remove the action");
+      toast.error(error instanceof Error ? error.message : "Could not remove the action");
     }
   };
 
@@ -404,7 +554,7 @@ export function ProspectDetailPage({
       await refreshActionItems();
     } catch (error) {
       console.error("Error snoozing action item:", error);
-      toast.error("Could not snooze the action");
+      toast.error(error instanceof Error ? error.message : "Could not snooze the action");
     }
   };
 
@@ -415,7 +565,7 @@ export function ProspectDetailPage({
       await refreshActionItems();
     } catch (error) {
       console.error("Error updating action item:", error);
-      toast.error("Could not update the action");
+      toast.error(error instanceof Error ? error.message : "Could not update the action");
     }
   };
 
@@ -426,13 +576,37 @@ export function ProspectDetailPage({
       await refreshActionItems();
     } catch (error) {
       console.error("Error creating action item:", error);
-      toast.error("Could not set the next action");
+      if (!recoverDeletedProspect(error)) toast.error(error instanceof Error ? error.message : "Could not set the next action");
     }
   };
 
   const handleAddNote = async (content: string) => {
-    const { data } = await apiMutate<{ note: ProspectNote }>("POST", `/outreach/prospects/${prospectId}/notes`, { content });
-    setNotes((prev) => [data.note, ...prev]);
+    try {
+      const { data } = await apiMutate<{ note: ProspectNote }>("POST", `/outreach/prospects/${prospectId}/notes`, { content });
+      setNotes((prev) => [data.note, ...prev]);
+    } catch (error) {
+      recoverDeletedProspect(error);
+      throw error;
+    }
+  };
+
+  const handleUpdateNote = async (noteId: string, content: string, expectedRevision: number) => {
+    try {
+      const { data } = await apiMutate<{ note: ProspectNote }>("PATCH", `/outreach/notes/${noteId}`, {
+        content,
+        expectedRevision,
+      });
+      setNotes((current) => current.map((note) => note.id === noteId ? data.note : note));
+      toast.success("Note updated");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        const latest = await apiGet<{ notes: ProspectNote[] }>(`/outreach/prospects/${prospectId}/notes`);
+        setNotes(latest.notes);
+      } else {
+        recoverDeletedProspect(error);
+      }
+      throw error;
+    }
   };
 
   const handleDeleteNote = async (noteId: string) => {
@@ -457,7 +631,7 @@ export function ProspectDetailPage({
       setTimeout(() => void refreshActionItems(), 600);
     } catch (error) {
       console.error("Error adding activity:", error);
-      toast.error("Could not add the activity — try again");
+      if (!recoverDeletedProspect(error)) toast.error(error instanceof Error ? error.message : "Could not add the activity — try again");
     } finally {
       setIsSubmittingActivity(false);
     }
@@ -481,7 +655,7 @@ export function ProspectDetailPage({
       toast.success("Activity updated");
     } catch (error) {
       console.error("Error updating activity:", error);
-      toast.error("Could not update the activity — try again");
+      toast.error(error instanceof Error ? error.message : "Could not update the activity — try again");
     } finally {
       setIsSubmittingActivity(false);
     }
@@ -494,7 +668,7 @@ export function ProspectDetailPage({
       toast.success("Activity deleted");
     } catch (error) {
       console.error("Error deleting activity:", error);
-      toast.error("Could not delete the activity — try again");
+      toast.error(error instanceof Error ? error.message : "Could not delete the activity — try again");
     }
   };
 
@@ -509,24 +683,19 @@ export function ProspectDetailPage({
       toast.success("Status updated");
     } catch (error) {
       console.error("Error updating status:", error);
-      toast.error("Could not update the status — try again");
+      if (!recoverDeletedProspect(error)) toast.error(error instanceof Error ? error.message : "Could not update the status — try again");
     } finally {
       setUpdatingStatus(false);
     }
   };
 
   const handleGenerateOutreach = (medium: OutreachMedium, targetContentValue?: string) => {
-    setShowOutreachCompletion(false);
     setOutreachMedium(medium);
     if (medium === "content_comment") setContentCommentDialogOpen(false);
-    const generationKey = `${medium}:${targetContentValue ?? ""}`;
-    const generationId = generationAttemptRef.current?.key === generationKey
-      ? generationAttemptRef.current.id
-      : crypto.randomUUID();
-    generationAttemptRef.current = { key: generationKey, id: generationId };
-    outreachGeneration.start({
+    generationStartedHereRef.current = true;
+    void outreachGeneration.start({
+      prospectId,
       medium,
-      generationId,
       ...(targetContentValue ? { targetContent: targetContentValue } : {}),
     });
   };
@@ -554,8 +723,9 @@ export function ProspectDetailPage({
   };
 
   const openNurtureDialog = () => {
+    setNurtureError("");
     setEnrollEmail(prospect?.email ?? "");
-    setSelectedFunnelId(nurtureFunnels?.[0]?.id ?? "");
+    setSelectedFunnelId(nurtureFunnels?.find((funnel) => !funnel.currentMembership)?.id ?? "");
     setNurtureDialogOpen(true);
   };
 
@@ -567,6 +737,7 @@ export function ProspectDetailPage({
       await apiMutate("POST", `/cascade/funnels/${selectedFunnelId}/members`, {
         email: enrollEmail.trim(),
         workspaceContactId: prospect.id,
+        requiredWorkspaceRole: "outreach",
         attributes: {
           name: prospect.name,
           company: prospect.company,
@@ -596,10 +767,25 @@ export function ProspectDetailPage({
         // Timeline entry is best-effort; the funnel membership is recorded.
       }
 
+      await refreshNurtureFunnels();
       toast.success(`${prospect.name} added to ${funnel?.name ?? "funnel"}`);
+      setNurtureError("");
       setNurtureDialogOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not add this person");
+      const deletedProspect = error instanceof ApiError
+        && error.status === 404
+        && /(?:outreach prospect|workspace contact)/i.test(error.message);
+      if (deletedProspect && recoverDeletedProspect(error)) {
+        setNurtureDialogOpen(false);
+        return;
+      }
+      const message = error instanceof Error ? error.message : "Could not add this person";
+      setNurtureError(message);
+      toast.error(message);
+      const refreshed = await refreshNurtureFunnels();
+      if (refreshed && !refreshed.some((item) => item.id === selectedFunnelId && !item.currentMembership)) {
+        setSelectedFunnelId(refreshed.find((item) => !item.currentMembership)?.id ?? "");
+      }
     } finally {
       setIsEnrolling(false);
     }
@@ -639,6 +825,8 @@ export function ProspectDetailPage({
         await handleDelete();
       } else if (confirmDelete.type === "activity") {
         await handleDeleteActivity(confirmDelete.id);
+      } else if (confirmDelete.type === "action") {
+        await handleDeleteActionItem(confirmDelete.id);
       } else {
         await handleDeleteMessage(confirmDelete.id);
       }
@@ -661,6 +849,12 @@ export function ProspectDetailPage({
             description: "This permanently removes the activity from the timeline.",
             action: "Delete activity",
           }
+        : confirmDelete?.type === "action"
+          ? {
+              title: "Delete action",
+              description: "This permanently removes the upcoming action.",
+              action: "Delete action",
+            }
         : {
             title: "Delete message",
             description: "This permanently removes the outreach message.",
@@ -691,19 +885,7 @@ export function ProspectDetailPage({
   }
 
   if (!prospect) {
-    return (
-      <div className="w-full min-w-0">
-        <div className="flex flex-col items-center gap-3 py-24 text-center">
-          <UserX className="h-8 w-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            This person is not currently in the Outreach prospects list
-          </p>
-          <Button variant="outline" asChild>
-            <Link href="/outreach/prospects">Back to prospects</Link>
-          </Button>
-        </div>
-      </div>
-    );
+    return <ProspectMissingState />;
   }
 
   const personaInsights = dossier ? {
@@ -734,6 +916,7 @@ export function ProspectDetailPage({
       observedValue: finding.observedValue,
       evidence: finding.evidence,
       effectiveMatch: finding.match?.effectiveMatch,
+      classification: finding.match?.classification,
       hardExclusion: finding.match?.hardExclusion,
     })),
     timingSignals: dossier.account.timingFindings.map((finding) => ({
@@ -743,6 +926,8 @@ export function ProspectDetailPage({
       signalCount: finding.signalCount,
     })),
   } : null;
+  const eligibleNurtureFunnels = nurtureFunnels?.filter((funnel) => !funnel.currentMembership) ?? [];
+  const currentNurtureFunnels = nurtureFunnels?.filter((funnel) => funnel.currentMembership) ?? [];
   return (
     <div className="w-full min-w-0 space-y-8">
       {/* Keep collection navigation separate from prospect-to-prospect navigation. */}
@@ -775,6 +960,34 @@ export function ProspectDetailPage({
         />
       </div>
 
+      {currentNurtureFunnels.length > 0 ? (
+        <Card data-nurture-relationships="current">
+          <CardContent className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 space-y-2">
+              <div className="flex items-center gap-2">
+                <GitBranch className="size-4 text-primary" />
+                <p className="text-sm font-medium">Current Nurture relationship</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {currentNurtureFunnels.map((funnel) => (
+                  <Link
+                    className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+                    href={`/cascade/funnels/${funnel.id}#people`}
+                    key={funnel.id}
+                  >
+                    {funnel.name}
+                    <Badge variant="outline">{funnel.currentMembership?.status.replaceAll("_", " ")}</Badge>
+                  </Link>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Next action: open a funnel&apos;s People list to review this person&apos;s entry status or remove the membership.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardContent className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center">
           <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><BookOpen className="size-4" /></span>
@@ -795,11 +1008,22 @@ export function ProspectDetailPage({
       <ProspectDossierCard
         dossier={dossier}
         isLoading={dossierLoading}
-        isRequalifying={qualifyStream.isStreaming}
-        onRequalify={() => qualifyStream.start()}
+        isRequalifying={qualificationOperation.isRunning}
+        onRequalify={() => void qualificationOperation.start()}
+        onRetryQualification={() => void qualificationOperation.retry()}
+        qualificationError={qualificationOperation.error}
+        qualificationOperation={qualificationOperation.operation}
+        qualificationProgress={qualificationOperation.progressSnapshot}
+        qualificationRetrying={qualificationOperation.isRetrying}
       />
 
       <ProspectIntelligenceTabs
+        availableSourceIds={[
+          `prospect:${prospectId}:created`,
+          ...activities.map((activity) => `activity:${activity.id}`),
+          ...outreachMessages.filter((message) => message.status === "sent").map((message) => `outreach:${message.id}`),
+          ...notes.map((note) => `note:${note.id}`),
+        ]}
         prospectId={prospectId}
         prospectName={prospect.name}
         notesVersion={[
@@ -813,6 +1037,7 @@ export function ProspectDetailPage({
             notes={notes}
             isLoading={notesLoading}
             onAddNote={handleAddNote}
+            onUpdateNote={handleUpdateNote}
             onDeleteNote={handleDeleteNote}
           />
         )}
@@ -823,17 +1048,33 @@ export function ProspectDetailPage({
               accountLoading={dossierLoading}
               accountNeedsResolution={dossier?.accountResolution.state === "available"}
               accountResearchAvailable={Boolean(prospect.company?.trim())}
-              accountResearchDimensions={accountResearch.dimensions}
-              accountResearchError={accountResearch.error}
+              accountExecution={{
+                completedAt: accountResearch.completedAt,
+                dimensions: accountResearch.dimensions,
+                error: accountResearch.error,
+                isRetrying: accountResearch.isRetrying,
+                isRunning: accountResearch.isStreaming,
+                onRetry: () => void accountResearch.retry(),
+                progress: accountResearch.progress,
+                startedAt: accountResearch.startedAt,
+                telemetry: accountResearch.telemetry,
+              }}
               companyName={prospect.company || undefined}
-              isResearchingAccount={accountResearch.isStreaming}
-              isResearchingPerson={personResearch.isStreaming}
-              onResearchAccount={() => accountResearch.start()}
-              onResearchPerson={() => personResearch.start()}
+              onResearchAccount={() => void accountResearch.start()}
+              onResearchProspect={() => void prospectResearch.start()}
               persona={personaInsights}
               personaLoading={dossierLoading}
-              personResearchDimensions={personResearch.dimensions}
-              personResearchError={personResearch.error}
+              prospectExecution={{
+                completedAt: prospectResearch.completedAt,
+                dimensions: prospectResearch.dimensions,
+                error: prospectResearch.error,
+                isRetrying: prospectResearch.isRetrying,
+                isRunning: prospectResearch.isStreaming,
+                onRetry: () => void prospectResearch.retry(),
+                progress: prospectResearch.progress,
+                startedAt: prospectResearch.startedAt,
+                telemetry: prospectResearch.telemetry,
+              }}
             />
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -848,7 +1089,7 @@ export function ProspectDetailPage({
                   onComplete={handleCompleteActionItem}
                   onSnooze={handleSnoozeActionItem}
                   onCreate={handleCreateActionItem}
-                  onDelete={handleDeleteActionItem}
+                  onDelete={(actionId) => setConfirmDelete({ type: "action", id: actionId })}
                   onEdit={handleEditActionItem}
                 />
                 <ActivityTimeline
@@ -880,12 +1121,16 @@ export function ProspectDetailPage({
 
                 <OutreachGenerationPanel
                   error={outreachGeneration.error}
-                  isComplete={showOutreachCompletion}
-                  isStreaming={outreachGeneration.isStreaming}
+                  isComplete={outreachGeneration.isComplete}
+                  isStreaming={outreachGeneration.isRunning}
                   medium={outreachMedium}
-                  partial={outreachGeneration.partial}
-                  progress={outreachGeneration.progress}
+                  message={outreachGeneration.final?.message ?? null}
+                  simulation={outreachGeneration.final?.simulation ?? null}
+                  operation={outreachGeneration.operation}
+                  onRetry={() => void outreachGeneration.retry()}
+                  progress={outreachGeneration.progressSnapshot}
                   prospectName={prospect.name}
+                  retrying={outreachGeneration.isRetrying}
                 />
 
                 <OutreachHistory
@@ -919,7 +1164,10 @@ export function ProspectDetailPage({
         }}
       />
 
-      <Dialog open={nurtureDialogOpen} onOpenChange={setNurtureDialogOpen}>
+      <Dialog open={nurtureDialogOpen} onOpenChange={(open) => {
+        setNurtureDialogOpen(open);
+        if (!open) setNurtureError("");
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add {prospect.name} to a funnel</DialogTitle>
@@ -930,10 +1178,13 @@ export function ProspectDetailPage({
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
               <Label htmlFor="nurture-funnel">Funnel</Label>
-              <Select value={selectedFunnelId} onValueChange={setSelectedFunnelId}>
+              <Select disabled={eligibleNurtureFunnels.length === 0} value={selectedFunnelId} onValueChange={(value) => {
+                setSelectedFunnelId(value);
+                setNurtureError("");
+              }}>
                 <SelectTrigger id="nurture-funnel"><SelectValue placeholder="Choose a funnel" /></SelectTrigger>
                 <SelectContent>
-                  {(nurtureFunnels ?? []).map((funnel) => (
+                  {eligibleNurtureFunnels.map((funnel) => (
                     <SelectItem key={funnel.id} value={funnel.id}>{funnel.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -941,16 +1192,20 @@ export function ProspectDetailPage({
               {nurtureFunnels?.length === 0 && (
                 <p className="text-xs text-muted-foreground">Create a funnel in Nurture before adding this person.</p>
               )}
+              {nurtureFunnels && nurtureFunnels.length > 0 && eligibleNurtureFunnels.length === 0 ? (
+                <p className="text-xs text-muted-foreground">This person is already in every available funnel. Create another funnel or remove an existing membership first.</p>
+              ) : null}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="nurture-email">Email</Label>
               <Input id="nurture-email" type="email" value={enrollEmail} onChange={(event) => setEnrollEmail(event.target.value)} placeholder="person@company.com" />
               {!prospect.email && <p className="text-xs text-muted-foreground">This email will also be saved on the shared People record.</p>}
             </div>
+            {nurtureError ? <p className="text-sm text-destructive" role="alert">{nurtureError}</p> : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNurtureDialogOpen(false)} disabled={isEnrolling}>Cancel</Button>
-            <Button onClick={handleAddToFunnel} disabled={isEnrolling || !selectedFunnelId || !enrollEmail.includes("@")}>
+            <Button onClick={handleAddToFunnel} disabled={isEnrolling || eligibleNurtureFunnels.length === 0 || !selectedFunnelId || !enrollEmail.includes("@")}>
               {isEnrolling && <Loader2 className="h-4 w-4 animate-spin" />}
               Add person
             </Button>

@@ -11,8 +11,8 @@ export { QuickInfo } from "./QuickInfo";
 export { OutreachHistory } from "./OutreachHistory";
 export {
   OutreachGenerationPanel,
-  type OutreachDraftPartial,
-  type OutreachGenerationStep,
+  type OutreachGenerationOperation,
+  type OutreachGenerationProgress,
 } from "./OutreachGenerationPanel";
 export { ActivityTimeline } from "./ActivityTimeline";
 export { AddActivityDialog } from "./AddActivityDialog";
@@ -21,6 +21,11 @@ export { ProspectNotes } from "./ProspectNotes";
 export { ProspectIntelligenceTabs } from "./ProspectIntelligenceTabs";
 export { CompanySummaryBar, type CompanySummary } from "./CompanySummaryBar";
 export { ProspectDossierCard } from "./ProspectDossierCard";
+export {
+  AccountResearchInsights,
+  type AccountResearchInsightsData,
+  type ResearchExecutionView,
+} from "./AccountResearchInsights";
 export {
   ProspectResearchInsights,
   type PersonaInsights,

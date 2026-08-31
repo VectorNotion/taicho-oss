@@ -28,8 +28,6 @@ import type {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ModelPicker } from "@content-automation/ui/components/ModelPicker";
-import type { PublicModelDefinition } from "@content-automation/platform/models/catalog";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -259,7 +257,6 @@ export function ComposerControlDock({
   contactLocked = false,
   controls,
   disabled,
-  modelOptions = [],
   onControlsChange,
 }: {
   availability: ChatControlAvailability;
@@ -268,7 +265,6 @@ export function ComposerControlDock({
   contactLocked?: boolean;
   controls: ChatControls;
   disabled?: boolean;
-  modelOptions?: PublicModelDefinition[];
   onControlsChange: (controls: ChatControls) => void;
 }) {
   function toggleContext(label: ChatContext) {
@@ -385,7 +381,7 @@ export function ComposerControlDock({
           <DropdownMenuLabel>
             <p className="text-xs">Focus context</p>
             <p className="mt-0.5 text-[10px] font-normal text-muted-foreground">
-              Choose workspace libraries for the next request.
+              Choose workspace context for the next request.
             </p>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -400,7 +396,7 @@ export function ComposerControlDock({
               {label}
               {!availability.contexts[label as keyof typeof availability.contexts] ? (
                 <Badge className="ml-auto text-[9px]" variant="outline">
-                  Library not enabled
+                  Context not enabled
                 </Badge>
               ) : null}
             </DropdownMenuCheckboxItem>
@@ -408,16 +404,6 @@ export function ComposerControlDock({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <ModelPicker
-        compact
-        models={modelOptions}
-        onValueChange={(model) =>
-          onControlsChange({ ...controls, model })
-        }
-        requiredCapabilities={["text-generation", "tool-use"]}
-        surface="chat"
-        value={controls.model}
-      />
       <RadioControl
         ariaLabel="Sources"
         icon={SearchIcon}
@@ -435,7 +421,7 @@ export function ComposerControlDock({
               option.value as keyof typeof availability.sources
             ]
               ? undefined
-              : "Library not enabled",
+              : "Source not enabled",
         }))}
         value={controls.source}
       />

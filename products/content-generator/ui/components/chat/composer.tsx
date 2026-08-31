@@ -11,7 +11,6 @@ import type {
   ChatControlAvailability,
   ChatControls,
 } from "@content-automation/platform/intelligence/chat-controls";
-import type { PublicModelDefinition } from "@content-automation/platform/models/catalog";
 
 export const Composer: FC<{
   autoFocus?: boolean;
@@ -20,7 +19,6 @@ export const Composer: FC<{
   contactLocked?: boolean;
   controls: ChatControls;
   disabled?: boolean;
-  modelOptions: PublicModelDefinition[];
   onControlsChange: (controls: ChatControls) => void;
 }> = ({
   autoFocus = true,
@@ -29,7 +27,6 @@ export const Composer: FC<{
   contactLocked = false,
   controls,
   disabled = false,
-  modelOptions,
   onControlsChange,
 }) => {
   return (
@@ -51,7 +48,6 @@ export const Composer: FC<{
             contactLocked={contactLocked}
             controls={controls}
             disabled={disabled}
-            modelOptions={modelOptions}
             onControlsChange={onControlsChange}
           />
           <ComposerAction disabled={disabled} />

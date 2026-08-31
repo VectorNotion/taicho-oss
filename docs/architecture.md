@@ -17,7 +17,8 @@ content-automation/
 └── packages/                ← shared foundations
     ├── auth/                ← Better Auth + org entitlements + role permissions
     ├── ui/                  ← the design system (shadcn/tokens, docs/design-language.md) + genui streaming kit
-    ├── atlas/              ← the Brain knowledge explorer (/brain) over the graph
+    ├── knowledge/           ← shared registry, evidence graph, extraction and query contract
+    ├── atlas/               ← the Brain knowledge explorer (/brain) over the graph
     ├── platform/            ← shared data access (workspace Contacts/Content, graph session, jobs)
     ├── observability/       ← execution attribution, ledger, privacy filters, Datadog + Langfuse exporters
     └── config/              ← shared configuration
@@ -29,6 +30,61 @@ live in a product package: canonical Contacts and Content are exposed through
 `packages/platform/workspace/*`. `apps/unified` owns their dashboard pages and
 APIs. The standalone apps remain product-development shells.
 
+### 1.1 Shared knowledge registry
+
+Every mounted module contributes its knowledge types, relationships, extraction
+profiles, read projections, and existing capability references through one
+versioned manifest. The dashboard compiles those manifests into a shared
+registry before serving traffic or running workers. Every authorized module can
+inspect that registry and query the same organization-scoped canonical
+knowledge through the shared knowledge API.
+
+In one line: modules describe their vocabulary to the shared registry, research
+becomes evidence-backed canonical knowledge, and every authorized module or
+agent reads that same knowledge to assess, generate, and explain its work.
+
+Modules may add roles and meaning around canonical entities, but they may not
+create private semantic stores that other authorized processes cannot discover.
+The owner never administers graph schema: module developers resolve vocabulary
+overlap as reuse, extension, equivalence, or an explicitly distinct namespaced
+concept. Models can propose entities, claims, and relationships only from the
+active registry slice; they cannot create graph types or emit persistence
+queries.
+
+The knowledge registry is distinct from the existing capability registry. The
+knowledge registry describes what concepts and projections exist; the
+capability registry remains the sole authority for what a caller may execute.
+Module manifests reference capability IDs rather than duplicating capability
+authorization or implementation. See the approved
+[shared knowledge registry design](superpowers/specs/2026-08-19-shared-knowledge-registry-design.md)
+and its [implementation plan](superpowers/plans/2026-08-19-shared-knowledge-registry.md).
+
+Transactional modules contribute through a durable internal outbox: after the
+module record commits, it appends a replay-safe `knowledge.*` product event.
+The worker reloads that event under the owning tenant, runs the module's graph
+adapter, and records a projection receipt only after success. This is how
+Contacts, transcripts, Cascade, Intelligence, Support, Resonance, publishing,
+and performance feedback become shared knowledge without making FalkorDB the
+execution queue.
+
+### 1.2 Shared calendar registry
+
+Every capability module contributes a versioned calendar manifest and names
+the single authorized read capability, `calendar.events.list`. A module must
+also declare whether it owns user-visible scheduled work: owners provide one
+or more namespaced event kinds, while non-owners provide an explicit reason
+and cannot declare events. This makes calendar participation mandatory without
+inventing schedules for modules such as Nurture, Brain, Chat, or Resonance.
+
+The owning module remains the source of truth and emits replay-safe
+`calendar.entry.changed` events for every lifecycle transition. The capability
+worker projects those events into the tenant-scoped `calendar_entries` read
+model; source snapshots repair legacy records or missed emissions. Calendar,
+Today, REST, MCP, and agents all read that same authorized projection, and
+calendar actions call the owning module's registered capability instead of
+changing source records directly. Future provider-sync adapters consume this
+same event boundary rather than introducing a second scheduling model.
+
 ## 2. One app, three products, one gate
 
 The unified app serves the sidebar shell and all pages. Its API routes do **not** call product services over HTTP — they import the product packages directly (`@content-automation/cascade`, `.../publishing/*`) and hit their repositories. There is no internal service mesh or RPC layer: the function call is the API.
@@ -39,9 +95,21 @@ Authorization is one funnel: every request passes through
 Workspace routes combine the relevant product capabilities at the route
 boundary because Contacts and Content serve more than one product.
 
-The unified app also serves the **Brain** (`/brain`, package `packages/atlas`) — a force-directed knowledge explorer over the graph — and every AI action streams through the generative-UI kit (`packages/ui/components/genui`, kernel `packages/platform/agents/streaming.ts`) beside the authoritative `jobs` table.
+The unified app also serves the **Brain** (`/brain`, package `packages/atlas`),
+a read-only force-directed knowledge explorer over the workspace graph. The
+Brain is the human presentation layer; modules and agents use the shared
+registry, query, coverage, and explanation contracts. Every AI action streams
+through the generative-UI kit (`packages/ui/components/genui`, kernel
+`packages/platform/agents/streaming.ts`) beside the authoritative `jobs` table.
 
-`packages/resonance` is a platform service in the same shape as `packages/atlas` (the Brain) and `packages/intelligence` (the thin chat dispatcher): a package that owns domain logic, a client, and components, consumed through thin `apps/unified` route shells. It scores creative variants against a synthetic audience by reading next-token Yes/No probabilities from a small model instead of generating text. The actual GPU scoring runs in `services/resonance/`, a Python service deployed to Modal. The platform reaches it only through signed outbound HTTP (trigger, then poll-on-read for the result), never an inbound call.
+`packages/resonance` and `packages/intelligence` are platform services: packages
+that own domain logic, clients, and components consumed through thin
+`apps/unified` route shells. Resonance scores creative variants against a
+synthetic audience by reading next-token Yes/No probabilities from a small model
+instead of generating text. The actual GPU scoring runs in
+`services/resonance/`, a Python service deployed to Modal. The platform reaches
+it only through signed outbound HTTP (trigger, then poll-on-read for the result),
+never an inbound call.
 
 ## 3. The engines (where work actually happens)
 
@@ -62,7 +130,13 @@ Content and Outreach agents resolve through OpenRouter + Qwen. Cascade is plain 
   `Contact` identity; `Lead` and `NurtureContact` are role projections.
 - **Postgres** — the transactional runtime: one instance with product-owned schemas — `auth` tables (Better Auth + entitlements), `cascade` (funnels, memberships, plain-text emails), `publishing` (channels, posts), jobs, MCP operations, and the `observability.execution_event` support ledger. The "what we're doing" store.
 
-The rule: **engines execute only from Postgres; the graph is never on a hot path.** Where the two must meet, the engine bridges through an explicit product boundary — the UI never sees the seam.
+The rule: **durable engines execute from Postgres; the graph never owns job
+locks, schedules, retries, idempotency, or external delivery.** Intelligence and
+generation workflows may query the graph to assemble an authorized context
+bundle before committing an assessment or artifact. Delivery workers execute
+from committed Postgres work records and frozen inputs, never from mutable graph
+state. Where the stores meet, the engine bridges through an explicit product
+boundary — the UI never sees the seam.
 
 External stores/services: **Cloudflare R2** (media staging for publishing),
 customer-operated **n8n** (external email orchestration), the four **social platform APIs** (behind

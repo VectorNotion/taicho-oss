@@ -1,4 +1,8 @@
-import type { ProductEventInsert } from '../events/repository';
+import {
+  hasProductEventProjection,
+  recordProductEventProjection,
+  type ProductEventInsert,
+} from '../events/repository';
 import {
   type AttentionItem,
   type NotificationCategory,
@@ -8,8 +12,6 @@ import {
   createNotificationRecipients,
   eligibleNotificationUserIds,
   getAttentionItemForEvent,
-  hasProductEventProjection,
-  recordProductEventProjection,
 } from './repository';
 
 export type StoredProductEvent = ProductEventInsert & { id: string };

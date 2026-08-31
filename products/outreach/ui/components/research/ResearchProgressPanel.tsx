@@ -10,6 +10,7 @@ import {
   Circle,
   ExternalLink,
   Loader2,
+  RotateCcw,
   Search,
   Sparkles,
   User,
@@ -26,6 +27,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import type { DimensionLane } from "./useDimensionResearch";
+import { safeExternalUrl } from "../../safe-external-url";
 
 export interface ResearchProgressGroup {
   id: string;
@@ -226,7 +228,7 @@ function CriterionSteps({ phase }: { phase: DimensionLane["phase"] }) {
 }
 
 function EvidenceLinks({ urls }: { urls: string[] }) {
-  const unique = [...new Set(urls)].filter(Boolean).slice(0, 4);
+  const unique = [...new Set(urls.map((url) => safeExternalUrl(url)).filter((url): url is string => Boolean(url)))].slice(0, 4);
   if (unique.length === 0) return null;
   return (
     <div className="mt-3 flex flex-wrap gap-1.5">
@@ -428,12 +430,20 @@ export function ResearchProgressPanel({
   isComplete,
   error,
   backgroundItems = [],
+  operationId,
+  persistedProgress,
+  onRetry,
+  isRetrying = false,
 }: {
   groups: ResearchProgressGroup[];
   isStreaming: boolean;
   isComplete: boolean;
   error?: string | null;
   backgroundItems?: BackgroundResearchItem[];
+  operationId?: string | null;
+  persistedProgress?: number;
+  onRetry?: () => void;
+  isRetrying?: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const dimensions = useMemo(() => groups.flatMap((group) => group.dimensions), [groups]);
@@ -456,7 +466,9 @@ export function ResearchProgressPanel({
   const rawProgress = groups.length > 0
     ? groups.reduce((total, group) => total + groupProgress(group), 0) / groups.length
     : 0;
-  const progress = isComplete ? 100 : Math.min(96, isStreaming && rawProgress === 0 ? 5 : rawProgress);
+  const progress = isComplete
+    ? 100
+    : Math.min(96, Math.max(persistedProgress ?? 0, isStreaming && rawProgress === 0 ? 5 : rawProgress));
 
   const status = error
     ? { label: "Needs attention", variant: "destructive" as const }
@@ -512,6 +524,11 @@ export function ResearchProgressPanel({
             <p aria-atomic="true" aria-live="polite" className="mt-1 text-sm leading-6 text-muted-foreground">
               {summary}
             </p>
+            {operationId ? (
+              <p className="mt-1 text-[11px] font-medium text-muted-foreground">
+                Durable run {operationId.slice(0, 8)}
+              </p>
+            ) : null}
           </div>
           {dimensions.length > 0 || backgroundItems.length > 0 ? (
             <CollapsibleTrigger asChild>
@@ -562,9 +579,17 @@ export function ResearchProgressPanel({
               />
             ))}
             {error ? (
-              <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                <span>{error}</span>
+              <div className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+                {onRetry ? (
+                  <Button disabled={isRetrying} onClick={onRetry} size="sm" variant="outline">
+                    {isRetrying ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+                    Retry failed run
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>

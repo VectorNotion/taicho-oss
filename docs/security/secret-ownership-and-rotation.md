@@ -14,7 +14,8 @@ same access boundary under `/root/content-automation/.env.backup-*`. They are
 secret-bearing artifacts, not ordinary configuration, and must be removed
 through an approved retention decision after the rollback window.
 
-GitHub Actions keeps only release-registry and live-provider credentials.
+GitHub Actions keeps only release, registry, deployment, and signing credentials;
+provider credentials are not available to CI browser jobs.
 GitHub's job token and OIDC signing token are short-lived platform-managed
 credentials and are intentionally excluded from the static rotation registry.
 The production Docker pull credential resides in `/root/.docker/config.json`.

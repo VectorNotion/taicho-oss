@@ -96,8 +96,13 @@ test('marking outreach sent records one durable prospect activity', async () => 
     content: 'Would Tuesday work for a technical review?',
   });
 
+  const sent = await updateOutreachMessage(message.id, { status: 'sent' });
   await updateOutreachMessage(message.id, { status: 'sent' });
-  await updateOutreachMessage(message.id, { status: 'sent' });
+  assert.ok(sent?.sentAt);
+
+  const returned = await updateOutreachMessage(message.id, { status: 'draft' });
+  assert.equal(returned?.status, 'draft');
+  assert.equal(returned?.sentAt, undefined);
 
   const activities = await getProspectActivities(prospect.id);
   assert.equal(activities.length, 1);

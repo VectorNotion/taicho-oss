@@ -375,6 +375,20 @@ are exercised with Razorpay test credentials in the launch environment.
 | [ ] | [ ] | GTM-06 | Prepare launch and incident communications. | Unassigned | Launch announcement, known limitations, maintenance/incident templates, security contact, support links, and status updates are approved and ready. |
 | [ ] | [ ] | GTM-07 | Set launch success and abort criteria. | Unassigned | Owners agree on measurable activation, error, latency, queue, billing, provider-cost, and support-volume thresholds plus who can pause or roll back the launch. |
 
+GTM-04 progress (31 August 2026): the unified app reports cookieless page
+views to the self-hosted Plausible instance (`analytics.vectornotion.com`;
+`PLAUSIBLE_API_HOST` overrides it), one site per deployment
+(`cloud-dev.taicho.ai` for staging, `cloud.taicho.ai` for production). The site is derived at
+runtime from `PUBLIC_APP_URL` (never baked into the image, which production
+reuses from staging), local origins disable the tracker, and every event
+passes `sanitizeAnalyticsPayload` (`apps/unified/lib/analytics.ts`), which
+collapses record identifiers to `_`, strips query strings, and drops same-site
+referrers. Plausible sets no cookies and keeps no persistent identifiers, and it is
+not a third-party subprocessor, so no consent banner is introduced; the Cookie
+and Telemetry Notice describes it. Still open: confirm events arrive in each Plausible site after
+deployment, and define the activation, conversion, and failure events worth
+recording beyond page views.
+
 ## Launch-day execution checklist
 
 Run this only after the P0 and P1 exit criteria are met.

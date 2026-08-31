@@ -25,11 +25,27 @@ import {
 import { isContentType, type ContentDraft, type ContentIdea, type ContentType } from '../../domain/content';
 import { formatGeneratedContent } from '../../domain/generated-content';
 import type { ContentResonanceCandidate } from '../../domain/resonance-experiment';
+import { queryContentKnowledge, recordContentKnowledgeArtifact } from '../../knowledge-service';
 
 // --------------------------------------------------------------------------
 // Structured-output primitive (see ideas.ts for rationale).
 // --------------------------------------------------------------------------
 
+
+export interface DraftVisionInput {
+  bytes: Buffer;
+  mimeType: string;
+  description: string;
+  generationContext?: string;
+}
+
+export function draftVisionGroundingText(vision: DraftVisionInput[]): string {
+  return vision.map((item, index) => [
+    `Selected image ${index + 1}`,
+    `Description: ${item.description}`,
+    item.generationContext?.trim() || null,
+  ].filter(Boolean).join('\n')).join('\n\n');
+}
 
 export type StructuredGenerate = <S extends z.ZodType>(args: {
   agentId: string;
@@ -38,6 +54,7 @@ export type StructuredGenerate = <S extends z.ZodType>(args: {
   prompt: string;
   schema: S;
   temperature: number;
+  vision?: DraftVisionInput[];
 }) => Promise<z.infer<S>>;
 
 const defaultGenerate: StructuredGenerate = async ({
@@ -47,6 +64,7 @@ const defaultGenerate: StructuredGenerate = async ({
   prompt,
   schema,
   temperature,
+  vision,
 }) => {
   const agent = registerObservedAgent(new Agent({
     id: agentId,
@@ -56,7 +74,23 @@ const defaultGenerate: StructuredGenerate = async ({
   }), 'taicho-content-agents');
   return traceable(
     async () => {
-      const result = await agent.generate(prompt, {
+      const messages = vision?.length
+        ? [{
+            role: 'user' as const,
+            content: [
+              {
+                type: 'text' as const,
+                text: `${prompt}\n\n## Selected image grounding\nThe user selected these Content Base images before asking for the Post. Write companion copy that is tightly aligned with their actual visual content, original Visual Briefs, and image-generation prompts. Treat the images as required source material, not optional decoration. Do not merely describe the images; make the Post and the selected images communicate one coherent idea.\n\n${draftVisionGroundingText(vision)}`,
+              },
+              ...vision.map((item) => ({
+                type: 'image' as const,
+                image: item.bytes,
+                mediaType: item.mimeType,
+              })),
+            ],
+          }]
+        : prompt;
+      const result = await agent.generate(messages, {
         structuredOutput: { schema },
         // Drafts are the longest generations; the provider default cap can
         // truncate mid-JSON and fail structured parsing.
@@ -123,6 +157,56 @@ const adCampaignSchema = z.object({
   description: z.string().max(150).describe('Supporting description'),
   call_to_action: z.string().max(40).describe('Button or action label'),
 });
+
+/** Deterministic non-production generator used by the real browser QA path. */
+export const localDraftGenerate: StructuredGenerate = async ({ agentId, schema }) => {
+  const output = agentId.startsWith('video-script-agent')
+    ? {
+        hook: 'What happens when step seven fails after six successful writes?',
+        intro: 'Durable workflows make that failure inspectable and resumable instead of forcing a blind restart.',
+        main_sections: ['Persist a checkpoint after each committed effect.', 'Resume from recorded state with an idempotent input.', 'Report attempts, outputs, and terminal failures together.'],
+        demo_notes: ['Show a database write failure after a completed HTTP step.', 'Retry and highlight that the completed step is not repeated.'],
+        conclusion: 'A durable workflow is a sequence of explicit, recoverable commitments.',
+        call_to_action: 'Test one real failure boundary before trusting an automation design.',
+      }
+    : agentId.startsWith('blog-post-agent')
+      ? {
+          title: 'Durable workflow recovery, tested in the browser',
+          meta_description: 'A practical guide to checkpoints, idempotency, failure reporting, and safe workflow resumption.',
+          introduction: 'A workflow is only durable when a failure leaves behind enough truthful state to continue safely.',
+          sections: ['## Persist every committed effect\nRecord the output and identity of each completed step.', '## Resume without repeating side effects\nUse idempotency keys and stored outcomes at every mutation boundary.', '## Make failure legible\nShow attempts, errors, inputs, outputs, and the next recoverable action.'],
+          code_examples: ['await step.run({ idempotencyKey, resumeFrom: checkpoint });'],
+          conclusion: 'Test the failure boundary through the same browser and API path users rely on.',
+        }
+      : agentId.startsWith('tweet-thread-agent')
+        ? {
+            thread_hook: '1/ Durable automation is not “retry everything.” It is resume from the last truthful checkpoint.',
+            tweets: ['1/ Durable automation is not “retry everything.” It is resume from the last truthful checkpoint.', '2/ Store each committed effect with an idempotency identity.', '3/ When a database write fails, show the exact failed boundary and keep earlier outputs.', '4/ Retry only unfinished work, then report the new attempt beside the old one.', '5/ If the UI cannot explain that history, the workflow is not operationally durable.'],
+          }
+        : agentId.startsWith('x-post-agent')
+          ? { post: 'Durable automation means resuming from the last truthful checkpoint—not replaying every side effect. Test database failure, retry identity, persisted outputs, and operator-visible history together.' }
+          : agentId.startsWith('social-post-agent')
+            ? {
+                hook: 'A workflow is only durable if failure leaves a safe next move.',
+                body: 'Persist each committed effect, retry with the same identity, and show operators exactly what finished, failed, and resumed.',
+                call_to_action: 'Which failure boundary have you tested end to end?',
+                hashtags: ['#automation', '#reliability'],
+              }
+            : agentId.startsWith('ad-campaign-agent')
+              ? {
+                  headline: 'Resume workflows with confidence',
+                  primary_text: 'Test real failure boundaries, preserve completed work, and give operators a truthful recovery path.',
+                  description: 'Durable execution with inspectable checkpoints.',
+                  call_to_action: 'See the recovery flow',
+                }
+              : {
+                  hook: 'Most workflow demos stop before the failure that matters.',
+                  body: 'The real test is whether completed effects remain durable, retries avoid duplicates, and operators can see the recovery history.',
+                  call_to_action: 'What would you deliberately break first?',
+                  hashtags: ['#automation', '#durability', '#engineering'],
+                };
+  return schema.parse(output);
+};
 
 // --------------------------------------------------------------------------
 // System prompts (ported verbatim from the four *_PROMPT templates).
@@ -428,6 +512,8 @@ export interface DraftDeps {
   getContentDraftById: typeof getContentDraftById;
   queryRelatedPublishedContent: typeof queryRelatedPublishedContent;
   createContentDraft: typeof createContentDraft;
+  getKnowledgeContext: (idea: ContentIdea) => ReturnType<typeof queryContentKnowledge>;
+  recordKnowledgeArtifact: typeof recordContentKnowledgeArtifact;
   generate: StructuredGenerate;
 }
 
@@ -437,6 +523,8 @@ const defaultDeps: DraftDeps = {
   getContentDraftById,
   queryRelatedPublishedContent,
   createContentDraft,
+  getKnowledgeContext: () => queryContentKnowledge('content.draft_context'),
+  recordKnowledgeArtifact: recordContentKnowledgeArtifact,
   generate: defaultGenerate,
 };
 
@@ -453,6 +541,8 @@ interface GenerationContext {
   innerLinksText: string;
   relatedContentIds: string[];
   hook: string;
+  sourceClaimIds: string[];
+  sourceEvidenceIds: string[];
 }
 
 interface VariationInput {
@@ -486,7 +576,20 @@ async function loadGenerationContextInternal(idea: ContentIdea, deps: DraftDeps)
   const suggestedCitations = idea.suggestedCitations ?? [];
 
   const sourceTopicIds = (idea.sourceTopics ?? []).map((topic) => topic.id).filter(Boolean);
-  const relatedContent = await deps.queryRelatedPublishedContent(sourceTopicIds, 5);
+  const [relatedContent, knowledgeContext] = await Promise.all([
+    deps.queryRelatedPublishedContent(sourceTopicIds, 5),
+    deps.getKnowledgeContext(idea),
+  ]);
+  const requestedClaimIds = new Set(idea.sourceClaimIds ?? []);
+  const selectedClaims = (knowledgeContext?.claims ?? []).filter((claim) => requestedClaimIds.has(claim.id));
+  if (selectedClaims.length !== requestedClaimIds.size) {
+    const available = new Set(selectedClaims.map(({ id }) => id));
+    const missing = [...requestedClaimIds].filter((id) => !available.has(id));
+    throw new Error(`Content draft referenced claims outside its authorized context: ${missing.join(', ')}`);
+  }
+  const sourceClaimIds = selectedClaims.map(({ id }) => id);
+  const sourceEvidenceIds = [...new Set(selectedClaims.flatMap((claim) => claim.evidenceIds))];
+  const knowledgeCitations = selectedClaims.map((claim) => `[claim:${claim.id}] ${claim.statement}`);
 
   return {
     idea,
@@ -497,8 +600,8 @@ async function loadGenerationContextInternal(idea: ContentIdea, deps: DraftDeps)
     description: idea.description,
     outlineText: outline.length ? outline.map((point) => `- ${point}`).join('\n') : 'No outline provided',
     keyPointsText: keyPoints.length ? keyPoints.map((point) => `- ${point}`).join('\n') : 'No key points',
-    citationsText: suggestedCitations.length
-      ? suggestedCitations.map((citation) => `- ${citation}`).join('\n')
+    citationsText: knowledgeCitations.length || suggestedCitations.length
+      ? [...knowledgeCitations, ...suggestedCitations].map((citation) => `- ${citation}`).join('\n')
       : 'No citations',
     innerLinksText: relatedContent.some((content) => content.publishedUrl)
       ? relatedContent
@@ -508,6 +611,8 @@ async function loadGenerationContextInternal(idea: ContentIdea, deps: DraftDeps)
       : 'No related content to link',
     relatedContentIds: relatedContent.map((content) => content.id).filter(Boolean),
     hook: idea.rationale ?? '',
+    sourceClaimIds,
+    sourceEvidenceIds,
   };
 }
 
@@ -528,8 +633,9 @@ async function generateContentArtifact(input: {
   context: GenerationContext;
   generate: StructuredGenerate;
   variation?: VariationInput;
+  vision?: DraftVisionInput[];
 }): Promise<{ title: string; content: string }> {
-  const { type, context, generate, variation } = input;
+  const { type, context, generate, variation, vision } = input;
   const suffix = variation ? variationPrompt(variation) : '';
   const agentSuffix = variation ? `-variation-${variation.index}` : '';
   let output: Record<string, unknown>;
@@ -550,6 +656,7 @@ async function generateContentArtifact(input: {
       }) + suffix,
       schema: videoScriptSchema,
       temperature: variation ? 0.85 : 0.7,
+      vision,
     });
   } else if (type === 'blog_post') {
     output = await generate({
@@ -566,6 +673,7 @@ async function generateContentArtifact(input: {
       }) + suffix,
       schema: blogPostSchema,
       temperature: variation ? 0.82 : 0.7,
+      vision,
     });
   } else if (type === 'tweet_thread') {
     output = await generate({
@@ -580,6 +688,7 @@ async function generateContentArtifact(input: {
       }) + suffix,
       schema: tweetThreadSchema,
       temperature: variation ? 0.9 : 0.8,
+      vision,
     });
   } else if (type === 'x_post') {
     output = await generate({
@@ -594,6 +703,7 @@ async function generateContentArtifact(input: {
       }) + suffix,
       schema: xPostSchema,
       temperature: variation ? 0.9 : 0.8,
+      vision,
     });
   } else if (type === 'social_post') {
     output = await generate({
@@ -608,6 +718,7 @@ async function generateContentArtifact(input: {
       }) + suffix,
       schema: socialPostSchema,
       temperature: variation ? 0.9 : 0.78,
+      vision,
     });
   } else if (type === 'ad_campaign') {
     output = await generate({
@@ -622,6 +733,7 @@ async function generateContentArtifact(input: {
       }) + suffix,
       schema: adCampaignSchema,
       temperature: variation ? 0.88 : 0.72,
+      vision,
     });
   } else {
     output = await generate({
@@ -637,6 +749,7 @@ async function generateContentArtifact(input: {
       }) + suffix,
       schema: linkedInPostSchema,
       temperature: variation ? 0.85 : 0.7,
+      vision,
     });
   }
 
@@ -648,7 +761,7 @@ async function generateContentArtifact(input: {
 
 async function runGenerateContentDraftInternal(
   payload: { ideaId: string; contentType: string },
-  options: { deps?: Partial<DraftDeps> } = {},
+  options: { deps?: Partial<DraftDeps>; vision?: DraftVisionInput[] } = {},
 ): Promise<{ draftId: string }> {
   const deps = { ...defaultDeps, ...options.deps };
   const { ideaId, contentType } = payload;
@@ -677,6 +790,7 @@ async function runGenerateContentDraftInternal(
     type: contentType,
     context,
     generate: deps.generate,
+    vision: options.vision,
   });
 
   const draft = await observeWorkflowStep('content.draft.persist', {
@@ -695,8 +809,18 @@ async function runGenerateContentDraftInternal(
       type: contentType,
       content: artifact.content,
       citations: [],
+      sourceClaimIds: context.sourceClaimIds,
+      sourceEvidenceIds: context.sourceEvidenceIds,
       innerLinks: context.relatedContentIds,
     }));
+
+  await deps.recordKnowledgeArtifact({
+    kind: 'content.draft',
+    externalId: draft.id,
+    usedClaimIds: context.sourceClaimIds,
+    usedEvidenceIds: context.sourceEvidenceIds,
+    metadata: { title: draft.title, status: draft.status, ideaId, contentType },
+  });
 
   // Deliberately NOT emitted from runGenerateContentVariation: resonance
   // variation candidates are not persisted drafts.

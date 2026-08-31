@@ -14,7 +14,7 @@ test('semantic search defaults to the configured OpenRouter key without an OpenA
   assert.deepEqual(config, {
     embeddingUrl: 'https://openrouter.ai/api/v1/embeddings',
     embeddingApiKey: 'test-openrouter-key',
-    embeddingModel: 'nvidia/nemotron-3-embed-1b:free',
+    embeddingModel: 'qwen/qwen3-embedding-8b',
     embeddingDimensions: 2_048,
     queryInputType: 'query',
     documentInputType: 'passage',
@@ -52,6 +52,7 @@ test('knowledge sources preserve exact deep links and exclude drafts', () => {
   const notes: ProspectNote[] = [{
     id: 'note-1',
     content: '<p>Security review is required.</p>',
+    revision: 1,
     createdAt: '2026-08-02T10:00:00.000Z',
   }];
   const activities: ProspectActivity[] = [{

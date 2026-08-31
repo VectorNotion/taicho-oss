@@ -44,10 +44,10 @@ function obsFor(dimension: DimensionDefinition): ObservationRecord {
   };
 }
 
-interface Rec { researched: string[][]; savedScore: { personaScore: number; hardExcluded: boolean } | null; qualified: string[] }
+interface Rec { researched: string[][]; savedScore: { personaScore: number; hardExcluded: boolean } | null; qualified: string[]; knowledgeAssessments: string[][]; knowledgeExtractions: string[][] }
 
 function makeDeps(config: { matchScores?: Record<string, { score: number; hardExclusion?: boolean }> }): { deps: Partial<ProspectResearchDeps>; rec: Rec } {
-  const rec: Rec = { researched: [], savedScore: null, qualified: [] };
+  const rec: Rec = { researched: [], savedScore: null, qualified: [], knowledgeAssessments: [], knowledgeExtractions: [] };
   const store: ObservationRecord[] = [];
   const deps: Partial<ProspectResearchDeps> = {
     cascade: false,
@@ -56,9 +56,11 @@ function makeDeps(config: { matchScores?: Record<string, { score: number; hardEx
     getObservations: async () => store,
     upsertObservation: async (_e, obs) => {
       const rest = { ...obs, id: `obs-${obs.dimensionKey}` };
-      store.push(rest);
+      const index = store.findIndex((observation) => observation.dimensionKey === obs.dimensionKey);
+      if (index >= 0) store[index] = rest; else store.push(rest);
       return rest;
     },
+    updateObservationLineage: undefined,
     researchDimensions: async (lapsed) => {
       rec.researched.push(lapsed.map((x) => x.key));
       return lapsed.map((x) => {
@@ -70,12 +72,25 @@ function makeDeps(config: { matchScores?: Record<string, { score: number; hardEx
     evaluateFitMatches: async (fitDims, observations) => {
       const observed = new Set(observations.map((o) => o.dimensionKey));
       return fitDims.filter((x) => observed.has(x.key)).map((x) => {
+        const observation = observations.find((candidate) => candidate.dimensionKey === x.key)!;
+        if (observation.confidence <= 0) {
+          return { dimensionKey: x.key, matchScore: 0, effectiveMatch: 0, classification: 'insufficient_evidence', hardExclusion: false, confidence: 0 } satisfies DimensionMatch;
+        }
         const cfg = config.matchScores?.[x.key] ?? { score: 1 };
         return { dimensionKey: x.key, matchScore: cfg.score, effectiveMatch: cfg.score, classification: 'strong_match', hardExclusion: cfg.hardExclusion ?? false, confidence: 1 } satisfies DimensionMatch;
       });
     },
     saveMatches: async () => undefined,
     saveProspectScore: async (_id, score) => { rec.savedScore = { personaScore: score.personaScore, hardExcluded: score.hardExcluded }; },
+    ingestObservationKnowledge: async ({ observation }) => ({ claimIds: [`claim-${observation.dimensionKey}`], evidenceIds: [`evidence-${observation.dimensionKey}`] }),
+    extractResearchKnowledge: async ({ observations }) => {
+      rec.knowledgeExtractions.push(observations.map(({ dimensionKey }) => dimensionKey));
+      return null;
+    },
+    recordKnowledgeAssessment: async ({ observations }) => {
+      rec.knowledgeAssessments.push(observations.flatMap((observation) => observation.claimIds ?? []));
+      return null;
+    },
     runQualifyProspect: async (id) => { rec.qualified.push(id); return { status: 'success' }; },
     now: () => NOW,
   };
@@ -92,6 +107,8 @@ test('runProspectResearch researches persona dims only, scores, chains qualify',
   assert.equal(result.hardExcluded, false);
   assert.equal(result.account, null);
   assert.deepEqual(rec.qualified, ['p1'], 'chains qualification');
+  assert.deepEqual(rec.knowledgeAssessments, [['claim-authority', 'claim-ownership']]);
+  assert.deepEqual(rec.knowledgeExtractions, [['authority', 'ownership']], 'extracts one graph batch per research run');
 });
 
 test('hard exclusion on a persona dim propagates to the prospect score', async () => {
@@ -189,11 +206,10 @@ test('an explicit refresh researches every persona dimension even when evidence 
   assert.deepEqual(researched, [['authority', 'ownership']]);
 });
 
-test('person research fails instead of completing when a requested criterion has no result', async () => {
-  const { deps } = makeDeps({});
+test('person research retains a requested criterion as insufficient evidence when synthesis omits it', async () => {
+  const { deps, rec } = makeDeps({});
 
-  await assert.rejects(
-    () => runProspectResearch('p1', {
+  const result = await runProspectResearch('p1', {
       ...deps,
       forceRefresh: true,
       researchDimensions: async (dimensions) => dimensions
@@ -203,9 +219,33 @@ test('person research fails instead of completing when a requested criterion has
           void ignoredId;
           return observation;
         }),
-    }),
-    /Person research returned no result for: ownership/,
-  );
+    });
+
+  assert.equal(result.matches.length, 2);
+  assert.equal(result.matches.find((match) => match.dimensionKey === 'ownership')?.classification, 'insufficient_evidence');
+  assert.equal(rec.qualified.length, 1, 'partial research still reaches qualification');
+});
+
+test('graph enrichment failure is a warning after observations are saved and scored', async () => {
+  const { deps, rec } = makeDeps({});
+  const activities: string[] = [];
+
+  const result = await runProspectResearch('p1', {
+    ...deps,
+    extractResearchKnowledge: async () => { throw new Error('graph shape rejected'); },
+    recordKnowledgeAssessment: async () => { throw new Error('assessment graph unavailable'); },
+    onActivity: (activity) => activities.push(activity.type),
+  });
+
+  assert.equal(result.matches.length, 2);
+  assert.ok(rec.savedScore);
+  assert.ok(activities.includes('observations_persisted'));
+  assert.ok(activities.includes('graph_enrichment_warning'));
+  assert.ok(activities.includes('scoring_completed'));
+  assert.ok(activities.includes('scope_completed'));
+  assert.ok(activities.indexOf('observations_persisted') < activities.indexOf('graph_enrichment_warning'));
+  assert.ok(activities.indexOf('scoring_completed') < activities.lastIndexOf('graph_enrichment_warning'));
+  assert.ok(activities.lastIndexOf('graph_enrichment_warning') < activities.indexOf('scope_completed'));
 });
 
 test('company research failure fails the composite run and never qualifies stale data', async () => {

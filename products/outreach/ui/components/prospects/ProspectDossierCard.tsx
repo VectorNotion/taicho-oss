@@ -71,16 +71,36 @@ export function ProspectDossierCard({
   isLoading,
   isRequalifying,
   onRequalify,
+  onRetryQualification,
+  qualificationError,
+  qualificationOperation,
+  qualificationProgress,
+  qualificationRetrying,
 }: {
   dossier: ProspectDossier | null;
   isLoading: boolean;
   isRequalifying: boolean;
   onRequalify: () => void;
+  onRetryQualification: () => void;
+  qualificationError: string | null;
+  qualificationOperation: {
+    id: string;
+    status: "queued" | "processing" | "succeeded" | "failed" | "cancelled";
+    progress: number;
+    attempt: number;
+    maxAttempts: number;
+  } | null;
+  qualificationProgress: {
+    label?: string;
+    phase?: string;
+  } | null;
+  qualificationRetrying: boolean;
 }) {
+  const operationFailed = qualificationOperation?.status === "failed";
   const actions = (
-    <Button disabled={isRequalifying} onClick={onRequalify} size="sm" variant="outline">
+    <Button disabled={isRequalifying || operationFailed} onClick={onRequalify} size="sm" variant="outline">
       {isRequalifying ? <RefreshCw className="size-4 animate-spin" /> : <Target className="size-4" />}
-      Re-score
+      {isRequalifying ? "Scoring…" : "Re-score"}
     </Button>
   );
 
@@ -90,6 +110,56 @@ export function ProspectDossierCard({
       description="One decision snapshot for person fit, company fit, buying timing, exclusions, and research freshness."
       title="Sales intelligence dossier"
     >
+      {qualificationOperation ? (
+        <div
+          aria-live="polite"
+          className={`mx-6 mt-6 space-y-3 rounded-xl border p-4 ${operationFailed ? "border-destructive/40 bg-destructive/5" : "bg-muted/15"}`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {operationFailed ? (
+                <AlertTriangle className="size-4 text-destructive" />
+              ) : qualificationOperation.status === "succeeded" ? (
+                <CheckCircle2 className="size-4 text-chart-2" />
+              ) : (
+                <RefreshCw className="size-4 animate-spin text-muted-foreground" />
+              )}
+              <div>
+                <p className="text-sm font-medium">
+                  {operationFailed
+                    ? "Scoring needs attention"
+                    : qualificationOperation.status === "succeeded"
+                      ? "Scoring complete"
+                      : qualificationProgress?.label ?? "Scoring current research"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Operation {qualificationOperation.id} · attempt {qualificationOperation.attempt} of {qualificationOperation.maxAttempts}
+                </p>
+              </div>
+            </div>
+            {operationFailed ? (
+              <Button disabled={qualificationRetrying} onClick={onRetryQualification} size="sm" variant="outline">
+                <RefreshCw className={`size-4 ${qualificationRetrying ? "animate-spin" : ""}`} />
+                {qualificationRetrying ? "Retrying…" : "Retry same operation"}
+              </Button>
+            ) : null}
+          </div>
+          <div
+            aria-label="Qualification progress"
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={qualificationOperation.progress}
+            className="h-2 overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+          >
+            <div
+              className={`h-full rounded-full transition-[width] ${operationFailed ? "bg-destructive" : "bg-primary"}`}
+              style={{ width: `${qualificationOperation.progress}%` }}
+            />
+          </div>
+          {qualificationError ? <p className="text-sm text-destructive">{qualificationError}</p> : null}
+        </div>
+      ) : null}
       {isLoading || !dossier ? <DossierSkeleton /> : (
         <div className="space-y-5 p-6">
           <div className="flex flex-wrap items-center gap-2">

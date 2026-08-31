@@ -97,12 +97,13 @@ test("emitProductEventFromContext falls back to the graph organization boundary"
   assert.equal(recorded[0].organizationId, "org_graph");
 });
 
-test("the frozen v1 vocabulary contains product outcomes, not funnel delivery events", () => {
+test("the frozen v1 vocabulary contains public outcomes and the internal knowledge outbox", () => {
   // `prospect.replied` closes the prospect chain (spec §7, emitted from the activity
   // choke point); `post.metrics.updated` closes the feedback chain (emitted by
   // recordMetricSnapshot, plan 2026-07-31-metrics-groundwork). The Cascade
-  // Funnel list and email CRUD are state, not delivery events. External
-  // automation owns delivery and can report channel-neutral outcomes.
+  // Funnel list and email CRUD are state, not public delivery events. They do
+  // enter the internal knowledge outbox so the shared graph can project the
+  // module's current state without exposing those records as webhooks.
   assert.deepEqual([...PRODUCT_EVENT_NAMES], [
     "prospect.created", "prospect.researched", "prospect.qualified",
     "prospect.meeting.scheduled", "prospect.transcript.updated", "prospect.insights.updated",
@@ -111,5 +112,13 @@ test("the frozen v1 vocabulary contains product outcomes, not funnel delivery ev
     "content.angle.emerged",
     "post.metrics.updated",
     "intelligence.artifact.ready", "intelligence.artifact.outcome.reported",
+    "knowledge.outreach.transcript.ready",
+    "knowledge.workspace.contact.changed",
+    "knowledge.cascade.funnel.changed", "knowledge.cascade.member.changed", "knowledge.cascade.email.changed",
+    "knowledge.intelligence.artifact.ready", "knowledge.intelligence.outcome.recorded",
+    "knowledge.support.feedback.recorded",
+    "knowledge.resonance.run.completed",
+    "knowledge.publishing.post.changed", "knowledge.publishing.metrics.recorded",
+    "calendar.entry.changed",
   ]);
 });

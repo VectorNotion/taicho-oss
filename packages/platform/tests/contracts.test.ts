@@ -5,7 +5,14 @@ import {
   getActionProduct,
   type BackgroundAction,
 } from '../agents/contracts';
-import { DEFAULT_MODEL_SLUG, modelSlug, routerModel } from '../agents/model';
+import {
+  AI_GENERATION_NOT_CONFIGURED_MESSAGE,
+  LANGUAGE_RUNTIME_VERSION,
+  PRIMARY_LANGUAGE_MODEL_SLUG,
+  createLanguageModelRuntime,
+  modelSlug,
+  routerModel,
+} from '../agents/model';
 import { actionHandlers } from '../agents/registry';
 
 test('every catalog action has exactly one runtime handler', () => {
@@ -48,18 +55,45 @@ test('unknown actions are rejected instead of silently becoming outreach actions
   );
 });
 
-test('model selection has one default and a deterministic OpenRouter prefix', () => {
-  const previous = process.env.MODEL_NAME;
-  try {
-    delete process.env.MODEL_NAME;
-    assert.equal(modelSlug(), DEFAULT_MODEL_SLUG);
-    assert.equal(routerModel(), `openrouter/${DEFAULT_MODEL_SLUG}`);
+test('the language runtime exposes one release-owned OpenRouter target', () => {
+  assert.equal(modelSlug(), PRIMARY_LANGUAGE_MODEL_SLUG);
+  assert.equal(routerModel(), `openrouter/${PRIMARY_LANGUAGE_MODEL_SLUG}`);
 
-    process.env.MODEL_NAME = 'vendor/custom-model';
-    assert.equal(modelSlug(), 'vendor/custom-model');
-    assert.equal(routerModel(), 'openrouter/vendor/custom-model');
-  } finally {
-    if (previous === undefined) delete process.env.MODEL_NAME;
-    else process.env.MODEL_NAME = previous;
-  }
+  const configured = createLanguageModelRuntime({
+    environment: { OPENROUTER_API_KEY: 'test-key' },
+  });
+  assert.equal(configured.isConfigured(), true);
+  assert.deepEqual(configured.requireReady(), {
+    provider: 'openrouter',
+    modelId: PRIMARY_LANGUAGE_MODEL_SLUG,
+    runtimeVersion: LANGUAGE_RUNTIME_VERSION,
+  });
+});
+
+test('runtime readiness and test injection do not mutate global process state', () => {
+  const missing = createLanguageModelRuntime({ environment: {} });
+  assert.equal(missing.isConfigured(), false);
+  assert.throws(
+    () => missing.requireReady(),
+    new RegExp(AI_GENERATION_NOT_CONFIGURED_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  );
+
+  const injected = createLanguageModelRuntime({
+    environment: { OPENROUTER_API_KEY: 'test-key' },
+    primaryModelSlug: 'test/provider-model',
+  });
+  assert.equal(injected.routerModel, 'openrouter/test/provider-model');
+  assert.equal(injected.execution.modelId, 'test/provider-model');
+  assert.equal(modelSlug(), PRIMARY_LANGUAGE_MODEL_SLUG);
+});
+
+test('production rejects language-generation simulation modes', () => {
+  const runtime = createLanguageModelRuntime({
+    environment: {
+      NODE_ENV: 'production',
+      OPENROUTER_API_KEY: 'test-key',
+      TAICHO_CHAT_SIMULATION: '1',
+    },
+  });
+  assert.throws(() => runtime.requireReady(), /TAICHO_CHAT_SIMULATION=1 is forbidden/);
 });

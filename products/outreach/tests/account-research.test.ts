@@ -51,6 +51,8 @@ interface Rec {
   savedScore: { icpScore: number; timingScore: number; hardExcluded: boolean } | null;
   progress: DimensionProgress[];
   opportunityRefreshes: string[];
+  knowledgeAssessments: string[][];
+  knowledgeExtractions: string[][];
 }
 
 function makeDeps(config: {
@@ -58,7 +60,7 @@ function makeDeps(config: {
   existing?: ObservationRecord[];
   hasRun?: boolean;
 }): { deps: Partial<AccountResearchDeps>; rec: Rec } {
-  const rec: Rec = { researched: [], savedScore: null, progress: [], opportunityRefreshes: [] };
+  const rec: Rec = { researched: [], savedScore: null, progress: [], opportunityRefreshes: [], knowledgeAssessments: [], knowledgeExtractions: [] };
   const store = [...(config.existing ?? [])];
   const deps: Partial<AccountResearchDeps> = {
     cascade: false,
@@ -71,6 +73,7 @@ function makeDeps(config: {
       if (i >= 0) store[i] = rest; else store.push(rest);
       return rest;
     },
+    updateObservationLineage: undefined,
     researchDimensions: async (lapsed) => {
       rec.researched.push(lapsed.map((x) => x.key));
       return lapsed.map((x) => {
@@ -82,6 +85,10 @@ function makeDeps(config: {
     evaluateFitMatches: async (fitDims, observations) => {
       const observed = new Set(observations.map((o) => o.dimensionKey));
       return fitDims.filter((x) => observed.has(x.key)).map((x) => {
+        const observation = observations.find((candidate) => candidate.dimensionKey === x.key)!;
+        if (observation.confidence <= 0) {
+          return { dimensionKey: x.key, matchScore: 0, effectiveMatch: 0, classification: 'insufficient_evidence', hardExclusion: false, confidence: 0 } satisfies DimensionMatch;
+        }
         const cfg = config.matchScores?.[x.key] ?? { score: 1 };
         return { dimensionKey: x.key, matchScore: cfg.score, effectiveMatch: cfg.score, classification: 'strong_match', hardExclusion: cfg.hardExclusion ?? false, confidence: 1 } satisfies DimensionMatch;
       });
@@ -93,6 +100,15 @@ function makeDeps(config: {
     refreshAccountOpportunityAngles: async (input) => {
       rec.opportunityRefreshes.push(input.account.id);
       return { count: 2 };
+    },
+    ingestObservationKnowledge: async ({ observation }) => ({ claimIds: [`claim-${observation.dimensionKey}`], evidenceIds: [`evidence-${observation.dimensionKey}`] }),
+    extractResearchKnowledge: async ({ observations }) => {
+      rec.knowledgeExtractions.push(observations.map(({ dimensionKey }) => dimensionKey));
+      return null;
+    },
+    recordKnowledgeAssessment: async ({ observations }) => {
+      rec.knowledgeAssessments.push(observations.flatMap((observation) => observation.claimIds ?? []));
+      return null;
     },
     now: () => NOW,
     onDimension: (p) => rec.progress.push(p),
@@ -113,6 +129,8 @@ test('runAccountResearch researches account fit+timing only, scores, ignores pro
   assert.deepEqual(rec.opportunityRefreshes, ['acct-1']);
   assert.equal(rec.savedScore?.icpScore.toFixed(0), '85');
   assert.equal(rec.savedScore?.timingScore, 100);
+  assert.deepEqual(rec.knowledgeAssessments, [['claim-icp_a', 'claim-icp_b', 'claim-hiring_activity']]);
+  assert.deepEqual(rec.knowledgeExtractions, [['icp_a', 'icp_b', 'hiring_activity']], 'extracts one graph batch per research run');
 
   // Emitted per-dimension progress (searching + found + matched), never for persona_a.
   const keys = new Set(rec.progress.map((p) => p.dimensionKey));
@@ -159,11 +177,10 @@ test('an explicit refresh researches every account dimension even when evidence 
   assert.deepEqual(rec.researched, [['icp_a', 'icp_b', 'hiring_activity']]);
 });
 
-test('account research fails instead of completing when a requested criterion has no result', async () => {
+test('account research retains a requested criterion as insufficient evidence when synthesis omits it', async () => {
   const { deps } = makeDeps({});
 
-  await assert.rejects(
-    () => runAccountResearch('acct-1', {
+  const result = await runAccountResearch('acct-1', {
       ...deps,
       forceRefresh: true,
       researchDimensions: async (dimensions) => dimensions
@@ -173,9 +190,32 @@ test('account research fails instead of completing when a requested criterion ha
           void ignoredId;
           return observation;
         }),
-    }),
-    /Company research returned no result for: icp_b/,
-  );
+    });
+
+  assert.equal(result.icpMatches.length, 2);
+  assert.equal(result.icpMatches.find((match) => match.dimensionKey === 'icp_b')?.classification, 'insufficient_evidence');
+});
+
+test('account graph enrichment failure does not block scoring or opportunity generation', async () => {
+  const { deps, rec } = makeDeps({});
+  const activities: string[] = [];
+
+  const result = await runAccountResearch('acct-1', {
+    ...deps,
+    extractResearchKnowledge: async () => { throw new Error('graph shape rejected'); },
+    recordKnowledgeAssessment: async () => { throw new Error('assessment graph unavailable'); },
+    onActivity: (activity) => activities.push(activity.type),
+  });
+
+  assert.equal(result.icpMatches.length, 2);
+  assert.equal(result.opportunityCount, 2);
+  assert.ok(rec.savedScore);
+  assert.ok(activities.includes('graph_enrichment_warning'));
+  assert.ok(activities.includes('scoring_completed'));
+  assert.ok(activities.includes('scope_completed'));
+  assert.ok(activities.indexOf('observations_persisted') < activities.indexOf('graph_enrichment_warning'));
+  assert.ok(activities.indexOf('scoring_completed') < activities.lastIndexOf('graph_enrichment_warning'));
+  assert.ok(activities.lastIndexOf('graph_enrichment_warning') < activities.indexOf('scope_completed'));
 });
 
 test('cascade researches new prospects and requalifies researched prospects', async () => {

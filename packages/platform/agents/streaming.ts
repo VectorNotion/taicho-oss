@@ -35,6 +35,7 @@ export type AgentStreamFactory = (args: {
   prompt: string;
   schema: z.ZodType;
   temperature: number;
+  vision?: Array<{ bytes: Buffer; mimeType: string; description: string }>;
 }) => Promise<AsyncIterable<StreamChunk>>;
 
 const defaultAgentStream: AgentStreamFactory = async ({
@@ -44,6 +45,7 @@ const defaultAgentStream: AgentStreamFactory = async ({
   prompt,
   schema,
   temperature,
+  vision,
 }) => {
   const agent = registerObservedAgent(new Agent({
     id: agentId,
@@ -51,7 +53,19 @@ const defaultAgentStream: AgentStreamFactory = async ({
     instructions,
     model: routerModel(),
   }), 'taicho-background-agents');
-  const stream = await agent.stream(prompt, {
+  const messages = vision?.length
+    ? [{
+        role: 'user' as const,
+        content: [
+          {
+            type: 'text' as const,
+            text: `${prompt}\n\nThe attached Content Base media is source material. Interpret its actual visual content.\n${vision.map((item, index) => `Asset ${index + 1}: ${item.description}`).join('\n')}`,
+          },
+          ...vision.map((item) => ({ type: 'image' as const, image: item.bytes, mediaType: item.mimeType })),
+        ],
+      }]
+    : prompt;
+  const stream = await agent.stream(messages, {
     structuredOutput: { schema },
     modelSettings: { temperature, maxOutputTokens: 32768 },
     providerOptions: { openrouter: { reasoning: { effort: 'medium' } } },
@@ -71,6 +85,7 @@ export function streamingStructuredGenerate(
     prompt: string;
     schema: S;
     temperature: number;
+    vision?: Array<{ bytes: Buffer; mimeType: string; description: string }>;
   }): Promise<z.infer<S>> => traceable(
     async () => {
       const chunks = await agentStream(args);

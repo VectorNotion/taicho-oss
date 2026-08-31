@@ -22,7 +22,10 @@ import type {
 } from '../domain/types';
 
 const DEFAULT_EMBEDDING_URL = 'https://openrouter.ai/api/v1/embeddings';
-const DEFAULT_EMBEDDING_MODEL = 'nvidia/nemotron-3-embed-1b:free';
+// Keep the default on an open-weight model, but avoid a free-only route for a
+// production-facing search path: free capacity can queue until our request
+// timeout even when the deployment is otherwise correctly configured.
+const DEFAULT_EMBEDDING_MODEL = 'qwen/qwen3-embedding-8b';
 const DEFAULT_EMBEDDING_DIMENSIONS = 2_048;
 const MAX_SOURCE_CHARACTERS = 8_000;
 const EMBEDDING_BATCH_SIZE = 32;
@@ -68,7 +71,7 @@ export function prospectSemanticSearchConfigFromEnvironment(
 
   const embeddingModel = environment.OUTREACH_EMBEDDING_MODEL?.trim()
     || DEFAULT_EMBEDDING_MODEL;
-  const usesDefaultNvidiaModel = embeddingUrl === DEFAULT_EMBEDDING_URL
+  const usesDefaultOpenRouterModel = embeddingUrl === DEFAULT_EMBEDDING_URL
     && embeddingModel === DEFAULT_EMBEDDING_MODEL;
   return {
     embeddingUrl,
@@ -76,9 +79,9 @@ export function prospectSemanticSearchConfigFromEnvironment(
     embeddingModel,
     embeddingDimensions: dimensionsFromEnvironment(environment.OUTREACH_EMBEDDING_DIMENSIONS),
     queryInputType: environment.OUTREACH_EMBEDDING_QUERY_INPUT_TYPE?.trim()
-      || (usesDefaultNvidiaModel ? 'query' : undefined),
+      || (usesDefaultOpenRouterModel ? 'query' : undefined),
     documentInputType: environment.OUTREACH_EMBEDDING_DOCUMENT_INPUT_TYPE?.trim()
-      || (usesDefaultNvidiaModel ? 'passage' : undefined),
+      || (usesDefaultOpenRouterModel ? 'passage' : undefined),
   };
 }
 

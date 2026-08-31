@@ -14,7 +14,7 @@ Membership is unique on `(funnel_id, contact_id)`. Email names are unique
 within a funnel. Deleting a funnel cascades its memberships and text emails but
 does not delete the shared contact.
 
-The migration collapses historical enrollments into membership and preserves
-valid historical email steps as named text emails. It then clears the retired
-execution, delivery, template, and experiment data so no legacy state remains
-active.
+The 2026-08 simplification migrations collapsed historical enrollments into
+membership, preserved valid historical email steps as named text emails, and
+then dropped the retired execution, delivery, template, and experiment tables.
+These four tables are the complete `cascade` schema.

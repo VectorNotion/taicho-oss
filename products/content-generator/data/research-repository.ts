@@ -16,6 +16,7 @@ export async function createResearchSource(
   data: CreateResearchSourceInput
 ): Promise<ResearchSource> {
   const session = await getSession();
+  const now = new Date().toISOString();
 
   try {
     const result = await session.run(
@@ -26,8 +27,8 @@ export async function createResearchSource(
         type: $type,
         url: $url,
         enabled: $enabled,
-        createdAt: localdatetime(),
-        updatedAt: localdatetime()
+        createdAt: $now,
+        updatedAt: $now
       })
       RETURN s
       `,
@@ -36,6 +37,7 @@ export async function createResearchSource(
         type: data.type,
         url: data.url,
         enabled: data.enabled ?? true,
+        now,
       }
     );
 
@@ -64,7 +66,7 @@ export async function getResearchSources(): Promise<ResearchSource[]> {
       `
       MATCH (s:ResearchSource)
       RETURN s
-      ORDER BY s.createdAt DESC
+      ORDER BY toString(s.createdAt) DESC
       `
     );
 
@@ -126,8 +128,8 @@ export async function updateResearchSource(
 
   try {
     // Build SET clause dynamically based on provided fields
-    const setClauses: string[] = ['s.updatedAt = localdatetime()'];
-    const params: Record<string, unknown> = { id };
+    const setClauses: string[] = ['s.updatedAt = $updatedAt'];
+    const params: Record<string, unknown> = { id, updatedAt: new Date().toISOString() };
 
     if (data.name !== undefined) {
       setClauses.push('s.name = $name');
@@ -204,7 +206,7 @@ export async function getEnabledResearchSources(): Promise<ResearchSource[]> {
       `
       MATCH (s:ResearchSource {enabled: true})
       RETURN s
-      ORDER BY s.createdAt DESC
+      ORDER BY toString(s.createdAt) DESC
       `
     );
 
@@ -231,6 +233,7 @@ export async function createResearchItem(
   data: CreateResearchItemInput
 ): Promise<ResearchItem> {
   const session = await getSession();
+  const now = new Date().toISOString();
 
   try {
     const result = await session.run(
@@ -242,13 +245,13 @@ export async function createResearchItem(
         sourceUrl: $sourceUrl,
         sourceId: $sourceId,
         addedBy: $addedBy,
-        addedAt: localdatetime(),
+        addedAt: $now,
         tags: $tags,
         status: $status,
         priority: $priority,
         humanNote: $humanNote,
-        createdAt: localdatetime(),
-        updatedAt: localdatetime()
+        createdAt: $now,
+        updatedAt: $now
       })
       RETURN i
       `,
@@ -262,6 +265,7 @@ export async function createResearchItem(
         status: data.status || 'unprocessed',
         priority: data.priority || 'medium',
         humanNote: data.humanNote || null,
+        now,
       }
     );
 
@@ -336,7 +340,7 @@ export async function getResearchItems(
       ${whereClause}
       OPTIONAL MATCH (s:ResearchSource)-[:YIELDED]->(i)
       RETURN i, s.name as sourceName
-      ORDER BY i.createdAt DESC
+      ORDER BY toString(i.createdAt) DESC
       `,
       params
     );
@@ -416,8 +420,8 @@ export async function updateResearchItem(
 
   try {
     // Build SET clause dynamically based on provided fields
-    const setClauses: string[] = ['i.updatedAt = localdatetime()'];
-    const params: Record<string, unknown> = { id };
+    const setClauses: string[] = ['i.updatedAt = $updatedAt'];
+    const params: Record<string, unknown> = { id, updatedAt: new Date().toISOString() };
 
     if (data.title !== undefined) {
       setClauses.push('i.title = $title');
@@ -537,6 +541,7 @@ export async function createResearchItemFromAgent(
     }
 
     const sourceId = input.sourceId || null;
+    const now = new Date().toISOString();
     const created = await session.run(
       `
       CREATE (i:ResearchItem {
@@ -546,13 +551,13 @@ export async function createResearchItemFromAgent(
         sourceUrl: $sourceUrl,
         sourceId: $sourceId,
         addedBy: 'researcher_agent',
-        addedAt: localdatetime(),
+        addedAt: $now,
         tags: $tags,
         status: 'unprocessed',
         priority: $priority,
         humanNote: null,
-        createdAt: localdatetime(),
-        updatedAt: localdatetime()
+        createdAt: $now,
+        updatedAt: $now
       })
       RETURN i.id as id
       `,
@@ -563,6 +568,7 @@ export async function createResearchItemFromAgent(
         sourceId,
         tags: input.tags || [],
         priority: input.priority || 'medium',
+        now,
       }
     );
 
@@ -624,16 +630,17 @@ export async function getRecentResearchItems(
   days: number
 ): Promise<ResearchItem[]> {
   const session = await getSession();
+  const cutoff = new Date(Date.now() - Math.max(0, days) * 86_400_000).toISOString();
 
   try {
     const result = await session.run(
       `
       MATCH (i:ResearchItem)
-      WHERE i.createdAt > localdatetime() - duration({days: toInteger($days)})
+      WHERE toString(i.createdAt) > $cutoff
       RETURN i
-      ORDER BY i.createdAt DESC
+      ORDER BY toString(i.createdAt) DESC
       `,
-      { days }
+      { cutoff }
     );
 
     return result.records.map((record) => {

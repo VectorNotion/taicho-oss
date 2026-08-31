@@ -123,7 +123,7 @@ export function ContentViews() {
           title="Topic opportunity"
           description="Each topic's research items, split by whether any draft actually uses them (CITES / SOURCED_FROM) — a fully muted bar is a gap: research invested, nothing shipped. Shipped count rides the bar; exact numbers in the table."
         >
-          <ChartCard title="Research utilisation by topic" description="COVERS_TOPIC items split by draft usage; published drafts as the end label">
+          <ChartCard title="Research utilisation by topic" description="Evidence-backed research claims split by draft usage; published drafts as the end label">
             <ChartContainer className="h-56 w-full" config={coverageConfig}>
               <BarChart data={TOPIC_COVERAGE} layout="vertical" margin={{ left: 8, right: 72 }}>
                 <CartesianGrid horizontal={false} stroke="var(--border)" />

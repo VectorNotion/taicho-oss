@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash, randomUUID } from "node:crypto";
 
 /**
@@ -84,6 +84,10 @@ export class R2Media {
     const bytes = await res.Body?.transformToByteArray();
     if (!bytes) throw new Error(`R2 object ${key} has no body`);
     return Buffer.from(bytes);
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }));
   }
 
   publicUrlFor(key: string): string {

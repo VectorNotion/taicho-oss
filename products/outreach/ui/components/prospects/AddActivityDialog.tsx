@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +73,16 @@ export function AddActivityDialog({
     "connection_accepted",
   ].includes(selectedType);
 
+  useEffect(() => {
+    if (!open) return;
+    setSelectedType(editActivity?.type || "note");
+    setTitle(editActivity?.title || "");
+    setNotes(editActivity?.notes || "");
+    setPostUrl(editActivity?.metadata?.postUrl || "");
+    setPlatform(editActivity?.metadata?.platform || "LinkedIn");
+    setReaction(editActivity?.metadata?.reaction || "Thumbs up");
+  }, [editActivity, open]);
+
   const handleTypeSelect = (type: ActivityType) => {
     setSelectedType(type);
     // Auto-fill title if empty
@@ -142,12 +152,15 @@ export function AddActivityDialog({
 
                 return (
                   <button
+                    aria-label={`Activity type: ${label}`}
+                    aria-pressed={isSelected}
+                    disabled={isEditing}
                     key={type}
                     type="button"
                     onClick={() => handleTypeSelect(type)}
                     className={cn(
                       "flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-all",
-                      "hover:border-primary/50 hover:bg-muted/50",
+                      "hover:border-primary/50 hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60",
                       isSelected
                         ? "border-primary bg-primary/5"
                         : "border-border"

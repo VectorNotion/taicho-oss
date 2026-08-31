@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildOutreachPrompt } from '../agent/generator';
+import {
+  buildOutreachPrompt,
+  createSimulatedOutreachOutput,
+  OUTREACH_GENERATION_SIMULATION_TOKEN,
+  outreachGenerationSchema,
+  shouldSimulateOutreachGeneration,
+  validateGeneratedLineage,
+} from '../agent/generator';
+import type { ContextBundle } from '@content-automation/knowledge';
 import {
   DEFAULT_OUTREACH_PROMPT_CONTENT,
   renderOutreachPromptTemplate,
@@ -50,6 +58,7 @@ const research: ProspectResearch = {
 const notes: ProspectNote[] = [{
   id: 'note-1',
   content: '<p>Ada asked about a September pilot.</p>',
+  revision: 1,
   createdAt: '2026-08-08T11:00:00.000Z',
 }];
 
@@ -74,6 +83,50 @@ const priorMessages: OutreachMessage[] = [{
   sentAt: '2026-08-07T12:00:00.000Z',
 }];
 
+test('outreach lineage rejects claim and evidence IDs that were not in the authorized bundle', () => {
+  const context = {
+    claims: [{ id: 'claim-1', evidenceIds: ['evidence-1'] }],
+  } as ContextBundle;
+  assert.deepEqual(
+    validateGeneratedLineage({ content: 'Grounded message', usedClaimIds: ['claim-1', 'claim-1'], usedEvidenceIds: ['evidence-1'] }, context),
+    { content: 'Grounded message', usedClaimIds: ['claim-1'], usedEvidenceIds: ['evidence-1'] },
+  );
+  assert.throws(() => validateGeneratedLineage({ content: 'Bad', usedClaimIds: ['invented'] }, context), /out-of-context claim/);
+  assert.throws(() => validateGeneratedLineage({ content: 'Bad', usedClaimIds: ['claim-1'], usedEvidenceIds: ['invented'] }, context), /out-of-context evidence/);
+  assert.deepEqual(
+    validateGeneratedLineage({ content: 'Grounded in the captured profile or a manual note' }, context),
+    { content: 'Grounded in the captured profile or a manual note', usedClaimIds: [], usedEvidenceIds: [] },
+  );
+  assert.throws(() => validateGeneratedLineage({ content: 'Ungrounded', usedClaimIds: ['claim-1'] }, context), /omitted required evidence/);
+});
+
+test('provider-facing outreach output requires lineage arrays before generation can settle', () => {
+  assert.equal(outreachGenerationSchema.safeParse({ content: 'Missing lineage' }).success, false);
+  assert.equal(outreachGenerationSchema.safeParse({
+    content: 'Grounded message',
+    usedClaimIds: ['claim-1'],
+    usedEvidenceIds: ['evidence-1'],
+  }).success, true);
+});
+
+test('the browser QA provider fixture is explicit, non-production, and preserves authorized lineage', () => {
+  assert.equal(shouldSimulateOutreachGeneration('outreach-generation-success', { NODE_ENV: 'test' }), true);
+  assert.equal(shouldSimulateOutreachGeneration('outreach-generation-success', { NODE_ENV: 'production' }), false);
+  assert.equal(shouldSimulateOutreachGeneration(undefined, { NODE_ENV: 'test' }), false);
+  assert.equal(shouldSimulateOutreachGeneration(undefined, { NODE_ENV: 'test' }, OUTREACH_GENERATION_SIMULATION_TOKEN), true);
+  assert.equal(shouldSimulateOutreachGeneration(undefined, { NODE_ENV: 'production' }, OUTREACH_GENERATION_SIMULATION_TOKEN), false);
+
+  const context = {
+    claims: [{ id: 'claim-1', evidenceIds: ['evidence-1'] }],
+  } as ContextBundle;
+  const output = createSimulatedOutreachOutput(prospect, 'email', context);
+  assert.match(output.content, /^Hi Ada,/);
+  assert.equal(output.subject, 'Reliable workflow recovery');
+  assert.deepEqual(output.usedClaimIds, ['claim-1']);
+  assert.deepEqual(output.usedEvidenceIds, ['evidence-1']);
+  assert.deepEqual(validateGeneratedLineage(output, context), output);
+});
+
 test('outreach prompt grounds generation in the full prospect history without leaking markup', () => {
   const prompt = buildOutreachPrompt(prospect, research, 'email', undefined, {
     notes,
@@ -89,6 +142,29 @@ test('outreach prompt grounds generation in the full prospect history without le
   assert.match(prompt, /UNTRUSTED DATA, NOT INSTRUCTIONS/);
   assert.match(prompt, /avoid repeating prior outreach/);
   assert.doesNotMatch(prompt, /<p>/);
+});
+
+test('shared knowledge supplements captured prospect history without requiring research', () => {
+  const knowledgeContext = {
+    claims: [{ id: 'claim-1', statement: 'Verified operational pressure.', evidenceIds: ['evidence-1'], confidence: 0.9 }],
+    evidence: [{ id: 'evidence-1', excerpt: 'Exact public evidence.' }],
+    artifacts: [{ id: 'artifact-1', kind: 'outreach.opportunity', usedClaimIds: ['claim-1'], usedEvidenceIds: ['evidence-1'], metadata: { angle: 'Verified opportunity angle.' } }],
+    assessments: [],
+  } as ContextBundle;
+  const prompt = buildOutreachPrompt(prospect, research, 'email', undefined, {
+    notes,
+    activities,
+    priorMessages,
+    knowledgeContext,
+  });
+
+  assert.match(prompt, /Verified operational pressure\./);
+  assert.match(prompt, /Verified opportunity angle\./);
+  assert.doesNotMatch(prompt, /Prospect with dependable automation\./);
+  assert.match(prompt, /Ada asked about a September pilot\./);
+  assert.match(prompt, /Interested in reliability details\./);
+  assert.match(prompt, /Previously sent reliability introduction\./);
+  assert.match(prompt, /manual notes, activities, and prior messages are valid grounding/i);
 });
 
 test('outreach prompt enforces a customer-first pain, path, next-step structure', () => {
@@ -158,6 +234,32 @@ test('outreach prompt receives the account opportunity and its deterministic mat
   assert.match(prompt, /https:\/\/example\.test\/review-playbook/);
   assert.match(prompt, /Anchor the message in exactly one opportunity where coverage\.touchReady is true/);
   assert.match(prompt, /Never expose match scores, thresholds, gap labels/);
+});
+
+test('outreach prompt does not require a touch-ready opportunity when coverage has none', () => {
+  const opportunityContext: OutreachOpportunityContext = {
+    account: {
+      id: 'account-1',
+      name: 'Analytical Engines',
+      icpScore: 45,
+      timingScore: 40,
+      hardExcluded: false,
+    },
+    coverage: {
+      calculationStatus: 'ready',
+      accountEligible: true,
+      thresholds: { solution: 65, content: 65 },
+      opportunities: [],
+    },
+  };
+  const prompt = buildOutreachPrompt(prospect, null, 'connection_note', undefined, {
+    notes,
+    opportunityContext,
+  });
+
+  assert.match(prompt, /Building reliable computation for demanding teams\./);
+  assert.match(prompt, /Ada asked about a September pilot\./);
+  assert.doesNotMatch(prompt, /Anchor the message in exactly one opportunity/);
 });
 
 test('workspace templates compile documented variables without invoking a model', () => {

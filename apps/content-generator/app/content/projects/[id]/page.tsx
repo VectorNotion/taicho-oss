@@ -17,13 +17,13 @@ import { ListRow, ListRows } from "@/components/ListRow";
 import { PageHeader } from "@/components/PageHeader";
 import { EntityChipStream, ReasoningTicker, StreamSection } from "@/components/genui";
 import { useCapabilityStream } from "@content-automation/ui/hooks/use-capability-stream";
-import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useCallback } from "react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { ArrowLeft, ExternalLink, FolderKanban, Loader2, Pencil, Trash2, RefreshCw } from "lucide-react";
+import { ArrowLeft, CircleAlert, ExternalLink, FolderKanban, Loader2, Pencil, Trash2, RefreshCw } from "lucide-react";
 import type { ProjectEntity } from "@/products/content-generator/data/project-repository";
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,6 +36,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [project, setProject] = useState<any>(null);
   const [entities, setEntities] = useState<ProjectEntity[]>([]);
   const [entitiesLoading, setEntitiesLoading] = useState(true);
+  const [entitiesLoadError, setEntitiesLoadError] = useState<string | null>(null);
   const entitiesStream = useCapabilityStream<{
     entities?: Array<{ name: string; type: string }>;
   }, { entityCount: number }>({ api: `/content/projects/${projectId}/ingest` });
@@ -47,8 +48,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         const data = await apiGet<{ project: any }>(`/content/projects/${routeProjectId}`);
         setProject(data.project);
       } catch (error) {
-        console.error('Error fetching project:', error);
-        toast.error("Could not load the project. Refresh to try again.");
+        if (!(error instanceof ApiError && error.status === 404)) {
+          console.error('Error fetching project:', error);
+          toast.error("Could not load the project. Refresh to try again.");
+        }
       } finally {
         setIsLoading(false);
       }
@@ -56,32 +59,30 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     fetchProject();
   }, [routeProjectId]);
 
-  useEffect(() => {
-    async function fetchEntities() {
-      if (!projectId) return;
+  const fetchEntities = useCallback(async () => {
+    if (!projectId) return;
 
-      setEntitiesLoading(true);
-      try {
-        const data = await apiGet<{ entities: ProjectEntity[] }>(`/content/projects/${projectId}/entities`);
-        setEntities(data.entities);
-      } catch (error) {
-        console.error('Error fetching entities:', error);
-        toast.error("Could not load extracted entities. Refresh to try again.");
-      } finally {
-        setEntitiesLoading(false);
-      }
+    setEntitiesLoading(true);
+    setEntitiesLoadError(null);
+    try {
+      const data = await apiGet<{ entities: ProjectEntity[] }>(`/content/projects/${projectId}/entities`);
+      setEntities(data.entities);
+    } catch (error) {
+      console.error('Error fetching entities:', error);
+      setEntitiesLoadError(error instanceof Error ? error.message : "Could not load extracted entities.");
+    } finally {
+      setEntitiesLoading(false);
     }
-    fetchEntities();
   }, [projectId]);
+
+  useEffect(() => { void fetchEntities(); }, [fetchEntities]);
 
   const handleReingest = () => entitiesStream.start();
 
   useEffect(() => {
     if (!entitiesStream.final || !projectId) return;
-    void apiGet<{ entities: ProjectEntity[] }>(`/content/projects/${projectId}/entities`)
-      .then((data) => setEntities(data.entities))
-      .catch(() => toast.error("Extraction completed, but entities could not be refreshed."));
-  }, [entitiesStream.final, projectId]);
+    void fetchEntities();
+  }, [entitiesStream.final, fetchEntities, projectId]);
   useEffect(() => { if (entitiesStream.error) toast.error(entitiesStream.error); }, [entitiesStream.error]);
 
   const handleDelete = async () => {
@@ -95,7 +96,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       router.push('/content/projects');
     } catch (error) {
       console.error('Error deleting project:', error);
-      toast.error("Could not delete the project. Try again.");
+      toast.error(error instanceof ApiError
+        ? error.message
+        : "Could not delete the project. Try again.");
       setIsDeleting(false);
     }
   };
@@ -108,6 +111,40 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     acc[entity.type].push(entity);
     return acc;
   }, {} as Record<string, ProjectEntity[]>);
+
+  const entityTypeLabel = (type: string) => type
+    .replace(/^content\./, '')
+    .replaceAll('_', ' ')
+    .replace(/^./, (letter) => letter.toUpperCase());
+
+  const extractedEntityList = entities.length > 0 ? (
+    <div className="space-y-5" data-testid="stored-project-entities">
+      {Object.entries(groupedEntities).map(([type, entityList]) => (
+        <section aria-labelledby={`entity-type-${type}`} key={type}>
+          <h3 className="mb-2 text-sm font-medium" id={`entity-type-${type}`}>{entityTypeLabel(type)}</h3>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {entityList.map((entity) => (
+              <div className="rounded-lg border bg-muted/20 p-3" data-claim-id={entity.claimId ?? undefined} data-entity-id={entity.entityId} key={entity.entityId}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">{entity.name}</p>
+                  <Badge variant="outline">{entityTypeLabel(entity.type)}</Badge>
+                </div>
+                {entity.statement && <p className="mt-2 text-sm text-muted-foreground">{entity.statement}</p>}
+                {entity.evidence && (
+                  <div className="mt-3 border-t pt-2 text-xs text-muted-foreground">
+                    <p className="font-medium text-foreground/80">
+                      Source: {entity.evidence.source?.title ?? "Project description"}
+                    </p>
+                    <p className="mt-1 line-clamp-3">{entity.evidence.excerpt}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  ) : null;
 
   const backLink = (
     <Link
@@ -296,7 +333,26 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </CardHeader>
           <CardContent>
-            {entitiesStream.isStreaming || entitiesStream.partial ? (
+            {entitiesStream.error ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
+                  <div className="flex items-start gap-3">
+                    <CircleAlert className="mt-0.5 size-5 shrink-0 text-destructive" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">Entity extraction failed</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{entitiesStream.error}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {entities.length > 0 ? "Previously stored entities were not changed." : "No entities were stored."}
+                      </p>
+                      <Button className="mt-3" onClick={handleReingest} size="sm" variant="outline">
+                        <RefreshCw className="size-4" /> Try extraction again
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                {extractedEntityList}
+              </div>
+            ) : entitiesStream.isStreaming ? (
               <div className="space-y-4">
                 <ReasoningTicker text={entitiesStream.reasoning} active={entitiesStream.isStreaming} />
                 <StreamSection title="Extracting entities" state={entitiesStream.isStreaming ? "streaming" : "done"}>
@@ -311,6 +367,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   <Skeleton className="h-5 w-24" />
                   <Skeleton className="h-5 w-16" />
                 </div>
+              </div>
+            ) : entitiesLoadError ? (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
+                <p className="text-sm font-medium">Extracted entities could not be loaded</p>
+                <p className="mt-1 text-sm text-muted-foreground">{entitiesLoadError}</p>
+                <Button className="mt-3" onClick={() => void fetchEntities()} size="sm" variant="outline">
+                  <RefreshCw className="size-4" /> Try again
+                </Button>
               </div>
             ) : entities.length === 0 ? (
               <div className="py-6 text-center">
@@ -331,22 +395,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   Extract entities
                 </Button>
               </div>
-            ) : (
-              <div className="space-y-4">
-                {Object.entries(groupedEntities).map(([type, entityList]) => (
-                  <div key={type}>
-                    <h3 className="mb-2 text-sm font-medium">{type}s</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {entityList.map((entity, i) => (
-                        <Badge key={i} variant="outline">
-                          {entity.name}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            ) : extractedEntityList}
           </CardContent>
         </Card>
       </div>

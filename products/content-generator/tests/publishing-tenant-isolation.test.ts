@@ -37,6 +37,8 @@ test("publishing runtime role blocks cross-organization channels and queue work"
     await admin.query(
       `CREATE ROLE "${role}" LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`,
     );
+    const databaseName = String((await admin.query<{ name: string }>("SELECT current_database() AS name")).rows[0]?.name);
+    await admin.query(`GRANT CONNECT ON DATABASE "${databaseName.replaceAll('"', '""')}" TO "${role}"`);
     await admin.query(`GRANT USAGE ON SCHEMA "${schema}" TO "${role}"`);
     await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "${schema}" TO "${role}"`);
     await admin.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "${schema}" TO "${role}"`);

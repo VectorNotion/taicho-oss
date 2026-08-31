@@ -33,9 +33,17 @@ export function parseRunRequest(body: unknown): RunRequest {
   return run
 }
 
+/**
+ * Flat per-run price (spec 2026-08-31 §3.3): the real cost is one batched
+ * embeddings call, so per-cell GPU pricing no longer reflects anything.
+ * Settlement (`server/runs.ts`) uses this same constant — reserve and settle
+ * cannot disagree.
+ */
+export const RESONANCE_RUN_CREDITS = 1
+
 export function estimateRun(run: RunRequest): RunEstimate {
   const cells = run.creatives.length * run.frames.length * run.audienceSize
-  return { cells, credits: Math.max(1, Math.ceil(cells / 1000)) }
+  return { cells, credits: RESONANCE_RUN_CREDITS }
 }
 
 /**
@@ -89,7 +97,7 @@ const runProgressSchema = z.object({
   voteSnapshot: voteSnapshotSchema.optional(),
 })
 
-const runResultSchema = z.object({
+export const runResultSchema = z.object({
   scores: z.array(creativeScoreSchema),
   winner: z.object({
     creativeId: z.string().min(1).nullable(),
@@ -104,6 +112,8 @@ const runResultSchema = z.object({
   voteSnapshot: voteSnapshotSchema.optional(),
   partial: z.boolean().optional(),
   degradedReason: z.string().optional(),
+  audienceGrounding: z.enum(['graph', 'default']).optional(),
+  computedAudienceSize: z.number().int().min(0).optional(),
 })
 
 export const modalResultSchema = z.object({
@@ -136,11 +146,11 @@ export function parseResonancePoll(body: unknown): ResonancePollPayload {
 }
 
 /**
- * A structurally invalid result from Modal. Deliberately NOT a
- * `ResonanceResultGoneError`: a malformed body is treated exactly like a failed
- * poll (logged, swallowed by `reconcileRun`, job left `processing`) so a
- * deploy-skew bug is recoverable by fixing the worker, never by silently
- * charging or cancelling a run that may well have succeeded.
+ * A structurally invalid result payload. A malformed body is treated exactly
+ * like a failed poll (logged, swallowed by `reconcileRun`, job left
+ * `processing`) so a producer bug is recoverable by fixing the producer,
+ * never by silently charging or cancelling a run that may well have
+ * succeeded.
  */
 export class ResonanceMalformedResultError extends Error {
   readonly issues: z.ZodIssue[]

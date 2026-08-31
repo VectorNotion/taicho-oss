@@ -98,6 +98,30 @@ function signingKey(secret: string): Buffer {
 }
 
 function apiUrl(): string {
+  const configured = process.env.RECALL_API_URL?.trim();
+  if (configured) {
+    try {
+      const url = new URL(configured);
+      const loopbackDevelopment = process.env.NODE_ENV !== 'production'
+        && url.protocol === 'http:'
+        && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1');
+      if (
+        (url.protocol !== 'https:' && !loopbackDevelopment)
+        || url.username
+        || url.password
+        || url.search
+        || url.hash
+        || (url.pathname !== '/' && url.pathname !== '')
+      ) {
+        throw new Error('invalid');
+      }
+      return url.origin;
+    } catch {
+      throw new RecallConfigurationError(
+        'RECALL_API_URL must be an HTTPS origin, except for an HTTP loopback origin outside production.',
+      );
+    }
+  }
   const region = process.env.RECALL_REGION?.trim() || 'us-east-1';
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(region)) {
     throw new RecallConfigurationError('RECALL_REGION is invalid.');

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test, { after, before } from 'node:test';
+import { migrationPoolConfig } from '@content-automation/database';
+import { Pool } from 'pg';
 import { recordProductEvent } from '../events/emit';
-import { closeJobPools, getJobAdminPool } from '../jobs/pool';
+import { closeJobPools } from '../jobs/pool';
 import {
   getNotificationPreferences,
   listUserNotifications,
@@ -13,18 +15,18 @@ import {
 const suffix = randomUUID().replaceAll('-', '');
 const organizationId = `notify_test_${suffix}`;
 const userId = `notify_user_${suffix}`;
+const fixturePool = new Pool({ ...migrationPoolConfig(), max: 1 });
 
 before(async () => {
-  const pool = getJobAdminPool();
-  await pool.query(
+  await fixturePool.query(
     `INSERT INTO organization(id, name, slug, "createdAt") VALUES($1, $2, $3, NOW())`,
     [organizationId, 'Notification Test', organizationId],
   );
-  await pool.query(
+  await fixturePool.query(
     `INSERT INTO "user"(id, name, email, "emailVerified") VALUES($1, $2, $3, TRUE)`,
     [userId, 'Notification Test User', `${suffix}@notifications.test`],
   );
-  await pool.query(
+  await fixturePool.query(
     `INSERT INTO member(id, "organizationId", "userId", role, "createdAt")
      VALUES($1, $2, $3, 'owner', NOW())`,
     [`notify_member_${suffix}`, organizationId, userId],
@@ -32,13 +34,13 @@ before(async () => {
 });
 
 after(async () => {
-  const pool = getJobAdminPool();
-  await pool.query('DELETE FROM product_events WHERE organization_id = $1', [organizationId])
+  await fixturePool.query('DELETE FROM product_events WHERE organization_id = $1', [organizationId])
     .catch(() => undefined);
-  await pool.query('DELETE FROM organization WHERE id = $1', [organizationId])
+  await fixturePool.query('DELETE FROM organization WHERE id = $1', [organizationId])
     .catch(() => undefined);
-  await pool.query('DELETE FROM "user" WHERE id = $1', [userId])
+  await fixturePool.query('DELETE FROM "user" WHERE id = $1', [userId])
     .catch(() => undefined);
+  await fixturePool.end();
   await closeJobPools();
 });
 
@@ -126,7 +128,7 @@ test('external notifications are durable, idempotent, per-user, and preference-a
     payload: { title: 'Quiet angle', summary: 'The user disabled this category.' },
   });
 
-  const counts = (await getJobAdminPool().query(
+  const counts = (await fixturePool.query(
     `SELECT
        (SELECT count(*)::int FROM product_events WHERE organization_id = $1) AS events,
        (SELECT count(*)::int FROM attention_items WHERE organization_id = $1) AS attention,

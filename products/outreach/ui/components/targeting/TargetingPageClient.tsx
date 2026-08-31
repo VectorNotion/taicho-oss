@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Crosshair, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { PageHeader } from "@/components/PageHeader";
 import { ListCard } from "@/components/ListCard";
 import { ListRow, ListRows } from "@/components/ListRow";
@@ -96,6 +96,7 @@ function LensPanel({ appliesTo, noun, catalogItemId }: { appliesTo: DimensionApp
   const [editing, setEditing] = useState<DimensionDefinition | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DimensionDefinition | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -136,14 +137,22 @@ function LensPanel({ appliesTo, noun, catalogItemId }: { appliesTo: DimensionApp
   async function confirmDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
-      await apiMutate("DELETE", `/outreach/dimensions/${deleteTarget.id}`, { confirm: true });
+      await apiMutate("DELETE", `/outreach/dimensions/${deleteTarget.id}`, {
+        confirm: true,
+        expectedRevision: deleteTarget.revision,
+      });
       setDimensions((items) => items.filter((item) => item.id !== deleteTarget.id));
       toast.success("Dimension deleted");
       setDeleteTarget(null);
     } catch (error) {
-      console.error("Failed to delete dimension:", error);
-      toast.error("Could not delete the dimension. Try again.");
+      const message = error instanceof ApiError
+        ? error.message
+        : "Could not delete the dimension. Try again.";
+      if (!(error instanceof ApiError)) console.error("Failed to delete dimension:", error);
+      setDeleteError(message);
+      toast.error(message);
     } finally {
       setDeleting(false);
     }
@@ -215,7 +224,10 @@ function LensPanel({ appliesTo, noun, catalogItemId }: { appliesTo: DimensionApp
                       destructive: true,
                       icon: Trash2,
                       label: `Delete ${dimension.name}`,
-                      onSelect: () => setDeleteTarget(dimension),
+                      onSelect: () => {
+                        setDeleteError(null);
+                        setDeleteTarget(dimension);
+                      },
                     },
                   ]}
                 badge={
@@ -264,11 +276,17 @@ function LensPanel({ appliesTo, noun, catalogItemId }: { appliesTo: DimensionApp
               against. Findings already recorded for it stay on their entities but are no
               longer counted.
             </DialogDescription>
+            {deleteError && (
+              <p className="text-sm text-destructive" role="alert">{deleteError}</p>
+            )}
           </DialogHeader>
           <DialogFooter>
             <Button
               disabled={deleting}
-              onClick={() => setDeleteTarget(null)}
+              onClick={() => {
+                setDeleteError(null);
+                setDeleteTarget(null);
+              }}
               variant="outline"
             >
               Cancel

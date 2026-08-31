@@ -4,7 +4,7 @@
   "private": true,
   "exports": {
     "./hooks/use-capability-stream": "./hooks/use-capability-stream.ts",
-    "./components/ModelPicker": "./components/ModelPicker.tsx",
+    "./hooks/use-durable-operation": "./hooks/use-durable-operation.ts",
     "./components/ListCard": "./components/ListCard.tsx",
     "./components/ListRow": "./components/ListRow.tsx",
     "./components/ListSurface": "./components/ListSurface.tsx",
@@ -13,6 +13,7 @@
     "./components/ui/badge": "./components/ui/badge.tsx",
     "./components/ui/button": "./components/ui/button.tsx",
     "./components/ui/card": "./components/ui/card.tsx",
+    "./components/ui/dialog": "./components/ui/dialog.tsx",
     "./components/ui/input": "./components/ui/input.tsx",
     "./components/ui/revealable-secret-input": "./components/ui/revealable-secret-input.tsx",
     "./components/ui/label": "./components/ui/label.tsx",
@@ -20,7 +21,10 @@
     "./components/ui/skeleton": "./components/ui/skeleton.tsx",
     "./components/ui/switch": "./components/ui/switch.tsx",
     "./components/ui/table": "./components/ui/table.tsx",
-    "./components/ui/tabs": "./components/ui/tabs.tsx"
+    "./components/ui/tabs": "./components/ui/tabs.tsx",
+    "./components/workflow/VisualWorkflowBuilder": "./components/workflow/VisualWorkflowBuilder.tsx",
+    "./components/workflow/runtime-ui": "./components/workflow/runtime-ui.ts",
+    "./components/workflow/workflow-duration": "./components/workflow/workflow-duration.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -59,7 +63,8 @@
     "recharts": "2.15.4",
     "tailwind-merge": "^3.4.0",
     "turndown": "^7.2.4",
-    "zod": "4.3.5"
+    "zod": "4.3.5",
+    "@xyflow/react": "12.11.2"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.0",

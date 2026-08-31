@@ -1,3 +1,10 @@
 export { databaseFor, type Database } from "./client";
-export { adminPoolConfig, dedicatedDatabaseRolesRequired } from "./config";
+export {
+  adminPoolConfig,
+  controlPoolConfig,
+  dedicatedDatabaseRolesRequired,
+  migrationPoolConfig,
+  runtimePoolConfig,
+} from "./config";
+export { solidifyDatabasePermissions } from "./permissions";
 export * from "./schema/index";

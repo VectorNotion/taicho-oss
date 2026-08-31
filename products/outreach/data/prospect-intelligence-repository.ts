@@ -5,7 +5,8 @@ import {
   outreach_prospect_meetings as meetingsTable,
 } from '@content-automation/database';
 import { tenantDatabase } from '@content-automation/platform/data/tenant-database';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { recordMeetingCalendarChange } from '../calendar-events';
 import {
   prospectInsightSourceTarget,
   type InsightGeneratedReason,
@@ -172,7 +173,9 @@ export async function createProspectMeeting(input: {
     })
     .returning();
   if (!row) throw new Error('Meeting record was not created.');
-  return meeting(row);
+  const created = meeting(row);
+  await recordMeetingCalendarChange({ organizationId: input.organizationId, meeting: created });
+  return created;
 }
 
 export async function attachProviderBot(input: {
@@ -195,7 +198,9 @@ export async function attachProviderBot(input: {
     ))
     .returning();
   if (!row) throw new Error('Meeting record was not found.');
-  return meeting(row);
+  const updated = meeting(row);
+  await recordMeetingCalendarChange({ organizationId: input.organizationId, meeting: updated });
+  return updated;
 }
 
 export async function setProspectMeetingStatus(input: {
@@ -220,7 +225,23 @@ export async function setProspectMeetingStatus(input: {
       eq(meetingsTable.id, input.meetingId),
     ))
     .returning();
-  return row ? meeting(row) : null;
+  const updated = row ? meeting(row) : null;
+  if (updated) await recordMeetingCalendarChange({ organizationId: input.organizationId, meeting: updated });
+  return updated;
+}
+
+export async function listScheduledProspectMeetings(
+  organizationId: string,
+): Promise<ProspectMeeting[]> {
+  const rows = await tenantDatabase(organizationId)
+    .select()
+    .from(meetingsTable)
+    .where(and(
+      eq(meetingsTable.organization_id, organizationId),
+      isNotNull(meetingsTable.scheduled_for),
+    ))
+    .orderBy(asc(meetingsTable.scheduled_for));
+  return rows.map(meeting);
 }
 
 export async function getProspectMeeting(
@@ -382,6 +403,12 @@ export async function recordProspectMeetingEvent(input: {
 export async function commitProspectInsight(input: {
   organizationId: string;
   prospectId: string;
+  /**
+   * Durable operations use their own UUID as the snapshot UUID. A worker retry
+   * can therefore recover the already-committed revision before invoking the
+   * model again instead of creating a second revision for one user intent.
+   */
+  snapshotId?: string;
   summary: string;
   content: ProspectInsightContent;
   sourceRefs: ProspectInsightSourceRef[];
@@ -412,6 +439,7 @@ export async function commitProspectInsight(input: {
     const [created] = await transaction
       .insert(insightsTable)
       .values({
+        ...(input.snapshotId ? { id: input.snapshotId } : {}),
         organization_id: input.organizationId,
         prospect_id: input.prospectId,
         revision: (latest?.revision ?? 0) + 1,
@@ -428,6 +456,21 @@ export async function commitProspectInsight(input: {
     if (!created) throw new Error('Insight snapshot was not created.');
     return insight(created);
   });
+}
+
+export async function getProspectInsightSnapshotById(
+  organizationId: string,
+  snapshotId: string,
+): Promise<ProspectInsightSnapshot | null> {
+  const [row] = await tenantDatabase(organizationId)
+    .select()
+    .from(insightsTable)
+    .where(and(
+      eq(insightsTable.organization_id, organizationId),
+      eq(insightsTable.id, snapshotId),
+    ))
+    .limit(1);
+  return row ? insight(row) : null;
 }
 
 export async function getProspectIntelligenceWorkspace(

@@ -36,8 +36,27 @@ import {
   RotateCcw,
   Edit2,
   Hash,
+  CircleAlert,
+  CheckCircle2,
+  RefreshCw,
 } from "lucide-react";
 import type { Topic, TopicsResponse } from "@/products/content-generator/domain/topic";
+
+type TopicsRunPartial = {
+  topics?: Array<{ display_name?: string; displayName?: string; name?: string }>;
+};
+
+type TopicsRunFinal = {
+  topicsCreated: number;
+  topicsDeduped: number;
+  creditsUsed: number;
+};
+
+function topicsRunErrorMessage(error: string): string {
+  return /failed to fetch|networkerror|stream ended without a terminal event/i.test(error)
+    ? "The topic stream was interrupted before completion. Check your connection and try again."
+    : error;
+}
 
 /**
  * Convert a display name to a canonical name (lowercase, hyphenated).
@@ -84,14 +103,13 @@ export default function TopicsPage() {
   // Dismiss confirmation state
   const [dismissTarget, setDismissTarget] = useState<Topic | null>(null);
 
-  const topicsStream = useCapabilityStream<{
-    topics?: Array<{ display_name?: string; displayName?: string; name?: string }>;
-  }, { topicsCreated: number }>({ api: "/content/topics/extract" });
+  const topicsStream = useCapabilityStream<TopicsRunPartial, TopicsRunFinal>({ api: "/content/topics/extract" });
   const generateLoading = topicsStream.isStreaming;
 
   // Reset Topics state
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   // Fetch topics
   const fetchTopics = async () => {
@@ -117,15 +135,31 @@ export default function TopicsPage() {
   // Handle name input - auto-generate display name
   const handleNameChange = (value: string) => {
     setNewName(value);
+    setAddError(null);
     // Auto-generate display name if user hasn't manually edited it
     if (!newDisplayName || newDisplayName === toDisplayName(newName)) {
       setNewDisplayName(toDisplayName(toCanonicalName(value)));
     }
   };
 
+  const handleAddDialogOpenChange = (open: boolean) => {
+    setAddDialogOpen(open);
+    if (!open) {
+      setNewName("");
+      setNewDisplayName("");
+      setNewDescription("");
+      setAddError(null);
+    }
+  };
+
   // Add topic
   const handleAddTopic = async () => {
-    if (!newName || !newDescription) return;
+    const canonicalName = toCanonicalName(newName);
+    if (!canonicalName) {
+      setAddError("Use at least one letter or number so this topic has a canonical name.");
+      return;
+    }
+    if (!newDescription.trim()) return;
 
     setAddLoading(true);
     setAddError(null);
@@ -133,14 +167,18 @@ export default function TopicsPage() {
     try {
       try {
         await apiMutate("POST", "/content/topics", {
-          name: toCanonicalName(newName),
-          displayName: newDisplayName || toDisplayName(toCanonicalName(newName)),
-          description: newDescription,
+          name: canonicalName,
+          displayName: newDisplayName.trim() || toDisplayName(canonicalName),
+          description: newDescription.trim(),
           source: "manual",
         });
       } catch (error) {
         if (error instanceof ApiError && error.status === 409) {
           setAddError("A topic with this name already exists (including dismissed topics)");
+          return;
+        }
+        if (error instanceof ApiError) {
+          setAddError(error.message);
           return;
         }
         throw error;
@@ -220,12 +258,35 @@ export default function TopicsPage() {
 
   // Generate topics
   const handleGenerateTopics = () => topicsStream.start();
-  useEffect(() => { if (topicsStream.final) void fetchTopics(); }, [topicsStream.final]);
-  useEffect(() => { if (topicsStream.error) toast.error(topicsStream.error); }, [topicsStream.error]);
+  useEffect(() => {
+    if (!topicsStream.final) return;
+    // A run with nothing to do completes instantly and used to end in
+    // silence, which reads as a failed click — say what actually happened.
+    const { topicsCreated = 0, topicsDeduped = 0 } = topicsStream.final;
+    if (topicsCreated > 0) {
+      toast.success(`Generated ${topicsCreated} ${topicsCreated === 1 ? "topic" : "topics"}`);
+    } else if (topicsDeduped > 0) {
+      toast.message(`Nothing new — ${topicsDeduped} ${topicsDeduped === 1 ? "topic" : "topics"} matched ones you already have.`);
+    } else {
+      toast.message("No topics generated — there is no research to extract from yet. Run research first, then generate topics.");
+    }
+    void fetchTopics();
+  }, [topicsStream.final]);
+  useEffect(() => {
+    if (topicsStream.error) toast.error(topicsRunErrorMessage(topicsStream.error));
+  }, [topicsStream.error]);
+
+  const runJobId = (topicsStream.dataParts.find((part) => part.type === "data-job")?.data as {
+    jobId?: string;
+  } | undefined)?.jobId;
+  const streamedTopics = Object.values(topicsStream.partialsById)
+    .flatMap((partial) => partial.topics ?? [])
+    .filter((topic) => topic.display_name || topic.displayName || topic.name);
 
   // Reset all topics
   const handleResetTopics = async () => {
     setResetLoading(true);
+    setResetError(null);
     try {
       const { data } = await apiMutate<{ deletedCount: number }>("DELETE", "/content/topics", {
         confirm: "DELETE ALL TOPICS",
@@ -235,13 +296,21 @@ export default function TopicsPage() {
       fetchTopics();
     } catch (error) {
       console.error("Error resetting topics:", error);
-      toast.error("Could not reset topics. Try again.");
+      const message = error instanceof ApiError
+        ? error.message
+        : "Could not reset topics. Try again.";
+      setResetError(message);
+      toast.error(message);
     } finally {
       setResetLoading(false);
     }
   };
 
   const topics = topicsData?.topics || [];
+  const canonicalNameError = newName && !toCanonicalName(newName)
+    ? "Use at least one letter or number so this topic has a canonical name."
+    : null;
+  const visibleAddError = canonicalNameError ?? addError;
 
   const stats = [
     { label: "Total topics", value: (topicsData?.total || 0).toLocaleString() },
@@ -256,7 +325,7 @@ export default function TopicsPage() {
         description="Manage content topics extracted from research"
         actions={
           <div className="flex items-center gap-2">
-            <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+            <Dialog open={addDialogOpen} onOpenChange={handleAddDialogOpenChange}>
               <DialogTrigger asChild>
                 <Button variant="outline">
                   <Plus className="h-4 w-4" />
@@ -275,6 +344,8 @@ export default function TopicsPage() {
                   <div className="grid gap-2">
                     <Label htmlFor="topic-name">Name</Label>
                     <Input
+                      aria-describedby={visibleAddError ? "topic-add-error" : undefined}
+                      aria-invalid={Boolean(visibleAddError)}
                       id="topic-name"
                       placeholder="e.g., Multi-Agent Systems"
                       value={newName}
@@ -303,20 +374,20 @@ export default function TopicsPage() {
                       rows={3}
                     />
                   </div>
-                  {addError && (
-                    <p className="text-xs text-destructive">{addError}</p>
+                  {visibleAddError && (
+                    <p className="text-xs text-destructive" id="topic-add-error" role="alert">{visibleAddError}</p>
                   )}
                 </div>
                 <DialogFooter>
                   <Button
                     variant="outline"
-                    onClick={() => setAddDialogOpen(false)}
+                    onClick={() => handleAddDialogOpenChange(false)}
                   >
                     Cancel
                   </Button>
                   <Button
                     onClick={handleAddTopic}
-                    disabled={addLoading || !newName || !newDescription}
+                    disabled={addLoading || !toCanonicalName(newName) || !newDescription.trim()}
                   >
                     {addLoading && (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -340,20 +411,71 @@ export default function TopicsPage() {
       />
 
       <div className="space-y-8">
-        {topicsStream.isStreaming && (
+        {topicsStream.error ? (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
+            <div className="flex items-start gap-3">
+              <CircleAlert className="mt-0.5 size-5 shrink-0 text-destructive" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Topic generation failed</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {topicsRunErrorMessage(topicsStream.error)}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Existing topics were not changed by this failed run.
+                  {runJobId ? ` Run ${runJobId}.` : ""}
+                </p>
+                <Button className="mt-3" onClick={handleGenerateTopics} size="sm" variant="outline">
+                  <RefreshCw className="size-4" /> Try topic generation again
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : topicsStream.isStreaming ? (
           <div className="space-y-4">
             <ReasoningTicker text={topicsStream.reasoning} active />
             <StreamSection title="Discovering topics" state="streaming">
-              <div className="flex flex-wrap gap-2">
-                {(topicsStream.partial?.topics ?? []).filter((topic) => topic?.display_name || topic?.displayName || topic?.name).map((topic, index) => (
-                  <span key={index} className="animate-in fade-in zoom-in-95 rounded-full border bg-muted/50 px-3 py-1 text-sm duration-300">
-                    {topic.display_name ?? topic.displayName ?? topic.name}
-                  </span>
+              <ul className="space-y-1.5 text-sm" aria-live="polite">
+                {topicsStream.progress.map((progress) => (
+                  <li className="animate-in fade-in flex items-center gap-2 duration-300" key={progress.id}>
+                    <span className={progress.state === "done" ? "text-primary" : "animate-pulse text-muted-foreground"}>
+                      {progress.state === "done" ? "✓" : "…"}
+                    </span>
+                    {progress.label}
+                  </li>
                 ))}
-              </div>
+              </ul>
+              {streamedTopics.length > 0 ? (
+                <div className="mt-3 border-t pt-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {streamedTopics.length} topic{streamedTopics.length === 1 ? "" : "s"} discovered
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {streamedTopics.map((topic, index) => (
+                      <span key={`${topic.name ?? topic.display_name ?? topic.displayName}-${index}`} className="animate-in fade-in zoom-in-95 rounded-full border bg-muted/50 px-3 py-1 text-sm duration-300">
+                        {topic.display_name ?? topic.displayName ?? topic.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </StreamSection>
           </div>
-        )}
+        ) : topicsStream.final ? (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4" role="status">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Topic generation complete</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {topicsStream.final.topicsCreated} new · {topicsStream.final.topicsDeduped} already stored · {topicsStream.final.creditsUsed} credits
+                </p>
+                {runJobId ? (
+                  <p className="mt-1 break-all font-mono text-xs text-muted-foreground">Run {runJobId}</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
         <StatRow isLoading={loading} stats={stats} />
 
         {/* Topics list */}
@@ -381,7 +503,13 @@ export default function TopicsPage() {
                   Show dismissed topics
                 </Label>
               </div>
-              <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+              <Dialog
+                open={resetDialogOpen}
+                onOpenChange={(open) => {
+                  setResetDialogOpen(open);
+                  if (!open) setResetError(null);
+                }}
+              >
                 <DialogTrigger asChild>
                   <Button
                     className="ml-1"
@@ -405,6 +533,9 @@ export default function TopicsPage() {
                       dismissed ones. This cannot be undone.
                     </DialogDescription>
                   </DialogHeader>
+                  {resetError ? (
+                    <p className="text-sm text-destructive" role="alert">{resetError}</p>
+                  ) : null}
                   <DialogFooter>
                     <Button
                       disabled={resetLoading}

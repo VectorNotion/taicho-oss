@@ -1,5 +1,5 @@
 import { Pool } from 'pg'
-import { dedicatedDatabaseRolesRequired } from '@content-automation/database'
+import { controlPoolConfig, runtimePoolConfig } from '@content-automation/database'
 import { validatedTenantId } from '../security'
 
 declare global {
@@ -17,20 +17,7 @@ export function assistantSchemaName(): string {
 
 function databaseConfig(tenantId: string) {
   const options = `-csearch_path=${assistantSchemaName()} -capp.assistant_tenant_id=${tenantId}`
-  const connectionString = process.env.ASSISTANT_DATABASE_URL
-    ?? (process.env.POSTGRES_HOST ? undefined : process.env.DATABASE_URL)
-  if (dedicatedDatabaseRolesRequired() && !process.env.ASSISTANT_DATABASE_URL) {
-    throw new Error('ASSISTANT_DATABASE_URL is required in production or strict database-role mode and must use a non-superuser, non-BYPASSRLS role.')
-  }
-  if (connectionString) return { connectionString, options }
-  return {
-    host: process.env.POSTGRES_HOST ?? 'localhost',
-    port: Number(process.env.POSTGRES_PORT ?? 5432),
-    user: process.env.POSTGRES_USER ?? 'postgres',
-    password: process.env.POSTGRES_PASSWORD ?? 'postgres',
-    database: process.env.POSTGRES_DB ?? 'langgraph',
-    options,
-  }
+  return { ...runtimePoolConfig(), options }
 }
 
 export function getAssistantPool(tenantId: string): Pool {
@@ -46,23 +33,10 @@ export function getAssistantPool(tenantId: string): Pool {
 
 export function getAssistantAdminPool(): Pool {
   if (!globalThis.__assistantAdminPool) {
-    const connectionString = process.env.ASSISTANT_ADMIN_DATABASE_URL
-      ?? (process.env.POSTGRES_HOST ? undefined : process.env.DATABASE_URL)
-    if (dedicatedDatabaseRolesRequired() && !process.env.ASSISTANT_ADMIN_DATABASE_URL) {
-      throw new Error(
-        'ASSISTANT_ADMIN_DATABASE_URL is required in production or strict database-role mode and must use the dedicated migration role.',
-      )
-    }
-    globalThis.__assistantAdminPool = new Pool(connectionString
-      ? { connectionString, options: `-csearch_path=${assistantSchemaName()} -capp.assistant_tenant_id=migration` }
-      : {
-          host: process.env.POSTGRES_HOST ?? 'localhost',
-          port: Number(process.env.POSTGRES_PORT ?? 5432),
-          user: process.env.POSTGRES_USER ?? 'postgres',
-          password: process.env.POSTGRES_PASSWORD ?? 'postgres',
-          database: process.env.POSTGRES_DB ?? 'langgraph',
-          options: `-csearch_path=${assistantSchemaName()} -capp.assistant_tenant_id=migration`,
-        })
+    globalThis.__assistantAdminPool = new Pool({
+      ...controlPoolConfig(),
+      options: `-csearch_path=${assistantSchemaName()} -capp.assistant_tenant_id=control`,
+    })
   }
   return globalThis.__assistantAdminPool
 }

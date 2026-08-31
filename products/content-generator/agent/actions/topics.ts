@@ -33,7 +33,10 @@ import {
   type ExtractedTopics,
 } from './topics-agent';
 import { streamingStructuredGenerate, type StreamEmit } from '@content-automation/platform/agents/streaming';
-import { observeWorkflowStep, traceable } from '@content-automation/observability';
+import { createLogger, observeWorkflowStep, traceable } from '@content-automation/observability';
+import { getKnowledgeTopicCandidates, recordContentKnowledgeArtifact } from '../../knowledge-service';
+
+const log = createLogger('content.topics');
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -47,13 +50,6 @@ export interface ExtractTopicsResult {
 /** Cosine-similarity threshold above which topics are treated as duplicates. */
 export const SIMILARITY_THRESHOLD = 0.85;
 
-/** Entity-type weights used to rank entities in the prompt. */
-const ENTITY_TYPE_WEIGHTS: Record<string, number> = {
-  AIComponent: 2.0,
-  Feature: 2.0,
-  BusinessValue: 1.0,
-};
-
 // ---------------------------------------------------------------------------
 // Injectable dependency seams
 // ---------------------------------------------------------------------------
@@ -64,6 +60,8 @@ export interface EntityRow {
   id: string;
   projectNames: string[];
   projectCount: number;
+  claimIds?: string[];
+  evidenceIds?: string[];
 }
 
 export interface GenerateTopicsInput {
@@ -77,6 +75,7 @@ export interface TopicsRepos {
   createTopic: (data: CreateTopicInput) => Promise<Topic | null>;
   linkTopicToEntities: (topicId: string, entityNames: string[]) => Promise<void>;
   linkTopicToResearch: (topicId: string, topicName: string) => Promise<void>;
+  getKnowledgeTopicCandidates?: () => Promise<EntityRow[]>;
 }
 
 export interface TopicsDeps {
@@ -84,6 +83,7 @@ export interface TopicsDeps {
   /** Batch-embed texts. Undefined ⇒ no semantic dedup (name-only fallback). */
   embed?: (texts: string[]) => Promise<number[][]>;
   repos: TopicsRepos;
+  recordKnowledgeArtifact?: typeof recordContentKnowledgeArtifact;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +136,80 @@ export function streamingGenerateTopics(emit: StreamEmit): TopicsDeps['generateT
   };
 }
 
+function localTopicName(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
+}
+
+function localTopicDisplayName(value: string): string {
+  return value
+    .trim()
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+/**
+ * Deterministic non-production extractor used by real browser QA. It replaces
+ * only the external model call; accepted-knowledge loading, deduplication,
+ * graph writes, source linking, jobs, billing, and SSE lifecycle all continue
+ * through the production orchestration path.
+ */
+export function localTopicsGenerate(emit: StreamEmit): TopicsDeps['generateTopics'] {
+  return async (input) => {
+    const sourceEntities = [...input.entitiesFormatted.matchAll(
+      /^- \[[^\]]+\] (.+?) \(evidence-backed claims:/gm,
+    )].map((match) => match[1].trim());
+    const entityByName = new Map(sourceEntities.map((name) => [name.toLowerCase(), name]));
+    const candidates = [
+      entityByName.has('durable workflow recovery') ? {
+        name: 'durable-workflow-recovery',
+        display_name: 'Durable Workflow Recovery',
+        description: 'Designing checkpoints, retries, and resumable execution for long-running automation.',
+        source_entities: [entityByName.get('durable workflow recovery')!],
+        confidence: 0.96,
+      } : null,
+      entityByName.has('browser automation') ? {
+        name: 'browser-automation-testing',
+        display_name: 'Browser Automation Testing',
+        description: 'Verifying user-visible workflows, failure recovery, and durable outcomes in a real browser.',
+        source_entities: [entityByName.get('browser automation')!],
+        confidence: 0.94,
+      } : null,
+    ].filter((topic): topic is NonNullable<typeof topic> => topic !== null);
+    if (candidates.length === 0 && sourceEntities[0]) {
+      candidates.push({
+        name: localTopicName(sourceEntities[0]),
+        display_name: localTopicDisplayName(sourceEntities[0]),
+        description: `A content topic grounded in the accepted knowledge entity ${sourceEntities[0]}.`,
+        source_entities: [sourceEntities[0]],
+        confidence: 0.9,
+      });
+    }
+    const result = extractedTopicsSchema.parse({ topics: candidates });
+    emit({
+      type: 'data-progress',
+      id: 'topic-extraction',
+      data: { label: 'Reading accepted knowledge', state: 'running' },
+    });
+    emit({
+      type: 'data-reasoning',
+      id: 'topic-extraction',
+      data: { text: 'Grouping accepted knowledge into stable, reusable content topics and checking existing canonical names.' },
+    });
+    emit({ type: 'data-partial', id: 'topic-extraction', data: result });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    emit({
+      type: 'data-progress',
+      id: 'topic-extraction',
+      data: { label: 'Checked generated topics for duplicates', state: 'done' },
+    });
+    return result;
+  };
+}
+
 /** Inline OpenAI embeddings (text-embedding-3-small) via the REST API. */
 async function defaultEmbed(texts: string[]): Promise<number[][]> {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -181,7 +255,9 @@ export function makeDefaultTopicsDeps(): TopicsDeps {
       createTopic,
       linkTopicToEntities,
       linkTopicToResearch,
+      getKnowledgeTopicCandidates,
     },
+    recordKnowledgeArtifact: recordContentKnowledgeArtifact,
   };
 }
 
@@ -189,7 +265,7 @@ export function makeDefaultTopicsDeps(): TopicsDeps {
 // Helpers (ported from the Python node)
 // ---------------------------------------------------------------------------
 
-/** Format entities for the prompt with weighted scores (top 100). */
+/** Format registry-defined entity roles for the prompt by evidence support. */
 export function formatEntitiesForPrompt(entities: EntityRow[]): string {
   const formatted = entities.slice(0, 100).map((entity) => {
     const entityType = entity.entityType || 'Unknown';
@@ -197,17 +273,12 @@ export function formatEntitiesForPrompt(entities: EntityRow[]): string {
     const projectCount = entity.projectCount || 0;
     const projectNames = entity.projectNames || [];
 
-    const weight = ENTITY_TYPE_WEIGHTS[entityType] ?? 1.0;
-    const weightedScore = projectCount * weight;
-
     let projectsStr = projectNames.slice(0, 5).join(', ');
     if (projectNames.length > 5) {
       projectsStr += ` (+${projectNames.length - 5} more)`;
     }
 
-    return `- [${entityType}] ${name} (projects: ${projectCount}, weighted: ${weightedScore.toFixed(
-      1
-    )}) → ${projectsStr}`;
+    return `- [${entityType}] ${name} (evidence-backed claims: ${projectCount}) → ${projectsStr}`;
   });
 
   return formatted.length ? formatted.join('\n') : 'No entities found.';
@@ -294,12 +365,21 @@ async function runExtractTopicsInternal(
     });
   }
 
-  // 2. Entities ordered by project count.
+  // 2. Accepted research claims are the primary topic source. The legacy
+  // project-entity projection remains a cutover fallback only.
   const entities = await observeWorkflowStep('content.topics.load_entities', {
     kind: 'data',
     input: { orderBy: 'project_count', limit: 100 },
     processOutput: (output) => ({ entityCount: (output as EntityRow[]).length }),
-  }, () => d.repos.getEntitiesByProjectCount());
+  }, async () => {
+    const fromKnowledge = await d.repos.getKnowledgeTopicCandidates?.() ?? [];
+    if (fromKnowledge.length > 0) return fromKnowledge;
+    const legacyEntities = await d.repos.getEntitiesByProjectCount();
+    if (legacyEntities.length > 0) {
+      log.warn('knowledge.legacy_fallback.content.topic_discovery', { entity_count: legacyEntities.length });
+    }
+    return legacyEntities;
+  });
   if (entities.length === 0) {
     return { topicsCreated: 0, topicsDeduped: 0 };
   }
@@ -373,6 +453,11 @@ async function runExtractTopicsInternal(
       }
       await d.repos.linkTopicToEntities(created.id, topic.source_entities);
       await d.repos.linkTopicToResearch(created.id, normalizedName);
+      const sourceNames = new Set(topic.source_entities.map(normalizeName));
+      const sourceRows = entities.filter((entity) => sourceNames.has(normalizeName(entity.name)));
+      const usedClaimIds = [...new Set(sourceRows.flatMap((entity) => entity.claimIds ?? []))];
+      const usedEvidenceIds = [...new Set(sourceRows.flatMap((entity) => entity.evidenceIds ?? []))];
+      await d.recordKnowledgeArtifact?.({ kind: 'content.topic', externalId: created.id, usedClaimIds, usedEvidenceIds, metadata: { sourceEntities: topic.source_entities } });
     } else {
       topicsDeduped++;
     }

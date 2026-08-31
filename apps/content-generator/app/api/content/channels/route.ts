@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import "@/products/content-generator/publishing/adapters";
+import { canManageOrganization } from "@content-automation/auth/permissions";
+import { getAuthorizationContext } from "@content-automation/auth/server";
+import { publishingChannelInputSchema } from "@/products/content-generator/publishing/channel-config";
 import {
   listChannels,
   upsertChannel,
@@ -37,34 +40,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const destination = body?.destination as unknown;
-    const name = body?.name as unknown;
-    const credentials = body?.credentials as unknown;
-
-    if (destination !== "cms" && destination !== "webhook") {
+    const context = await getAuthorizationContext(request.headers);
+    if (!context) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+    if (!canManageOrganization(context.role)) {
       return NextResponse.json(
-        { error: "Only cms and webhook channels can be created with credentials" },
+        { error: "Only workspace owners and administrators can connect publishing channels." },
+        { status: 403 },
+      );
+    }
+    const parsed = publishingChannelInputSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Invalid publishing channel configuration." },
         { status: 400 },
       );
     }
+    const { destination, name, credentials, extra } = parsed.data;
     if (!hasAdapter(destination)) {
       return NextResponse.json({ error: `No adapter registered for ${destination}` }, { status: 400 });
-    }
-    if (typeof name !== "string" || name.trim().length === 0) {
-      return NextResponse.json({ error: "A channel name is required" }, { status: 400 });
-    }
-    if (
-      credentials === null ||
-      typeof credentials !== "object" ||
-      Array.isArray(credentials) ||
-      Object.keys(credentials).length === 0 ||
-      Object.values(credentials).some((value) => typeof value !== "string" || value.length === 0)
-    ) {
-      return NextResponse.json(
-        { error: "Credentials must be a non-empty object of string values" },
-        { status: 400 },
-      );
     }
 
     const adapter = getAdapter(destination);
@@ -72,10 +65,12 @@ export async function POST(request: NextRequest) {
     const channel = await upsertChannel(pool, {
       id: crypto.randomUUID(),
       destination,
-      name: name.trim(),
+      name,
       credentialKind: adapter.credentialKind,
-      credentials: credentials as Record<string, string>,
+      credentials,
       tokenExpiry: null,
+      extra,
+      orgId: context.organizationId,
     });
     return NextResponse.json(toChannelSummary(channel), { status: 201 });
   } catch (error) {

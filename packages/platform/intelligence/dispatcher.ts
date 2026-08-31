@@ -1,11 +1,13 @@
 import { actionHandlers } from '../agents/registry';
 import { recordProductEvent } from '../events/emit';
+import { runWithGraphOrganization } from '../data/organization-context';
 import {
   getProspectById,
   getLegacyQualification,
   getProspectResearch,
 } from '@/products/outreach/data/prospect-repository';
-import type { LegacyQualification, ProspectResearch } from '@/products/outreach/domain/types';
+import { getOutreachKnowledgeLineage } from '@/products/outreach/knowledge-service';
+import type { LegacyQualification } from '@/products/outreach/domain/types';
 import type {
   ArtifactDraft,
   CanonicalIntelligenceWorkflow,
@@ -68,18 +70,6 @@ export type WorkflowHandler = (
   context: WorkflowHandlerContext,
 ) => Promise<ArtifactDraft>;
 
-function researchSourceRefs(research: ProspectResearch | null) {
-  if (!research) return [];
-  return research.companyInsights
-    .filter((insight) => insight.sourceUrl)
-    .map((insight) => ({
-      type: 'web_source',
-      id: insight.id,
-      url: insight.sourceUrl,
-      label: insight.category,
-    }));
-}
-
 function qualificationSummary(
   name: string,
   qualification: LegacyQualification | null,
@@ -105,6 +95,7 @@ export const runProspectIntelligence: WorkflowHandler = async (input, context) =
   if (!prospect || !research) {
     throw new Error(`Prospect intelligence did not produce a dossier for ${prospectId}.`);
   }
+  const knowledge = await getOutreachKnowledgeLineage(prospect);
 
   return {
     workflow: 'prospect_intelligence',
@@ -128,8 +119,10 @@ export const runProspectIntelligence: WorkflowHandler = async (input, context) =
     },
     sourceRefs: [
       { type: 'prospect', id: prospect.id, label: prospect.name },
-      ...researchSourceRefs(research),
+      ...knowledge.sourceRefs,
     ],
+    usedClaimIds: knowledge.usedClaimIds,
+    usedEvidenceIds: knowledge.usedEvidenceIds,
     recommendations: [{
       action: 'outreach_intelligence',
       label: 'Create an outreach artifact',
@@ -165,6 +158,10 @@ export const runOutreachIntelligence: WorkflowHandler = async (input, context) =
   if (!message || typeof message.content !== 'string') {
     throw new Error(`Outreach intelligence did not produce a message for ${prospectId}.`);
   }
+  const usedClaimIds = Array.isArray(message.usedClaimIds)
+    ? message.usedClaimIds.filter((id): id is string => typeof id === 'string')
+    : undefined;
+  const knowledge = await getOutreachKnowledgeLineage(prospect, usedClaimIds);
   return {
     workflow: 'outreach_intelligence',
     kind: 'outreach_message',
@@ -187,8 +184,10 @@ export const runOutreachIntelligence: WorkflowHandler = async (input, context) =
     },
     sourceRefs: [
       { type: 'prospect', id: prospect.id, label: prospect.name },
-      ...researchSourceRefs(research),
+      ...knowledge.sourceRefs,
     ],
+    usedClaimIds: knowledge.usedClaimIds,
+    usedEvidenceIds: knowledge.usedEvidenceIds,
     recommendations: [{
       action: 'external_delivery',
       label: 'Send with the external orchestrator',
@@ -263,14 +262,19 @@ export async function executeIntelligenceWorkflow(input: {
   }
 
   try {
-    const draft = await handler(parsedInput, {
-      organizationId: input.context.organizationId,
-      runId: reserved.run.id,
-      actorType: input.context.actorType,
-      initiatingUserId: input.context.initiatingUserId,
-    });
+    const draft = await runWithGraphOrganization(input.context.organizationId, () => handler(parsedInput, {
+        organizationId: input.context.organizationId,
+        runId: reserved.run.id,
+        actorType: input.context.actorType,
+        initiatingUserId: input.context.initiatingUserId,
+      }));
     if (draft.workflow !== input.workflow) {
       throw new Error(`Workflow ${input.workflow} returned an artifact for ${draft.workflow}.`);
+    }
+    if (['prospect_intelligence', 'outreach_intelligence'].includes(input.workflow)) {
+      if (!draft.usedClaimIds?.length || !draft.usedEvidenceIds?.length) {
+        throw new Error(`Workflow ${input.workflow} produced an artifact without shared claim and evidence lineage.`);
+      }
     }
     const artifact = await deps.commitArtifact({
       organizationId: input.context.organizationId,
@@ -304,6 +308,13 @@ export async function executeIntelligenceWorkflow(input: {
       refs: input.workflow === 'prospect_intelligence' || input.workflow === 'outreach_intelligence'
         ? { prospectId: parsedInput.prospectId as string }
         : undefined,
+    });
+    await recordProductEvent({
+      organizationId: input.context.organizationId,
+      name: 'knowledge.intelligence.artifact.ready',
+      origin: 'internal',
+      idempotencyKey: artifact.id,
+      payload: { artifactId: artifact.id },
     });
     const completed = await deps.getRun(input.context.organizationId, reserved.run.id);
     if (!completed) throw new Error('The completed intelligence run could not be reloaded.');

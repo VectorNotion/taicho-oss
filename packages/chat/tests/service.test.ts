@@ -107,6 +107,30 @@ test('model tokens are emitted as separate assistant deltas', async () => {
   )
 })
 
+test('stub model exposes deterministic progressive and interrupted streams', async () => {
+  const progressive = new StubAssistantModel('A progressive support answer.', {
+    chunkSize: 5,
+  })
+  const chunks: string[] = []
+  for await (const chunk of progressive.stream({ system: 'support', messages: [] })) {
+    chunks.push(chunk)
+  }
+  assert.equal(chunks.length > 1, true)
+  assert.equal(chunks.join(''), 'A progressive support answer.')
+
+  const interrupted = new StubAssistantModel('This stream will stop.', {
+    chunkSize: 4,
+    failAfterChunks: 2,
+  })
+  const partial: string[] = []
+  await assert.rejects(async () => {
+    for await (const chunk of interrupted.stream({ system: 'support', messages: [] })) {
+      partial.push(chunk)
+    }
+  }, /interrupted/i)
+  assert.deepEqual(partial, ['This', ' str'])
+})
+
 test('sales retrieval uses the signed Payload tenant, site, and bot scope', async () => {
   const repository = new InMemoryAssistantRepository('payload-tenant-id')
   const scopes: unknown[] = []
@@ -444,6 +468,82 @@ test('support feedback is idempotent, escalates after two unhelpful ratings, and
   assert.equal(reset.some(({ event, data }) => (
     event === 'support.feedback.recorded' && data.helpful === true && data.unhelpfulRatings === 0
   )), true)
+})
+
+test('support history restores response-scoped feedback, escalation, and ticket state', async () => {
+  const repository = new InMemoryAssistantRepository(tenantId)
+  const operations = new InMemoryAssistantOperations()
+  const service = new AssistantService(
+    repository,
+    new StubAssistantModel('Documented answer.'),
+    operations,
+    { brandName: 'Taicho', discordUrl: 'https://discord.gg/example' },
+  )
+  const firstRequest = request('support', 'Unknown marker question')
+  const first = await service.chat(firstRequest, actor('support'))
+  const conversationId = first[0].conversationId
+  await service.feedback({
+    version: '1',
+    requestId: crypto.randomUUID(),
+    conversationId,
+    helpful: false,
+    responseRequestId: firstRequest.requestId,
+  }, actor('support'))
+
+  const afterFeedback = await service.history(conversationId, actor('support'))
+  assert.equal(afterFeedback.messages.at(-1)?.requestId, firstRequest.requestId)
+  assert.deepEqual(afterFeedback.supportState?.lastFeedback, {
+    helpful: false,
+    responseRequestId: firstRequest.requestId,
+    createdAt: afterFeedback.supportState?.lastFeedback?.createdAt,
+  })
+  assert.equal(afterFeedback.supportState?.communityUrl, 'https://discord.gg/example')
+
+  await service.chat(
+    request('support', 'Our credentials were exposed in a security breach', conversationId),
+    actor('support'),
+  )
+  const offered = await service.history(conversationId, actor('support'))
+  assert.equal(offered.supportState?.escalationOffer?.severity, 'urgent')
+
+  const escalation = await service.escalate({
+    version: '1',
+    requestId: crypto.randomUUID(),
+    conversationId,
+    reason: 'SUP001 urgent security issue',
+    severity: 'urgent',
+  }, {
+    ...actor('support'),
+    requesterName: 'A User',
+    requesterEmail: 'user@example.com',
+  })
+  const ticketEvent = escalation.find(({ event }) => event === 'support.ticket.created')
+  const final = await service.history(conversationId, actor('support'))
+  assert.equal(final.supportState?.conversationStatus, 'escalated')
+  assert.equal(final.supportState?.escalationOffer, undefined)
+  assert.equal(final.supportState?.ticket?.id, ticketEvent?.data.id)
+})
+
+test('support feedback refuses a response outside the owning conversation', async () => {
+  const repository = new InMemoryAssistantRepository(tenantId)
+  const service = new AssistantService(
+    repository,
+    new StubAssistantModel('Documented answer.'),
+    null,
+    { brandName: 'Taicho' },
+  )
+  const leftRequest = request('support', 'Left question')
+  const left = await service.chat(leftRequest, actor('support'))
+  const rightRequest = request('support', 'Right question')
+  await service.chat(rightRequest, actor('support'))
+
+  await assert.rejects(service.feedback({
+    version: '1',
+    requestId: crypto.randomUUID(),
+    conversationId: left[0].conversationId,
+    helpful: true,
+    responseRequestId: rightRequest.requestId,
+  }, actor('support')), /Support response not found/)
 })
 
 test('conversation history is restored only for the owning actor and surface', async () => {

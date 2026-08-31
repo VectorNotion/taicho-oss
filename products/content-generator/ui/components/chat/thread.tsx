@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Composer } from "@/components/chat/composer";
 import { ChatToolApprovalCard } from "@/components/chat/tool-approval-card";
+import { ChatConversationErrorCard } from "@/components/chat/conversation-error-card";
 import { AssistantMessage } from "@/components/chat/assistant-message";
 import { UserMessage, EditComposer } from "@/components/chat/user-message";
 import {
@@ -21,7 +22,6 @@ import type {
   ChatControlAvailability,
   ChatControls,
 } from "@content-automation/platform/intelligence/chat-controls";
-import type { PublicModelDefinition } from "@content-automation/platform/models/catalog";
 
 interface ThreadSuggestionsProps {
   suggestions?: {
@@ -42,7 +42,6 @@ interface ThreadProps extends ThreadSuggestionsProps {
   contactLocked?: boolean;
   compact?: boolean;
   controls: ChatControls;
-  modelOptions?: PublicModelDefinition[];
   onControlsChange: (controls: ChatControls) => void;
 }
 
@@ -56,7 +55,6 @@ export const Thread: FC<ThreadProps> = ({
   contactLocked = false,
   compact = false,
   controls,
-  modelOptions = [],
   onControlsChange,
 }) => {
   return (
@@ -92,6 +90,7 @@ export const Thread: FC<ThreadProps> = ({
             </ThreadPrimitive.If>
 
             <ChatToolApprovalCard />
+            <ChatConversationErrorCard />
 
             <Composer
               availability={availability}
@@ -99,7 +98,6 @@ export const Thread: FC<ThreadProps> = ({
               contactLocked={contactLocked}
               controls={controls}
               disabled={disabled}
-              modelOptions={modelOptions}
               onControlsChange={onControlsChange}
               autoFocus={!compact}
             />

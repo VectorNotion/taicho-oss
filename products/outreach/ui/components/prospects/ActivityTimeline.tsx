@@ -93,6 +93,10 @@ function formatRelativeDate(dateString: string) {
   }
 }
 
+function activityAuthor(activity: Activity): string {
+  return activity.updatedBy || activity.createdBy ? "Workspace member" : "System";
+}
+
 export function ActivityTimeline({
   activities = [],
   isLoading = false,
@@ -160,7 +164,7 @@ export function ActivityTimeline({
                       }]
                     : []),
                 ]}
-                className="scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30"
+                className="scroll-mt-24 target:bg-primary/10 target:ring-2 target:ring-inset target:ring-primary/30 data-[prospect-source-target=true]:bg-primary/10 data-[prospect-source-target=true]:ring-2 data-[prospect-source-target=true]:ring-inset data-[prospect-source-target=true]:ring-primary/30"
                 id={`activity-${activity.id}`}
                 key={activity.id}
                 leading={
@@ -170,8 +174,9 @@ export function ActivityTimeline({
                 }
                 meta={[
                   config.label,
-                  <time dateTime={activity.createdAt} key="date">
-                    {formatRelativeDate(activity.createdAt)}
+                  `${activity.updatedAt && activity.updatedAt !== activity.createdAt ? "Edited" : "Added"} by ${activityAuthor(activity)}`,
+                  <time dateTime={activity.updatedAt ?? activity.createdAt} key="date">
+                    {formatRelativeDate(activity.updatedAt ?? activity.createdAt)}
                   </time>,
                   ...(activity.notes ? [stripHtml(activity.notes)] : []),
                 ]}

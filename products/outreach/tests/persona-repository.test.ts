@@ -13,6 +13,7 @@ import {
   deletePersona,
   getPersonaById,
   getPersonas,
+  isPersonaReferenced,
   updatePersona,
 } from '../data/persona-repository';
 
@@ -44,13 +45,16 @@ test('persona CRUD round-trips all qualification fields', async () => {
     targetTitles: ['Founder', 'CEO'], companySizeMin: 10, companySizeMax: 100,
     fundingStages: ['seed'], targetDomains: ['example.test'], signals: ['hiring'], isActive: true,
   });
+  assert.ok(created);
   assert.match(created.id, /.+/);
+  assert.equal(created.revision, 1);
   assert.deepEqual(created.targetTitles, ['Founder', 'CEO']);
   assert.equal((await getPersonaById(created.id))?.name, 'Scaling Founder');
 
   const updated = await updatePersona(created.id, { name: 'Growth Founder', isActive: false });
   assert.equal(updated?.name, 'Growth Founder');
   assert.equal(updated?.isActive, false);
+  assert.equal(updated?.revision, 2);
   assert.deepEqual(updated?.targetTitles, ['Founder', 'CEO']);
 
   assert.equal(await deletePersona(created.id), true);
@@ -68,4 +72,32 @@ test('active filtering excludes disabled personas and results are name-sorted', 
 
 test('updating an unknown persona returns null', async () => {
   assert.equal(await updatePersona('missing', { name: 'No-op' }), null);
+});
+
+test('duplicate names are rejected case-insensitively', async () => {
+  const first = await createPersona({ name: 'Durable Operator', description: 'first', targetTitles: ['COO'], signals: ['recovery'], isActive: true });
+  assert.ok(first);
+  assert.equal(await createPersona({ name: 'durable operator', description: 'duplicate', targetTitles: ['CRO'], signals: ['handoffs'], isActive: true }), null);
+  assert.equal((await getPersonas()).filter((persona) => persona.name.toLowerCase() === 'durable operator').length, 1);
+});
+
+test('stale revisions cannot overwrite a newer persona', async () => {
+  const created = await createPersona({ name: 'Concurrent Operator', description: 'initial', targetTitles: ['COO'], signals: ['recovery'], isActive: true });
+  assert.ok(created);
+  const firstUpdate = await updatePersona(created.id, { description: 'newer', expectedRevision: created.revision });
+  assert.equal(firstUpdate?.revision, 2);
+  assert.equal(await updatePersona(created.id, { description: 'stale overwrite', expectedRevision: created.revision }), null);
+  assert.equal((await getPersonaById(created.id))?.description, 'newer');
+});
+
+test('saved qualification references are detectable before deletion', async () => {
+  const created = await createPersona({ name: 'Referenced Operator', description: 'referenced', targetTitles: ['COO'], signals: ['recovery'], isActive: true });
+  assert.ok(created);
+  const session = await getSession();
+  try {
+    await session.run('CREATE (:LegacyQualification {id: randomUUID(), matchedPersonaId: $id})', { id: created.id });
+  } finally {
+    await session.close();
+  }
+  assert.equal(await isPersonaReferenced(created.id), true);
 });

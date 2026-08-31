@@ -53,9 +53,15 @@ test("Catalog CRUD and prospect assignment preserve the commercial context", asy
     voice: "Direct and pragmatic.",
     status: "active",
   });
+  assert.ok(item);
   assert.deepEqual((await listCatalogItems()).map(({ id }) => id), [item.id]);
+  const updated = await updateCatalogItem(item.id, {
+    positioning: "Updated before assignment.",
+    expectedRevision: item.revision,
+  });
+  assert.ok(updated);
   assert.equal(
-    (await updateCatalogItem(item.id, { positioning: "Updated before assignment." }))?.positioning,
+    updated.positioning,
     "Updated before assignment.",
   );
 
@@ -64,13 +70,17 @@ test("Catalog CRUD and prospect assignment preserve the commercial context", asy
   assert.equal((await getProspectCatalogItem(prospect.id))?.name, "Automation advisory");
   assert.equal((await getProspectById(prospect.id))?.catalogItemName, "Automation advisory");
 
-  await updateCatalogItem(item.id, { name: "Automation implementation" });
+  const renamed = await updateCatalogItem(item.id, {
+    name: "Automation implementation",
+    expectedRevision: updated.revision,
+  });
+  assert.ok(renamed);
   assert.equal((await getProspectById(prospect.id))?.catalogItemName, "Automation implementation");
-  assert.equal(await deleteCatalogItem(item.id), false, "assigned items cannot be deleted");
+  assert.equal(await deleteCatalogItem(item.id, { expectedRevision: renamed.revision }), false, "assigned items cannot be deleted");
 
   await assignProspectCatalogItem(prospect.id, null);
   assert.equal((await getProspectById(prospect.id))?.catalogItemId, undefined);
-  assert.equal(await deleteCatalogItem(item.id), true);
+  assert.equal(await deleteCatalogItem(item.id, { expectedRevision: renamed.revision }), true);
 });
 
 test("an invalid assignment does not clear the existing Catalog item", async () => {
@@ -86,8 +96,53 @@ test("an invalid assignment does not clear the existing Catalog item", async () 
     voice: "",
     status: "active",
   });
+  assert.ok(item);
   const prospect = await createProspect({ name: "Protected Prospect", source: "manual" });
   await assignProspectCatalogItem(prospect.id, item.id);
   assert.equal(await assignProspectCatalogItem(prospect.id, "missing-item"), null);
   assert.equal((await getProspectCatalogItem(prospect.id))?.id, item.id);
+});
+
+test("normalized names are unique and stale mutations cannot replace a newer revision", async () => {
+  const first = await createCatalogItem({
+    name: "Durable research offering",
+    kind: "service",
+    summary: "A durable offer.",
+    positioning: "Safe updates.",
+    outcomes: "Reliable context.",
+    differentiators: "Atomic writes.",
+    proof: "Browser evidence.",
+    researchGuidance: "Inspect durable workflow requirements.",
+    voice: "Direct.",
+    status: "active",
+  });
+  assert.ok(first);
+  assert.equal(await createCatalogItem({
+    name: "  DURABLE RESEARCH OFFERING  ",
+    kind: "product",
+    summary: "Duplicate.",
+    positioning: "",
+    outcomes: "",
+    differentiators: "",
+    proof: "",
+    researchGuidance: "Duplicate guidance.",
+    voice: "",
+    status: "active",
+  }), null);
+
+  const winner = await updateCatalogItem(first.id, {
+    outcomes: "Winner update",
+    expectedRevision: first.revision,
+  });
+  assert.ok(winner);
+  assert.equal(winner.revision, first.revision + 1);
+  assert.equal(await updateCatalogItem(first.id, {
+    outcomes: "Stale update",
+    expectedRevision: first.revision,
+  }), null);
+  assert.equal(
+    await deleteCatalogItem(first.id, { expectedRevision: first.revision }),
+    false,
+    "a stale delete cannot remove a newer revision",
+  );
 });

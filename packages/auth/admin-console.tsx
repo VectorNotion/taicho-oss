@@ -35,6 +35,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@content-automation/ui/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@content-automation/ui/components/ui/dialog";
 import { Input } from "@content-automation/ui/components/ui/input";
 import { Label } from "@content-automation/ui/components/ui/label";
 import {
@@ -186,6 +194,8 @@ export function AdminConsole() {
         return { method: "DELETE", path: `/workspace/members/${value("memberId")}`, body: { confirm: true } };
       case "create_team":
         return { method: "POST", path: "/workspace/teams", body: { name: action.name } };
+      case "update_team":
+        return { method: "PATCH", path: `/workspace/teams/${value("teamId")}`, body: { name: action.name } };
       case "remove_team":
         return { method: "DELETE", path: `/workspace/teams/${value("teamId")}`, body: { confirm: true } };
       case "add_team_member":
@@ -207,6 +217,7 @@ export function AdminConsole() {
       await apiMutate(request.method, request.path, request.body);
       setMessage({ type: "success", text: success });
       await load();
+      return true;
     } catch (cause) {
       setMessage({
         type: "error",
@@ -215,6 +226,7 @@ export function AdminConsole() {
             ? cause.message
             : "The operation could not be completed",
       });
+      return false;
     } finally {
       setPending("");
     }
@@ -363,7 +375,7 @@ function UsersView({
     key: string,
     action: AdminAction,
     success: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState(
@@ -376,13 +388,15 @@ function UsersView({
 
   async function addMember(event: FormEvent) {
     event.preventDefault();
-    await act(
+    const added = await act(
       "add-member",
       { action: "add_member", email, role },
       "User added to the workspace",
     );
-    setEmail("");
+    if (added) setEmail("");
   }
+
+  const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredMembers = data.members.filter((member) => {
@@ -535,15 +549,7 @@ function UsersView({
                             label: owner
                               ? "The workspace owner cannot be removed"
                               : `Remove ${member.name}`,
-                            onSelect: () =>
-                              void act(
-                                `remove-${member.id}`,
-                                {
-                                  action: "remove_member",
-                                  memberId: member.id,
-                                },
-                                "User removed from the workspace",
-                              ),
+                            onSelect: () => setRemoveTarget(member),
                           },
                         ]
                       : []
@@ -604,6 +610,58 @@ function UsersView({
           </ListRows>
         ) : null}
       </ListSurface>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && pending !== `remove-${removeTarget?.id}`) {
+            setRemoveTarget(null);
+          }
+        }}
+        open={removeTarget !== null}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove {removeTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              This permanently revokes access to {data.organization.name}.
+              The underlying account remains available, but this action cannot
+              be undone from this screen.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={pending === `remove-${removeTarget?.id}`}
+              onClick={() => setRemoveTarget(null)}
+              variant="outline"
+            >
+              Keep user
+            </Button>
+            <Button
+              disabled={pending === `remove-${removeTarget?.id}`}
+              onClick={async () => {
+                if (!removeTarget) return;
+                const removed = await act(
+                  `remove-${removeTarget.id}`,
+                  {
+                    action: "remove_member",
+                    memberId: removeTarget.id,
+                  },
+                  "User removed from the workspace",
+                );
+                if (removed) setRemoveTarget(null);
+              }}
+              variant="destructive"
+            >
+              {pending === `remove-${removeTarget?.id}` ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Trash2 />
+              )}
+              Remove user
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -619,21 +677,23 @@ function TeamsView({
     key: string,
     action: AdminAction,
     success: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 }) {
   const [name, setName] = useState("");
   const [query, setQuery] = useState("");
   const [membershipFilter, setMembershipFilter] = useState("all");
   const [managedTeamId, setManagedTeamId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Team | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   async function createTeam(event: FormEvent) {
     event.preventDefault();
-    await act(
+    const created = await act(
       "create-team",
       { action: "create_team", name },
       "Team created",
     );
-    setName("");
+    if (created) setName("");
   }
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -790,15 +850,10 @@ function TeamsView({
                               pending === `delete-team-${team.id}`,
                             icon: Trash2,
                             label: `Delete ${team.name}`,
-                            onSelect: () =>
-                              void act(
-                                `delete-team-${team.id}`,
-                                {
-                                  action: "remove_team",
-                                  teamId: team.id,
-                                },
-                                "Team removed",
-                              ),
+                            onSelect: () => {
+                              setDeleteTarget(team);
+                              setDeleteDialogOpen(true);
+                            },
                           },
                         ]
                       : []),
@@ -832,6 +887,58 @@ function TeamsView({
           </ListRows>
         ) : null}
       </ListSurface>
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open && pending !== `delete-team-${deleteTarget?.id}`) {
+            setDeleteDialogOpen(false);
+          }
+        }}
+        open={deleteDialogOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {deleteTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              This permanently removes the team, its memberships, and its
+              delegated administrator assignments. Workspace users and roles
+              are not deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={pending === `delete-team-${deleteTarget?.id}`}
+              onClick={() => setDeleteDialogOpen(false)}
+              variant="outline"
+            >
+              Keep team
+            </Button>
+            <Button
+              disabled={pending === `delete-team-${deleteTarget?.id}`}
+              onClick={async () => {
+                if (!deleteTarget) return;
+                const deleted = await act(
+                  `delete-team-${deleteTarget.id}`,
+                  { action: "remove_team", teamId: deleteTarget.id },
+                  "Team removed",
+                );
+                if (deleted) {
+                  if (managedTeamId === deleteTarget.id) setManagedTeamId(null);
+                  setDeleteDialogOpen(false);
+                }
+              }}
+              variant="destructive"
+            >
+              {pending === `delete-team-${deleteTarget?.id}` ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Trash2 />
+              )}
+              Delete team
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -851,7 +958,7 @@ function TeamManagementPanel({
     key: string,
     action: AdminAction,
     success: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 }) {
   const members = data.members.filter((member) =>
     member.teams.includes(team.id),
@@ -862,6 +969,8 @@ function TeamManagementPanel({
   const [selectedUser, setSelectedUser] = useState(
     available[0]?.userId || "",
   );
+  const [teamName, setTeamName] = useState(team.name);
+  useEffect(() => setTeamName(team.name), [team.id, team.name]);
   const selected = available.some(
     (member) => member.userId === selectedUser,
   )
@@ -887,6 +996,48 @@ function TeamManagementPanel({
           </Button>
         </CardAction>
       </CardHeader>
+
+      {data.access.organizationAdmin ? (
+        <CardContent className="border-b py-4">
+          <form
+            className="flex max-w-xl items-end gap-3"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              await act(
+                `rename-team-${team.id}`,
+                { action: "update_team", teamId: team.id, name: teamName },
+                "Team renamed",
+              );
+            }}
+          >
+            <div className="grid min-w-0 flex-1 gap-2">
+              <Label htmlFor={`admin-team-name-${team.id}`}>Team name</Label>
+              <Input
+                id={`admin-team-name-${team.id}`}
+                minLength={2}
+                onChange={(event) => setTeamName(event.target.value)}
+                required
+                value={teamName}
+              />
+            </div>
+            <Button
+              disabled={
+                pending === `rename-team-${team.id}` ||
+                teamName.trim() === team.name
+              }
+              type="submit"
+              variant="outline"
+            >
+              {pending === `rename-team-${team.id}` ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Check />
+              )}
+              Rename team
+            </Button>
+          </form>
+        </CardContent>
+      ) : null}
 
       {available.length > 0 ? (
         <div className="flex gap-2 border-b p-4">

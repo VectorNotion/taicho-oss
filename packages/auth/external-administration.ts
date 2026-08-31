@@ -39,6 +39,17 @@ export type ExternalOAuthApplication = {
   updatedAt: string | null;
 };
 
+export class OAuthApplicationAdministrationError extends Error {
+  constructor(
+    readonly code: "INVALID_INPUT" | "NOT_FOUND" | "CONFLICT",
+    message: string,
+    readonly status: 400 | 404 | 409,
+  ) {
+    super(message);
+    this.name = "OAuthApplicationAdministrationError";
+  }
+}
+
 function randomSecret(bytes = 36) {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(bytes))).toString("base64url");
 }
@@ -60,10 +71,10 @@ function validateScopes(scopes: readonly string[]): OAuthScope[] {
   const supported = new Set<string>(PLATFORM_OAUTH_SCOPES);
   const unique = [...new Set(scopes)];
   if (unique.length === 0 || unique.some((scope) => !supported.has(scope))) {
-    throw new Error("One or more OAuth scopes are unsupported.");
+    throw new OAuthApplicationAdministrationError("INVALID_INPUT", "One or more OAuth scopes are unsupported.", 400);
   }
   if (unique.includes("vn:commercial:operator")) {
-    throw new Error("Platform-operator scope cannot be delegated to an OAuth application.");
+    throw new OAuthApplicationAdministrationError("INVALID_INPUT", "Platform-operator scope cannot be delegated to an OAuth application.", 400);
   }
   return unique as OAuthScope[];
 }
@@ -71,19 +82,24 @@ function validateScopes(scopes: readonly string[]): OAuthScope[] {
 function validateResources(resources: readonly OAuthResourceKind[]): OAuthResourceKind[] {
   const unique = [...new Set(resources)];
   if (unique.length === 0 || unique.some((resource) => resource !== "api" && resource !== "mcp")) {
-    throw new Error("At least one supported OAuth resource is required.");
+    throw new OAuthApplicationAdministrationError("INVALID_INPUT", "At least one supported OAuth resource is required.", 400);
   }
   return unique;
 }
 
 function validateRedirectUris(values: readonly string[]): string[] {
   const unique = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
-  if (unique.length === 0 || unique.length > 20) throw new Error("Provide between one and twenty redirect URIs.");
+  if (unique.length === 0 || unique.length > 20) throw new OAuthApplicationAdministrationError("INVALID_INPUT", "Provide between one and twenty redirect URIs.", 400);
   return unique.map((value) => {
-    const uri = new URL(value);
+    let uri: URL;
+    try {
+      uri = new URL(value);
+    } catch {
+      throw new OAuthApplicationAdministrationError("INVALID_INPUT", "Redirect URIs must be absolute URLs.", 400);
+    }
     const loopback = uri.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(uri.hostname);
     if (uri.hash || uri.username || uri.password || (uri.protocol !== "https:" && !loopback)) {
-      throw new Error("Redirect URIs must use HTTPS, except for HTTP loopback development URLs, and cannot contain credentials or fragments.");
+      throw new OAuthApplicationAdministrationError("INVALID_INPUT", "Redirect URIs must use HTTPS, except for HTTP loopback development URLs, and cannot contain credentials or fragments.", 400);
     }
     return uri.toString();
   });
@@ -148,37 +164,50 @@ export async function createExternalOAuthApplication(input: {
 }) {
   await assertOrganizationMember(input.organizationId, input.createdByUserId);
   const name = input.name.trim();
-  if (!name || name.length > 120) throw new Error("Application name must be between 1 and 120 characters.");
+  if (!name || name.length > 120) throw new OAuthApplicationAdministrationError("INVALID_INPUT", "Application name must be between 1 and 120 characters.", 400);
   const redirectUris = validateRedirectUris(input.redirectUris);
   const scopes = validateScopes(input.scopes);
   const resources = validateResources(input.resources ?? ["api"]);
   const clientId = randomSecret(24);
   const clientSecret = input.clientType === "confidential" ? randomSecret(36) : undefined;
   const storedScopes = ["openid", "profile", "email", ...scopes, ...(input.offlineAccess ? ["offline_access"] : [])];
-  await authDatabase.insert(oauthClientTable).values({
-    id: crypto.randomUUID(),
-    clientId,
-    clientSecret: clientSecret ? await hashOAuthSecret(clientSecret) : null,
-    disabled: false,
-    skipConsent: false,
-    scopes: storedScopes,
-    userId: input.createdByUserId,
-    createdAt: sql`now()`,
-    updatedAt: sql`now()`,
-    name,
-    redirectUris,
-    tokenEndpointAuthMethod: input.clientType === "public" ? "none" : "client_secret_basic",
-    grantTypes: ["authorization_code", ...(input.offlineAccess ? ["refresh_token"] : [])],
-    responseTypes: ["code"],
-    public: input.clientType === "public",
-    type: "web",
-    requirePKCE: true,
-    referenceId: input.organizationId,
-    metadata: {
-      managed_external_api: true,
-      allowed_resources: resources,
-      created_by_user_id: input.createdByUserId,
-    } satisfies ClientMetadata,
+  const storedSecret = clientSecret ? await hashOAuthSecret(clientSecret) : null;
+  await authDatabase.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`content_automation_oauth_application_names:${input.organizationId}`}))`);
+    const [existing] = await tx.select({ clientId: oauthClientTable.clientId }).from(oauthClientTable).where(and(
+      eq(oauthClientTable.referenceId, input.organizationId),
+      sql`lower(coalesce(${oauthClientTable.name}, '')) = lower(${name})`,
+      sql`coalesce((${oauthClientTable.metadata} ->> 'managed_external_api')::boolean, false) = true`,
+      sql`coalesce((${oauthClientTable.metadata} ->> 'service_principal')::boolean, false) = false`,
+    )).limit(1);
+    if (existing) {
+      throw new OAuthApplicationAdministrationError("CONFLICT", "An OAuth application with this name already exists in this workspace. Choose a unique name and try again.", 409);
+    }
+    await tx.insert(oauthClientTable).values({
+      id: crypto.randomUUID(),
+      clientId,
+      clientSecret: storedSecret,
+      disabled: false,
+      skipConsent: false,
+      scopes: storedScopes,
+      userId: input.createdByUserId,
+      createdAt: sql`now()`,
+      updatedAt: sql`now()`,
+      name,
+      redirectUris,
+      tokenEndpointAuthMethod: input.clientType === "public" ? "none" : "client_secret_basic",
+      grantTypes: ["authorization_code", ...(input.offlineAccess ? ["refresh_token"] : [])],
+      responseTypes: ["code"],
+      public: input.clientType === "public",
+      type: "web",
+      requirePKCE: true,
+      referenceId: input.organizationId,
+      metadata: {
+        managed_external_api: true,
+        allowed_resources: resources,
+        created_by_user_id: input.createdByUserId,
+      } satisfies ClientMetadata,
+    });
   });
   return {
     clientId,
@@ -204,7 +233,7 @@ async function assertManagedClient(organizationId: string, clientId: string) {
   )).limit(1);
   const metadata = (row?.metadata ?? {}) as ClientMetadata;
   if (!row || metadata.managed_external_api !== true || metadata.service_principal) {
-    throw new Error("OAuth application not found.");
+    throw new OAuthApplicationAdministrationError("NOT_FOUND", "OAuth application not found.", 404);
   }
   return row;
 }
@@ -222,7 +251,7 @@ export async function updateExternalOAuthApplication(input: {
   const current = await assertManagedClient(input.organizationId, input.clientId);
   const metadata = (current.metadata ?? {}) as ClientMetadata;
   const name = input.name?.trim();
-  if (input.name !== undefined && (!name || name.length > 120)) throw new Error("Application name must be between 1 and 120 characters.");
+  if (input.name !== undefined && (!name || name.length > 120)) throw new OAuthApplicationAdministrationError("INVALID_INPUT", "Application name must be between 1 and 120 characters.", 400);
   const scopes = input.scopes ? validateScopes(input.scopes) : undefined;
   const resources = input.resources ? validateResources(input.resources) : undefined;
   const currentScopes = Array.isArray(current.scopes) ? current.scopes.filter((value): value is string => typeof value === "string") : [];

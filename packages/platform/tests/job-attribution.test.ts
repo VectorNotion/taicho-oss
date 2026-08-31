@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Pool } from "pg";
+import { migrationPoolConfig, runtimePoolConfig } from "@content-automation/database";
 import { runWithExecutionContext } from "@content-automation/observability";
 import {
   closePool,
@@ -10,15 +11,6 @@ import {
   getJobStatus,
   updateJobStatus,
 } from "../jobs/repository";
-
-function databaseUrl(user?: string, password?: string): string {
-  const source = process.env.DATABASE_URL
-    ?? `postgresql://${encodeURIComponent(process.env.POSTGRES_USER ?? "postgres")}:${encodeURIComponent(process.env.POSTGRES_PASSWORD ?? "postgres")}@${process.env.POSTGRES_HOST ?? "localhost"}:${process.env.POSTGRES_PORT ?? "5432"}/${process.env.POSTGRES_DB ?? "langgraph"}`;
-  const url = new URL(source);
-  if (user) url.username = user;
-  if (password) url.password = password;
-  return url.toString();
-}
 
 test("platform jobs enforce RLS and persist attribution across the async boundary", {
   skip: process.env.PLATFORM_DB_TESTS !== "1",
@@ -29,25 +21,11 @@ test("platform jobs enforce RLS and persist attribution across the async boundar
   const actorId = `service-${randomUUID()}`;
   const requestId = randomUUID();
   const parentExecutionId = randomUUID();
-  const role = `jobs_test_${process.pid}_${suffix.slice(0, 12)}`;
-  const rolePassword = `T3st${suffix}`;
-  const verificationPool = new Pool({ connectionString: databaseUrl() });
-  const previous = {
-    runtimeUrl: process.env.JOBS_DATABASE_URL,
-    adminUrl: process.env.JOBS_ADMIN_DATABASE_URL,
-    role: process.env.JOBS_DATABASE_ROLE,
-  };
+  const verificationPool = new Pool({ ...migrationPoolConfig(), max: 1 });
   let jobId: string | undefined;
   let otherJobId: string | undefined;
 
   try {
-    await verificationPool.query(
-      `CREATE ROLE "${role}" LOGIN PASSWORD '${rolePassword}' NOSUPERUSER NOBYPASSRLS`,
-    );
-    process.env.JOBS_DATABASE_URL = databaseUrl(role, rolePassword);
-    process.env.JOBS_ADMIN_DATABASE_URL = databaseUrl();
-    process.env.JOBS_DATABASE_ROLE = role;
-
     jobId = await runWithExecutionContext({
       organizationId,
       actorId,
@@ -79,7 +57,7 @@ test("platform jobs enforce RLS and persist attribution across the async boundar
     assert.equal((await getJobStatus(organizationId, jobId))?.status, "queued");
 
     const otherPool = new Pool({
-      connectionString: process.env.JOBS_DATABASE_URL,
+      ...runtimePoolConfig(),
       options: `-capp.organization_id=${otherOrganizationId}`,
     });
     try {
@@ -104,14 +82,6 @@ test("platform jobs enforce RLS and persist attribution across the async boundar
       "DELETE FROM jobs WHERE id = ANY($1::uuid[])",
       [[jobId, otherJobId].filter(Boolean)],
     ).catch(() => undefined);
-    await verificationPool.query(`DROP OWNED BY "${role}"`).catch(() => undefined);
-    await verificationPool.query(`DROP ROLE IF EXISTS "${role}"`).catch(() => undefined);
     await verificationPool.end();
-    if (previous.runtimeUrl === undefined) delete process.env.JOBS_DATABASE_URL;
-    else process.env.JOBS_DATABASE_URL = previous.runtimeUrl;
-    if (previous.adminUrl === undefined) delete process.env.JOBS_ADMIN_DATABASE_URL;
-    else process.env.JOBS_ADMIN_DATABASE_URL = previous.adminUrl;
-    if (previous.role === undefined) delete process.env.JOBS_DATABASE_ROLE;
-    else process.env.JOBS_DATABASE_ROLE = previous.role;
   }
 });

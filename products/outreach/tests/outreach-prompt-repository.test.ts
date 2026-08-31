@@ -52,15 +52,23 @@ test('published outreach prompts are versioned and isolated by tenant graph', as
   changed.systemInstructions = 'Use the workspace-specific north-star narrative.';
   const drafted = await inOrganization(
     organizationA,
-    () => saveOutreachPromptDraft(changed, 'member-a'),
+    () => saveOutreachPromptDraft(changed, 'member-a', {
+      activeVersion: initialA.active.version,
+      draftContentHash: null,
+    }),
   );
+  assert.ok(drafted);
   assert.equal(drafted.active.version, 1);
   assert.equal(drafted.draft?.content.systemInstructions, changed.systemInstructions);
 
   const published = await inOrganization(
     organizationA,
-    () => publishOutreachPromptDraft('member-a'),
+    () => publishOutreachPromptDraft('member-a', {
+      activeVersion: drafted.active.version,
+      draftContentHash: drafted.draft!.contentHash,
+    }),
   );
+  assert.ok(published);
   assert.equal(published.active.version, 2);
   assert.equal(published.active.content.systemInstructions, changed.systemInstructions);
   assert.equal(published.draft, null);
@@ -95,4 +103,43 @@ test('published outreach prompts are versioned and isolated by tenant graph', as
       await session.close();
     }
   });
+});
+
+test('concurrent publishing reports one durable winner and stale draft saves cannot silently rebase', async () => {
+  const workspace = await inOrganization(organizationB, getOutreachPromptWorkspace);
+  const changed = structuredClone(DEFAULT_OUTREACH_PROMPT_CONTENT);
+  changed.mediumTemplates.email += '\n\nDurable prompt publication.';
+  const drafted = await inOrganization(
+    organizationB,
+    () => saveOutreachPromptDraft(changed, 'member-b', {
+      activeVersion: workspace.active.version,
+      draftContentHash: null,
+    }),
+  );
+  assert.ok(drafted?.draft);
+
+  const expected = {
+    activeVersion: drafted.active.version,
+    draftContentHash: drafted.draft.contentHash,
+  };
+  const results = await Promise.all([
+    inOrganization(organizationB, () => publishOutreachPromptDraft('member-b-1', expected)),
+    inOrganization(organizationB, () => publishOutreachPromptDraft('member-b-2', expected)),
+  ]);
+  assert.equal(results.filter(Boolean).length, 1);
+  const current = await inOrganization(organizationB, getOutreachPromptWorkspace);
+  assert.equal(current.active.version, 2);
+  assert.equal(current.versions.length, 2);
+  assert.equal(current.draft, null);
+
+  assert.equal(await inOrganization(
+    organizationB,
+    () => saveOutreachPromptDraft(DEFAULT_OUTREACH_PROMPT_CONTENT, 'stale-member', {
+      activeVersion: workspace.active.version,
+      draftContentHash: null,
+    }),
+  ), null);
+  const unchanged = await inOrganization(organizationB, getOutreachPromptWorkspace);
+  assert.equal(unchanged.active.version, 2);
+  assert.equal(unchanged.draft, null);
 });

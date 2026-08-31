@@ -28,24 +28,36 @@ export function useCapabilityStream<TPartial = unknown, TFinal = unknown>({
   const [error, setError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const active = useRef<{ abort: () => void } | null>(null);
+  const generation = useRef(0);
 
   const start = useCallback((extraBody: Record<string, unknown> = {}) => {
+    const currentGeneration = ++generation.current;
     active.current?.abort();
     setParts([]);
     setFinal(null);
     setError(null);
     setIsStreaming(true);
     const stream = apiStream<ActionDataPart, TFinal>(api, { ...body, ...extraBody }, {
-      onChunk: (part) => setParts((current) => [...current, part]),
-      onResult: (result) => setFinal(result.data),
-      onError: (cause: ApiError) => setError(cause.message),
+      onChunk: (part) => {
+        if (generation.current === currentGeneration) setParts((current) => [...current, part]);
+      },
+      onResult: (result) => {
+        if (generation.current === currentGeneration) setFinal(result.data);
+      },
+      onError: (cause: ApiError) => {
+        if (generation.current === currentGeneration) setError(cause.message);
+      },
     });
     active.current = stream;
     stream.done
       .catch((cause: unknown) => {
-        setError((current) => current ?? (cause instanceof Error ? cause.message : 'Action failed'));
+        if (generation.current === currentGeneration) {
+          setError((current) => current ?? (cause instanceof Error ? cause.message : 'Action failed'));
+        }
       })
-      .finally(() => setIsStreaming(false));
+      .finally(() => {
+        if (generation.current === currentGeneration) setIsStreaming(false);
+      });
   }, [api, body]);
 
   const derived = useMemo(() => {

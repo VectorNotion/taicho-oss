@@ -5,10 +5,11 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { Badge } from "@/components/ui/badge";
-import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
+import { ApiError, apiGet, apiMutate } from "@content-automation/platform/network/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/PageHeader";
 import { ListRow, ListRows } from "@/components/ListRow";
 import { FilterSelect, ListSurface } from "@/components/ListSurface";
@@ -49,6 +50,8 @@ import {
   Trash2,
   Loader2,
   RefreshCw,
+  CircleAlert,
+  Pencil,
 } from "lucide-react";
 import type {
   ResearchSource,
@@ -96,7 +99,39 @@ const sourceTypeConfig: Record<
   search_term: { icon: Search, label: "Search term" },
 };
 
+type ResearchRunPartial = {
+  items?: Array<{
+    title?: string;
+    content?: string;
+    tags?: string[];
+    priority?: "low" | "medium" | "high";
+  }>;
+};
+
+type ResearchRunFinal = {
+  itemsCreated: number;
+  itemsDeduped: number;
+  sourcesSearched: number;
+  creditsUsed: number;
+};
+
+function isHttpWebsiteUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value.trim());
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function researchRunErrorMessage(error: string): string {
+  return /failed to fetch|networkerror|stream ended without a terminal event/i.test(error)
+    ? "The research stream was interrupted before completion. Check your connection and try again."
+    : error;
+}
+
 export default function ResearchPage() {
+  const [activeTab, setActiveTab] = useState<"content" | "sources">("content");
   // Sources state
   const [sources, setSources] = useState<ResearchSource[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(true);
@@ -117,12 +152,22 @@ export default function ResearchPage() {
   const [newSourceType, setNewSourceType] = useState<ResearchSourceType>("website");
   const [newSourceUrl, setNewSourceUrl] = useState("");
   const [addSourceLoading, setAddSourceLoading] = useState(false);
+  const [addSourceError, setAddSourceError] = useState<string | null>(null);
 
   // Delete confirmation state
   const [deleteSourceTarget, setDeleteSourceTarget] = useState<ResearchSource | null>(null);
   const [deleteItemTarget, setDeleteItemTarget] = useState<ResearchItem | null>(null);
+  const [editItemTarget, setEditItemTarget] = useState<ResearchItem | null>(null);
+  const [editItemTitle, setEditItemTitle] = useState("");
+  const [editItemContent, setEditItemContent] = useState("");
+  const [editItemPriority, setEditItemPriority] = useState<"low" | "medium" | "high">("medium");
+  const [editItemTags, setEditItemTags] = useState("");
+  const [editItemNote, setEditItemNote] = useState("");
+  const [editItemLoading, setEditItemLoading] = useState(false);
+  const [editItemError, setEditItemError] = useState<string | null>(null);
+  const [runPreconditionError, setRunPreconditionError] = useState<string | null>(null);
 
-  const researchStream = useCapabilityStream<unknown, { itemsCreated: number }>({
+  const researchStream = useCapabilityStream<ResearchRunPartial, ResearchRunFinal>({
     api: "/content/research/run",
   });
   const runResearchLoading = researchStream.isStreaming;
@@ -163,7 +208,12 @@ export default function ResearchPage() {
   // Add source
   const handleAddSource = async () => {
     if (!newSourceName || !newSourceUrl) return;
+    if (newSourceType === "website" && !isHttpWebsiteUrl(newSourceUrl)) {
+      setAddSourceError("Enter a complete website URL beginning with http:// or https://.");
+      return;
+    }
 
+    setAddSourceError(null);
     setAddSourceLoading(true);
     try {
       await apiMutate("POST", "/content/research/sources", {
@@ -178,10 +228,14 @@ export default function ResearchPage() {
       setNewSourceName("");
       setNewSourceType("website");
       setNewSourceUrl("");
-      fetchSources();
+      await fetchSources();
     } catch (error) {
       console.error("Error adding source:", error);
-      toast.error("Could not add the source. Try again.");
+      const message = error instanceof ApiError
+        ? error.message
+        : "Could not add the source. Try again.";
+      setAddSourceError(message);
+      toast.error(message);
     } finally {
       setAddSourceLoading(false);
     }
@@ -192,7 +246,8 @@ export default function ResearchPage() {
     try {
       await apiMutate("PATCH", `/content/research/sources/${source.id}`, { enabled: !source.enabled });
       toast.success(source.enabled ? "Source disabled" : "Source enabled");
-      fetchSources();
+      if (!source.enabled) setRunPreconditionError(null);
+      await fetchSources();
     } catch (error) {
       console.error("Error updating source:", error);
       toast.error("Could not update the source. Try again.");
@@ -244,17 +299,70 @@ export default function ResearchPage() {
     }
   };
 
+  const openEditItem = (item: ResearchItem) => {
+    setEditItemTarget(item);
+    setEditItemTitle(item.title);
+    setEditItemContent(item.content);
+    setEditItemPriority(item.priority);
+    setEditItemTags(item.tags.join(", "));
+    setEditItemNote(item.humanNote ?? "");
+    setEditItemError(null);
+  };
+
+  const handleEditItem = async () => {
+    if (!editItemTarget) return;
+    if (!editItemTitle.trim() || !editItemContent.trim()) {
+      setEditItemError("Title and finding are required.");
+      return;
+    }
+    setEditItemError(null);
+    setEditItemLoading(true);
+    try {
+      await apiMutate("PATCH", `/content/research/items/${editItemTarget.id}`, {
+        title: editItemTitle.trim(),
+        content: editItemContent.trim(),
+        priority: editItemPriority,
+        tags: editItemTags.split(",").map((tag) => tag.trim()).filter(Boolean),
+        humanNote: editItemNote.trim(),
+      });
+      toast.success("Research item saved");
+      setEditItemTarget(null);
+      await fetchItems();
+    } catch (error) {
+      console.error("Error editing item:", error);
+      const message = error instanceof ApiError
+        ? error.message
+        : "Could not save the research item. Try again.";
+      setEditItemError(message);
+      toast.error(message);
+    } finally {
+      setEditItemLoading(false);
+    }
+  };
+
   // Run research
   const handleRunResearch = () => {
     const enabledSources = sources.filter((s) => s.enabled);
     if (enabledSources.length === 0) {
-      toast.error("No enabled sources. Enable at least one source first.");
+      const message = "No enabled sources. Enable at least one source first.";
+      setRunPreconditionError(message);
+      toast.error(message);
       return;
     }
+    setRunPreconditionError(null);
     researchStream.start({ sourceIds: enabledSources.map((source) => source.id), timeRange: "week" });
   };
   useEffect(() => { if (researchStream.final) void fetchItems(); }, [researchStream.final]);
-  useEffect(() => { if (researchStream.error) toast.error(researchStream.error); }, [researchStream.error]);
+  useEffect(() => {
+    if (researchStream.error) toast.error(researchRunErrorMessage(researchStream.error));
+  }, [researchStream.error]);
+
+  const runJobId = (researchStream.dataParts.find((part) => part.type === "data-job")?.data as {
+    jobId?: string;
+  } | undefined)?.jobId;
+  const streamedItems = Object.values(researchStream.partialsById)
+    .flatMap((partial) => partial.items ?? [])
+    .filter((item) => item.title);
 
   // Filter items by search
   const filteredItems = items.filter(
@@ -305,14 +413,50 @@ export default function ResearchPage() {
         description="Manage research content and sources"
       />
 
-      <Tabs defaultValue="content" className="w-full">
+      <Tabs
+        className="w-full"
+        onValueChange={(value) => setActiveTab(value as "content" | "sources")}
+        value={activeTab}
+      >
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="content">Content</TabsTrigger>
           <TabsTrigger value="sources">Sources</TabsTrigger>
         </TabsList>
 
         <TabsContent value="content" className="mt-6 space-y-8">
-          {researchStream.isStreaming && (
+          {runPreconditionError ? (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
+              <div className="flex items-start gap-3">
+                <CircleAlert className="mt-0.5 size-5 shrink-0 text-destructive" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">Research cannot start</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{runPreconditionError}</p>
+                  <Button className="mt-3" onClick={() => setActiveTab("sources")} size="sm" variant="outline">
+                    Review sources
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : researchStream.error ? (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4" role="alert">
+              <div className="flex items-start gap-3">
+                <CircleAlert className="mt-0.5 size-5 shrink-0 text-destructive" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">Research run failed</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {researchRunErrorMessage(researchStream.error)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Previously stored research items were not changed by this failed run.
+                    {runJobId ? ` Run ${runJobId}.` : ""}
+                  </p>
+                  <Button className="mt-3" onClick={handleRunResearch} size="sm" variant="outline">
+                    <RefreshCw className="size-4" /> Try research again
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : researchStream.isStreaming ? (
             <div className="space-y-4">
               <ReasoningTicker text={researchStream.reasoning} active />
               <StreamSection title="Researching sources" state="streaming">
@@ -324,9 +468,36 @@ export default function ResearchPage() {
                     </li>
                   ))}
                 </ul>
+                {streamedItems.length > 0 ? (
+                  <div className="mt-3 border-t pt-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {streamedItems.length} finding{streamedItems.length === 1 ? "" : "s"} discovered
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm">
+                      {streamedItems.map((item, index) => (
+                        <li key={`${item.title}-${index}`}>{item.title}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </StreamSection>
             </div>
-          )}
+          ) : researchStream.final ? (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4" role="status">
+              <div className="flex items-start gap-3">
+                <CheckCircle className="mt-0.5 size-5 shrink-0 text-primary" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">Research complete</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {researchStream.final.itemsCreated} new · {researchStream.final.itemsDeduped} already stored · {researchStream.final.sourcesSearched} source{researchStream.final.sourcesSearched === 1 ? "" : "s"} searched · {researchStream.final.creditsUsed} credits
+                  </p>
+                  {runJobId ? (
+                    <p className="mt-1 break-all font-mono text-xs text-muted-foreground">Run {runJobId}</p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
           <StatRow isLoading={itemsLoading} stats={itemStats} />
 
           {/* Research items */}
@@ -388,6 +559,11 @@ export default function ResearchPage() {
                     <ListRow
                       actions={[
                         {
+                          icon: Pencil,
+                          label: `Edit ${item.title}`,
+                          onSelect: () => openEditItem(item),
+                        },
+                        {
                           icon: Video,
                           label: `Flag ${item.title} for video`,
                           onSelect: () => void handleUpdateItemStatus(item, "flagged_for_video"),
@@ -445,7 +621,13 @@ export default function ResearchPage() {
             <p className="text-sm text-muted-foreground">
               Manage websites and search terms to monitor for research content
             </p>
-            <Dialog open={addSourceOpen} onOpenChange={setAddSourceOpen}>
+            <Dialog
+              open={addSourceOpen}
+              onOpenChange={(open) => {
+                setAddSourceOpen(open);
+                if (!open) setAddSourceError(null);
+              }}
+            >
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="h-4 w-4" />
@@ -467,16 +649,20 @@ export default function ResearchPage() {
                       id="source-name"
                       placeholder="e.g., LangChain Blog"
                       value={newSourceName}
-                      onChange={(e) => setNewSourceName(e.target.value)}
+                      onChange={(e) => {
+                        setNewSourceName(e.target.value);
+                        setAddSourceError(null);
+                      }}
                     />
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="source-type">Type</Label>
                     <Select
                       value={newSourceType}
-                      onValueChange={(value: ResearchSourceType) =>
-                        setNewSourceType(value)
-                      }
+                      onValueChange={(value: ResearchSourceType) => {
+                        setNewSourceType(value);
+                        setAddSourceError(null);
+                      }}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -492,6 +678,8 @@ export default function ResearchPage() {
                       {newSourceType === "website" ? "URL" : "Search query"}
                     </Label>
                     <Input
+                      aria-describedby={addSourceError ? "source-url-error" : undefined}
+                      aria-invalid={Boolean(addSourceError)}
                       id="source-url"
                       placeholder={
                         newSourceType === "website"
@@ -499,8 +687,16 @@ export default function ResearchPage() {
                           : "LangGraph tutorials 2025"
                       }
                       value={newSourceUrl}
-                      onChange={(e) => setNewSourceUrl(e.target.value)}
+                      onChange={(e) => {
+                        setNewSourceUrl(e.target.value);
+                        setAddSourceError(null);
+                      }}
                     />
+                    {addSourceError ? (
+                      <p className="text-sm text-destructive" id="source-url-error" role="alert">
+                        {addSourceError}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <DialogFooter>
@@ -639,6 +835,100 @@ export default function ResearchPage() {
         </TabsContent>
       </Tabs>
 
+      {/* Edit item */}
+      <Dialog
+        open={editItemTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditItemTarget(null);
+            setEditItemError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit research item</DialogTitle>
+            <DialogDescription>
+              Curate the finding without changing its source identity or provenance.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="research-item-title">Title</Label>
+              <Input
+                id="research-item-title"
+                onChange={(event) => {
+                  setEditItemTitle(event.target.value);
+                  setEditItemError(null);
+                }}
+                value={editItemTitle}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="research-item-content">Finding</Label>
+              <Textarea
+                id="research-item-content"
+                onChange={(event) => {
+                  setEditItemContent(event.target.value);
+                  setEditItemError(null);
+                }}
+                rows={5}
+                value={editItemContent}
+              />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="research-item-priority">Priority</Label>
+                <Select
+                  onValueChange={(value: "low" | "medium" | "high") => setEditItemPriority(value)}
+                  value={editItemPriority}
+                >
+                  <SelectTrigger id="research-item-priority">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="research-item-tags">Tags</Label>
+                <Input
+                  id="research-item-tags"
+                  onChange={(event) => setEditItemTags(event.target.value)}
+                  placeholder="workflow, reliability"
+                  value={editItemTags}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="research-item-note">Human note</Label>
+              <Textarea
+                id="research-item-note"
+                onChange={(event) => setEditItemNote(event.target.value)}
+                placeholder="Why this finding matters"
+                rows={3}
+                value={editItemNote}
+              />
+            </div>
+            {editItemError ? (
+              <p className="text-sm text-destructive" role="alert">{editItemError}</p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button disabled={editItemLoading} onClick={() => setEditItemTarget(null)} variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={editItemLoading || !editItemTitle.trim() || !editItemContent.trim()} onClick={handleEditItem}>
+              {editItemLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+              Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete source confirmation */}
       <Dialog
         open={deleteSourceTarget !== null}
@@ -649,7 +939,8 @@ export default function ResearchPage() {
             <DialogTitle>Remove source</DialogTitle>
             <DialogDescription>
               This permanently removes &ldquo;{deleteSourceTarget?.name}&rdquo; from your research
-              sources. This cannot be undone.
+              sources so future runs no longer use it. Existing research items stay in Content.
+              This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

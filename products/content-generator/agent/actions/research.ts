@@ -6,7 +6,7 @@
  *   pick sources (by ids | all enabled | none → combined active-topics query)
  *   → Tavily search per source
  *   → per-source LLM extraction (temp 0.3, structured output)
- *   → persist each item (URL dedup + COVERS_TOPIC linking).
+ *   → persist the current list projection and reconcile knowledge.v1.
  *
  * Tavily is called via an inline fetch to https://api.tavily.com/search with
  * the exact §1 parameters (topic:"news", search_depth:"advanced", time_range,
@@ -37,6 +37,7 @@ import {
 } from './research-agent';
 import { streamingStructuredGenerate, type StreamEmit } from '@content-automation/platform/agents/streaming';
 import { observeWorkflowStep, traceable } from '@content-automation/observability';
+import { ingestContentResearchKnowledge } from '../../knowledge-service';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -97,6 +98,7 @@ export interface ResearchRepos {
     itemId: string,
     tags: string[]
   ) => Promise<void>;
+  ingestKnowledge?: typeof ingestContentResearchKnowledge;
 }
 
 export interface ResearchDeps {
@@ -111,6 +113,101 @@ export interface ResearchDeps {
 
 const CONTENT_TRUNCATE_CHARS = 10000;
 
+async function firecrawlSearch(
+  params: TavilySearchParams
+): Promise<TavilySearchResponse> {
+  const base = process.env.FIRECRAWL_BASE_URL?.replace(/\/+$/, '');
+  if (!base) {
+    throw new Error(
+      'FIRECRAWL_BASE_URL is not configured — do_research cannot run without it'
+    );
+  }
+  return traceable(
+    async () => {
+      const response = await fetch(`${base}/v1/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY || 'self-hosted'}`,
+        },
+        body: JSON.stringify({
+          query: params.query,
+          limit: params.maxResults ?? 5,
+          scrapeOptions: { formats: ['markdown'], onlyMainContent: true },
+        }),
+      });
+      if (!response.ok) {
+        console.warn(
+          `[do_research] Firecrawl search failed for "${params.query}": ${response.status}`
+        );
+        return { content: '', results: [] };
+      }
+      const data = (await response.json()) as {
+        data?: Array<{ title?: string; url?: string; description?: string; markdown?: string }>;
+      };
+      const results: TavilyResult[] = (data.data ?? []).map((r) => ({
+        title: r.title,
+        url: r.url,
+        content: r.description,
+        raw_content: r.markdown,
+      }));
+      const formattedParts = results.map((r) => {
+        let content = r.raw_content || r.content || '';
+        if (content.length > CONTENT_TRUNCATE_CHARS) {
+          content = content.slice(0, CONTENT_TRUNCATE_CHARS) + '... [truncated]';
+        }
+        return `Title: ${r.title ?? 'Untitled'}\nURL: ${r.url ?? ''}\nContent: ${content}`;
+      });
+      return { content: formattedParts.join('\n\n---\n\n'), results };
+    },
+    {
+      name: 'content.research.search',
+      kind: 'tool',
+      processInputs: () => params,
+      processOutputs: (output) => ({ resultCount: output.results.length, results: output.results }),
+    }
+  )();
+}
+
+async function searxngSearch(
+  params: TavilySearchParams
+): Promise<TavilySearchResponse> {
+  const base = process.env.SEARXNG_BASE_URL?.replace(/\/+$/, '');
+  if (!base) {
+    throw new Error(
+      'SEARXNG_BASE_URL is not configured — do_research cannot run without it'
+    );
+  }
+  return traceable(
+    async () => {
+      const url = `${base}/search?q=${encodeURIComponent(params.query)}&format=json`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.warn(
+          `[do_research] SearXNG search failed for "${params.query}": ${response.status}`
+        );
+        return { content: '', results: [] };
+      }
+      const data = (await response.json()) as { results?: TavilyResult[] };
+      const results = (data.results ?? []).slice(0, params.maxResults ?? 5);
+      const formattedParts = results.map((r) => {
+        let content = r.content || '';
+        if (content.length > CONTENT_TRUNCATE_CHARS) {
+          content = content.slice(0, CONTENT_TRUNCATE_CHARS) + '... [truncated]';
+        }
+        return `Title: ${r.title ?? 'Untitled'}\nURL: ${r.url ?? ''}\nContent: ${content}`;
+      });
+      return { content: formattedParts.join('\n\n---\n\n'), results };
+    },
+    {
+      name: 'content.research.search',
+      kind: 'tool',
+      processInputs: () => params,
+      processOutputs: (output) => ({ resultCount: output.results.length, results: output.results }),
+    }
+  )();
+}
+
 /**
  * Inline Tavily search — §1 parameters. Throws a clear error when
  * TAVILY_API_KEY is missing (real path only; unit tests inject a stub). HTTP
@@ -119,6 +216,15 @@ const CONTENT_TRUNCATE_CHARS = 10000;
 async function defaultSearch(
   params: TavilySearchParams
 ): Promise<TavilySearchResponse> {
+  // SEARCH_PROVIDER selects the backend: firecrawl (self-hosted SearXNG +
+  // page scraping — full content like Tavily), searxng (snippets only), or
+  // Tavily by default.
+  if (process.env.SEARCH_PROVIDER === 'firecrawl') {
+    return firecrawlSearch(params);
+  }
+  if (process.env.SEARCH_PROVIDER === 'searxng') {
+    return searxngSearch(params);
+  }
   const apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) {
     throw new Error(
@@ -227,6 +333,71 @@ export function streamingGenerateItems(emit: StreamEmit): ResearchDeps['generate
   };
 }
 
+function stableLocalResearchKey(value: string): string {
+  let hash = 2_166_136_261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/**
+ * Deterministic non-production search provider used by the real browser QA
+ * path. It replaces only the external web request; source selection,
+ * extraction, persistence, knowledge reconciliation, jobs, billing, and SSE
+ * reporting still execute through the production orchestration path.
+ */
+export async function localResearchSearch(
+  params: TavilySearchParams
+): Promise<TavilySearchResponse> {
+  const domain = params.includeDomains?.[0];
+  const subject = domain ? `topics on ${domain}` : params.query;
+  const key = stableLocalResearchKey(`${subject}:${params.timeRange}`);
+  const url = domain
+    ? `https://${domain}/local-research/${key}`
+    : `https://research.local.test/results/${key}`;
+  const title = `Local research result for ${subject}`;
+  const content = `A deterministic non-production search result for “${subject}”. It exercises the real research workflow without contacting an external search provider.`;
+  return {
+    content: `Title: ${title}\nURL: ${url}\nContent: ${content}`,
+    results: [{ title, url, content, raw_content: content }],
+  };
+}
+
+/** Deterministic non-production extractor used by the real browser QA path. */
+export function localResearchGenerateItems(emit: StreamEmit): ResearchDeps['generateItems'] {
+  return async (input) => {
+    const progressId = `source-${input.sourceName}`;
+    emit({
+      type: 'data-progress',
+      id: progressId,
+      data: { label: `Extracting from ${input.sourceName}`, state: 'running' },
+    });
+    emit({
+      type: 'data-reasoning',
+      id: progressId,
+      data: { text: `Reviewing the configured result from ${input.sourceName} and preparing one traceable finding.` },
+    });
+    const result = extractedResearchItemsSchema.parse({
+      items: [{
+        title: `Local research: ${input.sourceName}`,
+        content: `This deterministic non-production finding was extracted from the configured source “${input.sourceName}”. The actual research orchestrator persisted it so retries, deduplication, curation, and reporting can be verified without an external provider dependency.`,
+        tags: ['local-research', 'workflow-testing', 'durable-execution'],
+        priority: 'high',
+      }],
+    });
+    emit({ type: 'data-partial', id: progressId, data: result });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    emit({
+      type: 'data-progress',
+      id: progressId,
+      data: { label: `Extracted from ${input.sourceName}`, state: 'done' },
+    });
+    return result;
+  };
+}
+
 export function makeDefaultResearchDeps(): ResearchDeps {
   return {
     search: defaultSearch,
@@ -238,6 +409,7 @@ export function makeDefaultResearchDeps(): ResearchDeps {
       getResearchSourceById,
       createResearchItemFromAgent,
       linkResearchToMatchingTopics,
+      ingestKnowledge: ingestContentResearchKnowledge,
     },
   };
 }
@@ -257,10 +429,15 @@ export function buildTopicsQuery(topics: Topic[]): string {
 
 /** Strip scheme + trailing slashes to get a bare domain for include_domains. */
 function extractDomain(url: string): string {
-  return url
-    .replace('https://', '')
-    .replace('http://', '')
-    .replace(/\/+$/, '');
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url
+      .replace('https://', '')
+      .replace('http://', '')
+      .split('/')[0]
+      .replace(/\/+$/, '');
+  }
 }
 
 interface CollectedItem {
@@ -403,8 +580,7 @@ async function runDoResearchInternal(
     }
   }
 
-  // 4. Persist: URL dedup lives in createResearchItemFromAgent; only newly
-  //    created items get COVERS_TOPIC links.
+  // 4. Persist the temporary list projection and always reconcile knowledge.v1.
   let itemsCreated = 0;
   let itemsDeduped = 0;
 
@@ -422,6 +598,10 @@ async function runDoResearchInternal(
         tags: item.tags,
         priority: item.priority,
       });
+
+      // knowledge.v1 is content-hash idempotent, so it is safe to reconcile on
+      // both a new legacy projection row and a URL-deduped replay.
+      await d.repos.ingestKnowledge?.({ ...item, findingId: `${id}:${item.title}` });
 
       if (deduped) {
         itemsDeduped++;

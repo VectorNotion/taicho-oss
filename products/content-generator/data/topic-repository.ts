@@ -34,7 +34,7 @@ export async function getTopics(
       OPTIONAL MATCH (r:ResearchItem)-[:COVERS_TOPIC]->(t)
       WITH t, count(r) as mentionCount
       RETURN t, mentionCount
-      ORDER BY t.createdAt DESC
+      ORDER BY toString(t.createdAt) DESC
       `
     );
 
@@ -148,36 +148,35 @@ export async function createTopic(
 ): Promise<Topic | null> {
   const session = await getSession();
   const normalizedName = normalizeTopicName(data.name);
+  const now = new Date().toISOString();
+  const candidateId = `topic-${crypto.randomUUID()}`;
 
   try {
-    // Check if topic already exists
-    const exists = await topicExistsByName(normalizedName);
-    if (exists) {
-      return null; // Duplicate
-    }
-
     const result = await session.run(
       `
-      CREATE (t:Topic {
-        id: 'topic-' + randomUUID(),
-        name: $name,
-        displayName: $displayName,
-        description: $description,
-        status: 'active',
-        source: $source,
-        createdAt: localdatetime(),
-        updatedAt: localdatetime(),
-        dismissedAt: null
-      })
-      RETURN t
+      MERGE (t:Topic {name: $name})
+      ON CREATE SET
+        t.id = $candidateId,
+        t.displayName = $displayName,
+        t.description = $description,
+        t.status = 'active',
+        t.source = $source,
+        t.createdAt = $now,
+        t.updatedAt = $now,
+        t.dismissedAt = null
+      RETURN t, t.id = $candidateId AS created
       `,
       {
+        candidateId,
         name: normalizedName,
         displayName: data.displayName,
         description: data.description,
         source: data.source || 'manual',
+        now,
       }
     );
+
+    if (!result.records[0].get('created')) return null;
 
     const topic = result.records[0].get('t').properties;
 
@@ -208,8 +207,8 @@ export async function updateTopic(
   const session = await getSession();
 
   try {
-    const setClauses: string[] = ['t.updatedAt = localdatetime()'];
-    const params: Record<string, unknown> = { id };
+    const setClauses: string[] = ['t.updatedAt = $now'];
+    const params: Record<string, unknown> = { id, now: new Date().toISOString() };
 
     if (data.displayName !== undefined) {
       setClauses.push('t.displayName = $displayName');
@@ -261,20 +260,21 @@ export async function updateTopic(
  */
 export async function dismissTopic(id: string): Promise<Topic | null> {
   const session = await getSession();
+  const now = new Date().toISOString();
 
   try {
     const result = await session.run(
       `
       MATCH (t:Topic {id: $id})
       SET t.status = 'dismissed',
-          t.dismissedAt = localdatetime(),
-          t.updatedAt = localdatetime()
+          t.dismissedAt = $now,
+          t.updatedAt = $now
       WITH t
       OPTIONAL MATCH (r:ResearchItem)-[:COVERS_TOPIC]->(t)
       WITH t, count(r) as mentionCount
       RETURN t, mentionCount
       `,
-      { id }
+      { id, now }
     );
 
     if (result.records.length === 0) {
@@ -313,13 +313,13 @@ export async function restoreTopic(id: string): Promise<Topic | null> {
       MATCH (t:Topic {id: $id})
       SET t.status = 'active',
           t.dismissedAt = null,
-          t.updatedAt = localdatetime()
+          t.updatedAt = $now
       WITH t
       OPTIONAL MATCH (r:ResearchItem)-[:COVERS_TOPIC]->(t)
       WITH t, count(r) as mentionCount
       RETURN t, mentionCount
       `,
-      { id }
+      { id, now: new Date().toISOString() }
     );
 
     if (result.records.length === 0) {

@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { runWithExecutionContext } from '@content-automation/observability';
 import {
   drainProductEvents,
@@ -14,9 +15,11 @@ import {
 } from '@content-automation/platform/events/emit';
 import type { ProductEventInsert } from '@content-automation/platform/events/repository';
 
-import { runGenerateContentIdeas } from '../agent/actions/ideas';
+import { localIdeasGenerate, runGenerateContentIdeas } from '../agent/actions/ideas';
 import { runRefineContentIdea } from '../agent/actions/refine';
-import { runGenerateContentDraft, runGenerateContentVariation } from '../agent/actions/draft';
+import { localDraftGenerate, runGenerateContentDraft, runGenerateContentVariation } from '../agent/actions/draft';
+import { contentKnowledgeManifest } from '../knowledge-manifest';
+import type { ContextBundle } from '@content-automation/knowledge';
 
 const SETTINGS = {
   id: 'global',
@@ -40,6 +43,23 @@ function topicsResponse(topics: Array<Record<string, unknown>>) {
 // ===========================================================================
 // generate_content_ideas
 // ===========================================================================
+
+test('local idea generation is deterministic and preserves available claim lineage', async () => {
+  const schema = z.object({
+    ideas: z.array(z.object({
+      title: z.string(), description: z.string(), rationale: z.string(),
+      priority: z.enum(['low', 'medium', 'high']), source_topics: z.array(z.string()),
+      source_claim_ids: z.array(z.string()).optional(),
+    })),
+  });
+  const generated = await localIdeasGenerate({
+    agentId: 'content-ideas-agent', agentName: 'Content Ideas Agent', instructions: '',
+    prompt: 'Evidence: [claim:claim-1] repeated [claim:claim-1] and [claim:claim-2]',
+    schema, temperature: 0,
+  });
+  assert.equal(generated.ideas.length, 5);
+  assert.deepEqual(generated.ideas[0]?.source_claim_ids, ['claim-1', 'claim-2']);
+});
 
 test('ideas: maps source_topics names -> ids and slices to count', async () => {
   const created: Array<Record<string, unknown>> = [];
@@ -133,6 +153,27 @@ test('ideas: no topic matches -> sourceTopicIds undefined', async () => {
   assert.equal(created[0].sourceTopicIds, undefined);
 });
 
+test('ideas: reject claim IDs outside the authorized knowledge bundle', async () => {
+  const created: Array<Record<string, unknown>> = [];
+  const artifacts: Array<Record<string, unknown>> = [];
+  const context = {
+    claims: [{ id: 'claim-1', statement: 'Verified fact', evidenceIds: ['evidence-1'] }],
+  } as ContextBundle;
+  await assert.rejects(runGenerateContentIdeas({}, { deps: {
+    getSettings,
+    getRecentResearchItems: async () => [],
+    getTopics: topicsResponse([]),
+    queryContentGaps: async () => [],
+    queryHighPerformingContent: async () => [],
+    getKnowledgeContext: async () => context,
+    createContentIdea: async (data) => { created.push(data); return { id: 'idea-grounded', ...data } as never; },
+    recordKnowledgeArtifact: async (data) => { artifacts.push(data); return null; },
+    generate: (async () => ({ ideas: [{ title: 'Grounded idea', description: 'd', rationale: 'r', priority: 'high', source_topics: [], source_claim_ids: ['claim-1', 'invented'] }] })) as never,
+  } }), /out-of-context claim: invented/);
+  assert.equal(created.length, 0);
+  assert.equal(artifacts.length, 0);
+});
+
 // ===========================================================================
 // refine_content_idea
 // ===========================================================================
@@ -204,8 +245,8 @@ test('refine: persists status/outline/keyPoints/suggestedCitations, drops hook/c
           return { ...baseIdea, ...data } as never;
         },
         generate: (async () => ({
-          outline: ['Section 1', 'Section 2'],
-          key_points: ['Key point A'],
+          outline: ['Section 1', 'Section 2', 'Section 3', 'Section 4', 'Section 5'],
+          key_points: ['Key point A', 'Key point B', 'Key point C'],
           suggested_citations: ['Cite this'],
           inner_link_suggestions: ['Related post'],
           hook: 'A grabbing hook',
@@ -215,14 +256,14 @@ test('refine: persists status/outline/keyPoints/suggestedCitations, drops hook/c
     },
   );
 
-  assert.deepEqual(result, { refined: true });
+  assert.deepEqual(result, { refined: true, mode: 'live' });
   assert.ok(updateArgs);
   const args = updateArgs as { id: string; data: Record<string, unknown> };
   assert.equal(args.id, 'idea-1');
   assert.deepEqual(args.data, {
     status: 'refined',
-    outline: ['Section 1', 'Section 2'],
-    keyPoints: ['Key point A'],
+    outline: ['Section 1', 'Section 2', 'Section 3', 'Section 4', 'Section 5'],
+    keyPoints: ['Key point A', 'Key point B', 'Key point C'],
     suggestedCitations: ['Cite this'],
   });
   // hook / call_to_action / inner_link_suggestions must NOT be persisted.
@@ -231,6 +272,136 @@ test('refine: persists status/outline/keyPoints/suggestedCitations, drops hook/c
   assert.equal('inner_link_suggestions' in args.data, false);
   assert.equal('keyPoints' in args.data, true);
   assert.equal('suggestedCitations' in args.data, true);
+});
+
+test('refine: refuses to persist an empty Content Base as refined', async () => {
+  let updateCalled = false;
+
+  await assert.rejects(
+    runRefineContentIdea(
+      { ideaId: 'idea-1' },
+      {
+        deps: {
+          getSettings,
+          getContentIdeaById: async () => baseIdea as never,
+          queryRelatedPublishedContent: async () => [],
+          getResearchItemsByTopicIds: async () => [],
+          updateContentIdea: async () => {
+            updateCalled = true;
+            return null;
+          },
+          generate: (async () => ({
+            outline: [],
+            key_points: [],
+            suggested_citations: [],
+            inner_link_suggestions: [],
+            hook: 'A hook',
+            call_to_action: 'A call to action',
+          })) as never,
+        },
+      },
+    ),
+    /Too small/,
+  );
+
+  assert.equal(updateCalled, false);
+});
+
+test('refine: cleans model markdown and footnote markers before persistence', async () => {
+  let updateArgs: Record<string, unknown> | null = null;
+
+  await runRefineContentIdea(
+    { ideaId: 'idea-1' },
+    {
+      deps: {
+        getSettings,
+        getContentIdeaById: async () => baseIdea as never,
+        queryRelatedPublishedContent: async () => [],
+        getResearchItemsByTopicIds: async () => [],
+        updateContentIdea: async (_id, data) => {
+          updateArgs = data as Record<string, unknown>;
+          return { ...baseIdea, ...data } as never;
+        },
+        generate: (async () => ({
+          outline: [
+            '# Opening frame',
+            '**Hook:** Make the tension concrete.',
+            '> A concise supporting example. [^1][^2]',
+            '- Explain the trade-offs.',
+            '5. End with a decision framework.',
+          ],
+          key_points: [
+            '- **Trust needs visibility.**',
+            '2. Approvals should be explicit.',
+            '> Recovery paths make autonomy safer. [^3]',
+          ],
+          suggested_citations: ['- Source title [^4]', 'No related research available.'],
+          inner_link_suggestions: ['* Related post'],
+          hook: '**A clean hook.**',
+          call_to_action: '> Choose the next action.',
+        })) as never,
+      },
+    },
+  );
+
+  assert.ok(updateArgs);
+  assert.deepEqual(updateArgs.outline, [
+    'Opening frame',
+    'Hook: Make the tension concrete.',
+    'A concise supporting example.',
+    'Explain the trade-offs.',
+    'End with a decision framework.',
+  ]);
+  assert.deepEqual(updateArgs.keyPoints, [
+    'Trust needs visibility.',
+    'Approvals should be explicit.',
+    'Recovery paths make autonomy safer.',
+  ]);
+  assert.deepEqual(updateArgs.suggestedCitations, ['Source title']);
+});
+
+test('refine: local mode builds a deterministic Content Base without calling a model', async () => {
+  let updateArgs: { id: string; data: Record<string, unknown> } | null = null;
+  let modelCalled = false;
+
+  const result = await runRefineContentIdea(
+    { ideaId: 'idea-1' },
+    {
+      mode: 'local',
+      deps: {
+        getSettings,
+        getContentIdeaById: async () => ({ ...baseIdea, rationale: baseIdea.description }) as never,
+        queryRelatedPublishedContent: async () => [
+          { title: 'A related post', type: 'blog_post', publishedUrl: 'https://example.test/post' },
+        ] as never,
+        getResearchItemsByTopicIds: async () => [
+          { title: 'Fresh research', content: 'Evidence', sourceUrl: 'https://example.test/research' },
+        ] as never,
+        updateContentIdea: async (id, data) => {
+          updateArgs = { id, data: data as Record<string, unknown> };
+          return { ...baseIdea, ...data } as never;
+        },
+        generate: (async () => {
+          modelCalled = true;
+          throw new Error('The local refinement fallback must not call a model.');
+        }) as never,
+      },
+    },
+  );
+
+  assert.deepEqual(result, { refined: true, mode: 'local' });
+  assert.equal(modelCalled, false);
+  assert.ok(updateArgs);
+  const args = updateArgs as { id: string; data: Record<string, unknown> };
+  assert.equal(args.id, 'idea-1');
+  assert.equal(args.data.status, 'refined');
+  assert.ok((args.data.outline as string[]).some((line) => line.includes(baseIdea.title)));
+  assert.equal(
+    (args.data.outline as string[]).filter((line) => line.includes(baseIdea.description)).length,
+    1,
+  );
+  assert.ok((args.data.keyPoints as string[]).includes(baseIdea.description));
+  assert.deepEqual(args.data.suggestedCitations, ['Prior research', 'Fresh research']);
 });
 
 // ===========================================================================
@@ -385,6 +556,56 @@ test('draft: assembles content from the generated parts per content type', async
   }
 });
 
+test('draft: forwards selected asset bytes as vision input to the writing model', async () => {
+  const vision = [{ bytes: Buffer.from('<svg/>'), mimeType: 'image/svg+xml', description: 'A Base-owned diagram' }];
+  let received: unknown;
+  await runGenerateContentDraft(
+    { ideaId: 'idea-1', contentType: 'x_post' },
+    {
+      vision,
+      deps: {
+        getSettings,
+        getContentIdeaById: async () => refinedIdea as never,
+        queryRelatedPublishedContent: async () => [],
+        getKnowledgeContext: async () => ({ claims: [] }) as never,
+        createContentDraft: async (data) => ({ id: 'draft-from-media', ...data }) as never,
+        recordKnowledgeArtifact: async () => null,
+        generate: (async (args: { vision?: unknown }) => { received = args.vision; return { post: 'Written from the actual diagram.' }; }) as never,
+      },
+    },
+  );
+  assert.equal(received, vision);
+});
+
+test('draft: rejects idea claims no longer authorized by the draft projection', async () => {
+  let draftInput: Record<string, unknown> | null = null;
+  let artifactInput: Record<string, unknown> | null = null;
+  const context = { claims: [{ id: 'claim-1', statement: 'Verified fact', evidenceIds: ['evidence-1'] }] } as ContextBundle;
+  await assert.rejects(runGenerateContentDraft(
+    { ideaId: 'idea-1', contentType: 'x_post' },
+    { deps: {
+      getSettings,
+      getContentIdeaById: async () => ({ ...refinedIdea, sourceClaimIds: ['claim-1', 'stale-claim'] }) as never,
+      queryRelatedPublishedContent: async () => [],
+      getKnowledgeContext: async () => context,
+      createContentDraft: async (data) => { draftInput = data as Record<string, unknown>; return { id: 'draft-grounded', ...data } as never; },
+      recordKnowledgeArtifact: async (data) => { artifactInput = data as Record<string, unknown>; return null; },
+      generate: (async () => ({ post: 'Grounded post.' })) as never,
+    } },
+  ), /outside its authorized context: stale-claim/);
+  assert.equal(draftInput, null);
+  assert.equal(artifactInput, null);
+});
+
+test('draft knowledge projection accepts every grounded predicate available to idea generation', () => {
+  const ideas = contentKnowledgeManifest.readProjections.find(({ key }) => key === 'content.idea_context');
+  const drafts = contentKnowledgeManifest.readProjections.find(({ key }) => key === 'content.draft_context');
+  assert.ok(ideas && drafts);
+  for (const predicate of ideas.predicates) {
+    assert.ok(drafts.predicates.includes(predicate), `draft context excludes idea predicate ${predicate}`);
+  }
+});
+
 test('draft variation reuses the source content type pipeline without creating a normal draft', async () => {
   let generatedPrompt = '';
   let createCalls = 0;
@@ -423,6 +644,24 @@ test('draft variation reuses the source content type pipeline without creating a
   assert.equal(candidate.content, 'A genuinely different post');
   assert.match(generatedPrompt, /variation 2/i);
   assert.match(generatedPrompt, /Original post/);
+});
+
+test('local draft generation produces schema-valid long and short formats', async () => {
+  const blog = await localDraftGenerate({
+    agentId: 'blog-post-agent', agentName: 'Blog Post Agent', instructions: '', prompt: '',
+    schema: z.object({
+      title: z.string(), meta_description: z.string(), introduction: z.string(),
+      sections: z.array(z.string()), code_examples: z.array(z.string()), conclusion: z.string(),
+    }),
+    temperature: 0,
+  });
+  const short = await localDraftGenerate({
+    agentId: 'x-post-agent', agentName: 'X Post Agent', instructions: '', prompt: '',
+    schema: z.object({ post: z.string().max(280) }), temperature: 0,
+  });
+  assert.match(blog.title, /Durable workflow recovery/);
+  assert.ok(blog.sections.length >= 3);
+  assert.ok(short.post.length <= 280);
 });
 
 test('draft: emits draft.ready with draftId, ideaId, contentType after creating the draft', async () => {

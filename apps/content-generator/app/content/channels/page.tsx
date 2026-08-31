@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { authClient } from "@content-automation/auth/client";
 import { Badge } from "@/components/ui/badge";
 import { apiGet, apiMutate } from "@content-automation/platform/network/api-client";
+import { isValidPublishingHttpUrl } from "@content-automation/content-generator/publishing/channel-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RevealableSecretInput } from "@/components/ui/revealable-secret-input";
@@ -71,9 +73,11 @@ function extraSummary(extra: Record<string, unknown>): string {
 }
 
 export default function ChannelsPage() {
+  const { data: activeMemberRole, isPending: roleLoading } = authClient.useActiveMemberRole();
   const [channels, setChannels] = useState<ChannelSummary[]>([]);
   const [destinations, setDestinations] = useState<DestinationInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [healthFilter, setHealthFilter] = useState<"all" | "healthy" | "attention">("all");
   const [destinationFilter, setDestinationFilter] = useState("all");
@@ -97,13 +101,15 @@ export default function ChannelsPage() {
   const [disconnectLoading, setDisconnectLoading] = useState(false);
 
   const fetchChannels = async () => {
+    setLoadError(null);
     try {
       const data = await apiGet<{ channels?: ChannelSummary[]; destinations?: DestinationInfo[] }>("/publishing");
       setChannels(data.channels ?? []);
       setDestinations(data.destinations ?? []);
     } catch (error) {
-      console.error("Error fetching channels:", error);
-      toast.error("Could not load channels. Refresh to try again.");
+      const message = error instanceof Error ? error.message : "Could not load channels. Refresh to try again.";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -121,6 +127,12 @@ export default function ChannelsPage() {
     if (connected) toast.success(`${labelFor(connected)} connected`);
     if (error === "state") {
       toast.error("The connection could not be verified. Start the connection again.");
+    } else if (error === "denied") {
+      toast.error("The connection was not approved. No channel was added.");
+    } else if (error === "workspace") {
+      toast.error("Return to the workspace where you started this connection and try again.");
+    } else if (error === "permission") {
+      toast.error("Only workspace owners and administrators can connect publishing channels.");
     } else if (error) {
       toast.error("Could not connect the channel. Try again.");
     }
@@ -145,8 +157,7 @@ export default function ChannelsPage() {
       setCmsApiKey("");
       fetchChannels();
     } catch (error) {
-      console.error("Error adding CMS channel:", error);
-      toast.error("Could not add the CMS channel. Try again.");
+      toast.error(error instanceof Error ? error.message : "Could not add the CMS channel. Try again.");
     } finally {
       setCmsLoading(false);
     }
@@ -169,8 +180,7 @@ export default function ChannelsPage() {
       setWebhookSecret("");
       fetchChannels();
     } catch (error) {
-      console.error("Error adding webhook channel:", error);
-      toast.error("Could not add the webhook channel. Try again.");
+      toast.error(error instanceof Error ? error.message : "Could not add the webhook channel. Try again.");
     } finally {
       setWebhookLoading(false);
     }
@@ -185,14 +195,19 @@ export default function ChannelsPage() {
       setDisconnectTarget(null);
       fetchChannels();
     } catch (error) {
-      console.error("Error disconnecting channel:", error);
-      toast.error("Could not disconnect the channel. Try again.");
+      toast.error(error instanceof Error ? error.message : "Could not disconnect the channel. Try again.");
     } finally {
       setDisconnectLoading(false);
     }
   };
 
   const oauthDestinations = destinations.filter((destination) => destination.oauthCapable);
+  const canManageChannels = (activeMemberRole?.role ?? "")
+    .split(",")
+    .map((role) => role.trim())
+    .some((role) => role === "owner" || role === "admin");
+  const cmsUrlInvalid = cmsBaseUrl.trim().length > 0 && !isValidPublishingHttpUrl(cmsBaseUrl);
+  const webhookUrlInvalid = webhookUrl.trim().length > 0 && !isValidPublishingHttpUrl(webhookUrl);
   const hasCms = destinations.some((destination) => destination.destination === "cms");
   const hasWebhook = destinations.some((destination) => destination.destination === "webhook");
   const connectedDestinations = useMemo(
@@ -241,13 +256,13 @@ export default function ChannelsPage() {
 
       <div className="space-y-8">
         {/* Available destinations to connect */}
-        {loading ? (
+        {loading || roleLoading ? (
           <div className="flex flex-wrap items-center gap-2">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-9 w-36" />
             ))}
           </div>
-        ) : (
+        ) : canManageChannels ? (
           <div className="flex flex-wrap items-center gap-2">
             {oauthDestinations.map((destination) => (
               <Button key={destination.destination} variant="outline" asChild>
@@ -286,11 +301,16 @@ export default function ChannelsPage() {
                     <div className="grid gap-2">
                       <Label htmlFor="cms-base-url">Base URL</Label>
                       <Input
+                        aria-invalid={cmsUrlInvalid}
                         id="cms-base-url"
                         placeholder="https://cms.example.com"
+                        type="url"
                         value={cmsBaseUrl}
                         onChange={(e) => setCmsBaseUrl(e.target.value)}
                       />
+                      {cmsUrlInvalid ? (
+                        <p className="text-xs text-destructive" role="alert">Enter a valid HTTP or HTTPS URL.</p>
+                      ) : null}
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="cms-api-key">API key</Label>
@@ -311,7 +331,7 @@ export default function ChannelsPage() {
                     </Button>
                     <Button
                       onClick={handleAddCms}
-                      disabled={cmsLoading || !cmsName || !cmsBaseUrl || !cmsApiKey}
+                      disabled={cmsLoading || !cmsName || !cmsBaseUrl || !cmsApiKey || cmsUrlInvalid}
                     >
                       {cmsLoading && <Loader2 className="h-4 w-4 animate-spin" />}
                       Add CMS
@@ -349,11 +369,16 @@ export default function ChannelsPage() {
                     <div className="grid gap-2">
                       <Label htmlFor="webhook-url">URL</Label>
                       <Input
+                        aria-invalid={webhookUrlInvalid}
                         id="webhook-url"
                         placeholder="https://example.com/hooks/content"
+                        type="url"
                         value={webhookUrl}
                         onChange={(e) => setWebhookUrl(e.target.value)}
                       />
+                      {webhookUrlInvalid ? (
+                        <p className="text-xs text-destructive" role="alert">Enter a valid HTTP or HTTPS URL.</p>
+                      ) : null}
                     </div>
                     <div className="grid gap-2">
                       <Label htmlFor="webhook-secret">Signing secret</Label>
@@ -374,7 +399,7 @@ export default function ChannelsPage() {
                     </Button>
                     <Button
                       onClick={handleAddWebhook}
-                      disabled={webhookLoading || !webhookName || !webhookUrl || !webhookSecret}
+                      disabled={webhookLoading || !webhookName || !webhookUrl || !webhookSecret || webhookUrlInvalid}
                     >
                       {webhookLoading && <Loader2 className="h-4 w-4 animate-spin" />}
                       Add webhook
@@ -384,7 +409,24 @@ export default function ChannelsPage() {
               </Dialog>
             )}
           </div>
+        ) : (
+          <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm">
+            <Plug className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div>
+              <p className="font-medium">Workspace administrator access required</p>
+              <p className="mt-0.5 text-muted-foreground">
+                You can inspect connected destinations here. Only workspace owners and administrators can add or disconnect them.
+              </p>
+            </div>
+          </div>
         )}
+
+        {loadError ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3" role="alert">
+            <p className="text-sm">{loadError}</p>
+            <Button onClick={() => void fetchChannels()} size="sm" variant="outline">Try again</Button>
+          </div>
+        ) : null}
 
         {/* Connected channels */}
         <ListSurface
@@ -399,7 +441,9 @@ export default function ChannelsPage() {
               <p className="mt-1 max-w-md text-sm text-muted-foreground">
                 {hasChannelFilters
                   ? "Try another search, destination, or connection status."
-                  : "Connect a platform above or add a CMS or webhook."}
+                  : canManageChannels
+                    ? "Connect a platform above or add a CMS or webhook."
+                    : "Ask a workspace owner or administrator to connect a publishing destination."}
               </p>
               {hasChannelFilters ? (
                 <Button className="mt-4" onClick={clearChannelFilters} size="sm" variant="outline">
@@ -456,12 +500,12 @@ export default function ChannelsPage() {
                 const summary = extraSummary(channel.extra);
                 return (
                   <ListRow
-                    actions={[{
+                    actions={canManageChannels ? [{
                       destructive: true,
                       icon: Unlink,
                       label: `Disconnect ${channel.name}`,
                       onSelect: () => setDisconnectTarget(channel),
-                    }]}
+                    }] : []}
                     badge={
                       <Badge
                         title={channel.tokenExpiry ? `Token expires ${new Date(channel.tokenExpiry).toLocaleString()}` : undefined}

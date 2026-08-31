@@ -8,6 +8,11 @@ import {
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { authDatabase } from "./database";
+import {
+  createMcpOrganizationTeam,
+  removeMcpOrganizationTeam,
+  updateMcpOrganizationTeam,
+} from "./mcp-administration";
 import { canManageOrganization, hasAnyRole, roleDefinitions, roles, type RoleName } from "./permissions";
 import { auth, getAuthorizationContext } from "./server";
 
@@ -32,6 +37,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("update_role"), memberId: z.string().min(1), role: z.enum(assignableRoles as [RoleName, ...RoleName[]]) }),
   z.object({ action: z.literal("remove_member"), memberId: z.string().min(1) }),
   z.object({ action: z.literal("create_team"), name: z.string().trim().min(2).max(80) }),
+  z.object({ action: z.literal("update_team"), teamId: z.string().min(1), name: z.string().trim().min(2).max(80) }),
   z.object({ action: z.literal("remove_team"), teamId: z.string().min(1) }),
   z.object({ action: z.literal("add_team_member"), teamId: z.string().min(1), userId: z.string().min(1) }),
   z.object({ action: z.literal("remove_team_member"), teamId: z.string().min(1), userId: z.string().min(1) }),
@@ -214,11 +220,15 @@ async function mutate(request: Request) {
       }
       case "create_team":
         if (!organizationAdmin) return json({ error: "Only organization administrators can create teams" }, 403);
-        await auth.api.createTeam({ headers: request.headers, body: { name: action.name, organizationId: context.organizationId } });
+        await createMcpOrganizationTeam({ organizationId: context.organizationId, name: action.name });
+        break;
+      case "update_team":
+        if (!organizationAdmin) return json({ error: "Only organization administrators can rename teams" }, 403);
+        await updateMcpOrganizationTeam({ organizationId: context.organizationId, teamId: action.teamId, name: action.name });
         break;
       case "remove_team":
         if (!organizationAdmin) return json({ error: "Only organization administrators can remove teams" }, 403);
-        await auth.api.removeTeam({ headers: request.headers, body: { teamId: action.teamId, organizationId: context.organizationId } });
+        await removeMcpOrganizationTeam({ organizationId: context.organizationId, teamId: action.teamId });
         break;
       case "add_team_member":
         await assertTeamScope(context.organizationId, action.teamId, organizationAdmin, assignedTeamIds);

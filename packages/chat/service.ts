@@ -1,5 +1,9 @@
 import {
   ProspectStateSchema,
+  SupportConversationStateSchema,
+  SupportEscalationOfferSchema,
+  SupportFeedbackStateSchema,
+  TicketSummarySchema,
   chatEvent,
   encodeSseEvent,
   type ChatEventEnvelope,
@@ -349,20 +353,36 @@ export class AssistantService {
     const conversation = await this.repository.ensureConversation(actor, conversationId)
     const messages = (await this.repository.listMessages(conversation.id, 50))
       .filter((message): message is typeof message & { role: 'user' | 'assistant' } => message.role !== 'system')
-      .map(({ id, role, content, citations, createdAt }) => ({
+      .map(({ id, requestId, role, content, citations, createdAt }) => ({
         id,
+        requestId,
         role,
         content,
         citations,
         createdAt,
       }))
+    const lastFeedback = SupportFeedbackStateSchema.safeParse(
+      conversation.metadata.lastSupportFeedback,
+    )
+    const escalationOffer = SupportEscalationOfferSchema.safeParse(
+      conversation.metadata.escalationOffer,
+    )
+    const ticket = TicketSummarySchema.safeParse(conversation.metadata.ticket)
     return {
       conversationId: conversation.id,
       surface: conversation.surface,
       messages,
       ...(conversation.surface === 'sales'
         ? { prospectState: ProspectStateSchema.parse(conversation.prospectState) }
-        : {}),
+        : {
+            supportState: SupportConversationStateSchema.parse({
+              conversationStatus: conversation.status,
+              ...(lastFeedback.success ? { lastFeedback: lastFeedback.data } : {}),
+              ...(escalationOffer.success ? { escalationOffer: escalationOffer.data } : {}),
+              ...(ticket.success ? { ticket: ticket.data } : {}),
+              ...(this.config.discordUrl ? { communityUrl: this.config.discordUrl } : {}),
+            }),
+          }),
     }
   }
 
@@ -381,20 +401,43 @@ export class AssistantService {
     }
     const writer = writerFor(syntheticRequest, conversation.id)
     writer.write('conversation.ready', { surface: 'support' })
+    const responseRequestId = request.responseRequestId ?? (await this.repository.listMessages(
+      conversation.id,
+      50,
+    )).findLast(({ role }) => role === 'assistant')?.requestId
+    if (!responseRequestId) throw new Error('Support response not found.')
+    const response = await this.repository.findMessage(
+      conversation.id,
+      responseRequestId,
+      'assistant',
+    )
+    if (!response) throw new Error('Support response not found.')
     const operation = 'support.feedback'
     const existing = await this.repository.getIdempotentResult<{
       helpful: boolean
       unhelpfulRatings: number
+      responseRequestId: string
+      createdAt: string
     }>(
       request.requestId,
       operation,
     )
+    if (existing && (
+      existing.helpful !== request.helpful ||
+      existing.responseRequestId !== responseRequestId
+    )) {
+      throw new Error('Feedback request conflicts with its original response.')
+    }
+    const createdAt = new Date().toISOString()
     const result = existing ?? {
       helpful: request.helpful,
+      responseRequestId,
+      createdAt,
       unhelpfulRatings: await this.repository.recordSupportFeedback(conversation.id, {
         helpful: request.helpful,
+        responseRequestId,
         note: request.note,
-        createdAt: new Date().toISOString(),
+        createdAt,
       }),
     }
     if (!existing) {
@@ -408,13 +451,22 @@ export class AssistantService {
     writer.write('support.feedback.recorded', {
       helpful: result.helpful,
       unhelpfulRatings: result.unhelpfulRatings,
+      responseRequestId: result.responseRequestId,
     })
     if (!result.helpful && result.unhelpfulRatings >= 2) {
-      writer.write('support.escalation.offered', {
+      const offer = SupportEscalationOfferSchema.parse({
         reason: 'unhelpful_answers',
-        unhelpfulRatings: result.unhelpfulRatings,
         severity: 'normal',
+        createdAt: new Date().toISOString(),
       })
+      await this.repository.setSupportEscalationOffer(conversation.id, offer)
+      writer.write('support.escalation.offered', {
+        reason: offer.reason,
+        unhelpfulRatings: result.unhelpfulRatings,
+        severity: offer.severity,
+      })
+    } else if (result.helpful) {
+      await this.repository.setSupportEscalationOffer(conversation.id, null)
     }
     writer.write('assistant.completed', { replayed: Boolean(existing) })
     return writer.events
@@ -525,10 +577,16 @@ export class AssistantService {
         ? 'This may need urgent human attention. I can create a high-priority support ticket with this conversation now.'
         : 'I can hand this conversation to the support team. Confirm the handoff and I will create one ticket with this transcript.'
       await this.saveSupportAnswer(request, conversation, answer, [])
-      writer.write('assistant.delta', { text: answer })
-      writer.write('support.escalation.offered', {
+      const offer = SupportEscalationOfferSchema.parse({
         reason: escalationSignal.reason,
         severity: escalationSignal.severity,
+        createdAt: new Date().toISOString(),
+      })
+      await this.repository.setSupportEscalationOffer(conversation.id, offer)
+      writer.write('assistant.delta', { text: answer })
+      writer.write('support.escalation.offered', {
+        reason: offer.reason,
+        severity: offer.severity,
       })
       if (this.config.discordUrl) writer.write('support.discord.available', { url: this.config.discordUrl })
       writer.write('assistant.completed', {})
@@ -557,13 +615,19 @@ export class AssistantService {
       await this.saveSupportAnswer(request, conversation, answer, [])
       writer.write('assistant.delta', { text: answer })
       if (offered) {
-        writer.write('support.escalation.offered', {
+        const offer = SupportEscalationOfferSchema.parse({
           reason: 'insufficient_evidence',
-          failures,
           severity: escalationSignal?.severity ?? 'normal',
+          createdAt: new Date().toISOString(),
+        })
+        await this.repository.setSupportEscalationOffer(conversation.id, offer)
+        writer.write('support.escalation.offered', {
+          reason: offer.reason,
+          failures,
+          severity: offer.severity,
         })
         if (this.config.discordUrl) writer.write('support.discord.available', { url: this.config.discordUrl })
-      }
+      } else await this.repository.setSupportEscalationOffer(conversation.id, null)
       writer.write('suggestions.updated', {
         suggestions: offered ? ['Create a support ticket', 'Open Discord'] : ['Add the error message', 'Describe the last step'],
       })
@@ -600,12 +664,18 @@ export class AssistantService {
       suggestions: ['That solved it', 'Ask a follow-up', 'Talk to support'],
     })
     if (escalationSignal) {
-      writer.write('support.escalation.offered', {
+      const offer = SupportEscalationOfferSchema.parse({
         reason: escalationSignal.reason,
         severity: escalationSignal.severity,
+        createdAt: new Date().toISOString(),
+      })
+      await this.repository.setSupportEscalationOffer(conversation.id, offer)
+      writer.write('support.escalation.offered', {
+        reason: offer.reason,
+        severity: offer.severity,
       })
       if (this.config.discordUrl) writer.write('support.discord.available', { url: this.config.discordUrl })
-    }
+    } else await this.repository.setSupportEscalationOffer(conversation.id, null)
     writer.write('assistant.completed', {})
     return writer.events
   }

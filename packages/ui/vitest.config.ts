@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@/lib/score-bands': fileURLToPath(new URL('../../apps/outreach/lib/score-bands.ts', import.meta.url)),
+      '@/products': fileURLToPath(new URL('../../products', import.meta.url)),
       '@': fileURLToPath(new URL('.', import.meta.url)),
     },
   },

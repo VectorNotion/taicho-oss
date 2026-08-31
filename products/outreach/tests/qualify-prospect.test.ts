@@ -14,6 +14,7 @@ import {
 import type { ProductEventInsert } from '@content-automation/platform/events/repository';
 import { runQualifyProspect, type QualifyProspectDeps } from '../agent/qualify-prospect';
 import type { AccountScoreRecord, ProspectScoreRecord } from '../data/qualification-repository';
+import type { DimensionDefinition, DimensionMatch } from '../domain/qualification';
 import type { Prospect } from '../domain/types';
 
 const NOW = new Date('2026-08-10T00:00:00Z');
@@ -23,6 +24,18 @@ const PROSPECT: Prospect = {
   createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
 };
 const ACCOUNT = { id: 'acct-1', name: 'Acme', normalizedName: 'acme', createdAt: '2026-01-01T00:00:00Z' };
+const DIMENSIONS: DimensionDefinition[] = [
+  {
+    id: 'd-account', key: 'company_fit', name: 'Company fit', dimensionType: 'fit', appliesTo: 'account',
+    researchInstruction: 'Assess company fit.', idealValue: 'Strong fit', weight: 1, freshnessWindowDays: 30,
+    isActive: true, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+  },
+  {
+    id: 'd-person', key: 'person_fit', name: 'Person fit', dimensionType: 'fit', appliesTo: 'prospect',
+    researchInstruction: 'Assess person fit.', idealValue: 'Strong fit', weight: 1, freshnessWindowDays: 30,
+    isActive: true, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+  },
+];
 
 function accountScore(p: Partial<AccountScoreRecord>): AccountScoreRecord {
   const icpScore = p.icpScore ?? 90;
@@ -40,6 +53,9 @@ function makeDeps(config: {
   account?: typeof ACCOUNT | null;
   accountScore?: AccountScoreRecord | null;
   prospectScore?: ProspectScoreRecord | null;
+  dimensions?: DimensionDefinition[];
+  accountMatches?: DimensionMatch[];
+  prospectMatches?: DimensionMatch[];
   researchSpy?: () => void;
 }): { deps: Partial<QualifyProspectDeps>; rec: Rec } {
   const rec: Rec = { saved: [], priorities: [] };
@@ -48,6 +64,10 @@ function makeDeps(config: {
     resolveAccountForProspect: async () => (config.account === undefined ? ACCOUNT : config.account),
     getAccountScore: async () => (config.accountScore === undefined ? accountScore({}) : config.accountScore),
     getProspectScore: async () => (config.prospectScore === undefined ? prospectScore({}) : config.prospectScore),
+    getDimensionDefinitions: async () => config.dimensions ?? DIMENSIONS,
+    getMatches: async (entity) => entity.kind === 'account'
+      ? config.accountMatches ?? []
+      : config.prospectMatches ?? [],
     saveProspectQualification: async (_id, result) => { rec.saved.push(result); },
     updateProspectPriorityByScore: async (_id, score) => { rec.priorities.push(score); },
     now: () => NOW,
@@ -112,6 +132,46 @@ test('no company → REVIEW with reason', async () => {
   assert.equal(result.qualification?.status, 'REVIEW');
   assert.match(result.qualification?.reviewReason ?? '', /company/);
   assert.equal(result.qualification?.icpScore, 0);
+});
+
+test('missing research scores → REVIEW with an exact missing-scope reason', async () => {
+  const { deps } = makeDeps({ accountScore: null, prospectScore: null });
+  const result = await runQualifyProspect('p1', deps);
+  assert.equal(result.qualification?.status, 'REVIEW');
+  assert.match(result.qualification?.reviewReason ?? '', /company research and person research/);
+});
+
+test('scored partial research with insufficient evidence routes to REVIEW instead of rejection', async () => {
+  const { deps } = makeDeps({
+    accountScore: accountScore({ reviewReason: 'insufficient evidence for: company_fit' }),
+    prospectScore: prospectScore({ reviewReason: 'insufficient evidence for: person_fit' }),
+  });
+  const result = await runQualifyProspect('p1', deps);
+  assert.equal(result.qualification?.status, 'REVIEW');
+  assert.match(result.qualification?.reviewReason ?? '', /company_fit/);
+  assert.match(result.qualification?.reviewReason ?? '', /person_fit/);
+});
+
+test('missing fit policy fails before persisting a misleading decision', async () => {
+  const { deps, rec } = makeDeps({ dimensions: DIMENSIONS.filter((dimension) => dimension.appliesTo === 'prospect') });
+  await assert.rejects(() => runQualifyProspect('p1', deps), /active company-fit targeting dimension/);
+  assert.equal(rec.saved.length, 0);
+  assert.equal(rec.priorities.length, 0);
+});
+
+test('persists the evidence-backed dimension matches used by the decision', async () => {
+  const accountMatch: DimensionMatch = {
+    dimensionKey: 'company_fit', matchScore: 0.9, effectiveMatch: 0.81,
+    classification: 'strong_match', hardExclusion: false, confidence: 0.9,
+  };
+  const prospectMatch: DimensionMatch = {
+    dimensionKey: 'person_fit', matchScore: 0.8, effectiveMatch: 0.72,
+    classification: 'strong_match', hardExclusion: false, confidence: 0.9,
+  };
+  const { deps, rec } = makeDeps({ accountMatches: [accountMatch], prospectMatches: [prospectMatch] });
+  await runQualifyProspect('p1', deps);
+  assert.deepEqual(rec.saved[0]?.icpMatches, [accountMatch]);
+  assert.deepEqual(rec.saved[0]?.personaMatches, [prospectMatch]);
 });
 
 test('timing never gates: zero timing still QUALIFIED', async () => {

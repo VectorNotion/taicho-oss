@@ -2,7 +2,7 @@
 
 An autonomous content creation system built on **stateful agents with persistent graph memory**. Agents research trends, plan content, generate materials (scripts, articles, posts), and publish across platforms — the only required human input is recording video.
 
-- **Knowledge graph** (FalkorDB): all knowledge lives in one interlinked graph — content, research, projects, leads — explored visually in **The Brain** (`/brain`)
+- **Knowledge graph** (FalkorDB): canonical identities, research evidence, claims, assessments, and generated artifacts are shared across products through authorized knowledge APIs.
 - **TypeScript agents** (Mastra + OpenRouter): structured-output entity extraction, research, content pipeline, outreach qualification
 - **Two products, one platform**: Content Generator (`localhost:3005`) and Outreach Agent (`localhost:3004`), sharing auth, graph, jobs, events, and UI packages
 - **Research** via Tavily, **transcription** via AssemblyAI, **publishing** via direct platform APIs, **scheduling** via Google Calendar
@@ -43,7 +43,8 @@ Self-hosted deployments run **unmetered** — no billing, no credit limits, ever
 | `apps/docs`, `apps/styleguide` | Documentation site and design-system workbench |
 | `products/*` | Product business logic and agents (content-generator, outreach, cascade) |
 | `packages/platform` | Graph seam, agent runtime, jobs, events, and the provider seams (`commercial`, `resonance`) |
-| `packages/ui`, `packages/atlas` | Visual primitives and The Brain knowledge explorer |
+| `packages/knowledge` | Shared module registry, evidence/claim model, extraction contract, and policy-bounded query API |
+| `packages/ui` | Shared visual primitives |
 | `packages/auth`, `packages/chat`, `packages/database`, `packages/observability`, `packages/config` | Shared infrastructure |
 | `tests/architecture` | Executable architecture contracts (including the open-core boundary) |
 

@@ -182,6 +182,8 @@ export interface StructuredArtifact {
   summary: string | null;
   content: Record<string, unknown>;
   sourceRefs: ArtifactSourceRef[];
+  usedClaimIds: string[];
+  usedEvidenceIds: string[];
   recommendations: ArtifactRecommendation[];
   provenance: Record<string, unknown>;
   createdAt: string;
@@ -190,8 +192,8 @@ export interface StructuredArtifact {
 
 export type ArtifactDraft = Omit<
   StructuredArtifact,
-  'id' | 'organizationId' | 'runId' | 'status' | 'createdAt' | 'updatedAt'
-> & { status?: ArtifactStatus };
+  'id' | 'organizationId' | 'runId' | 'status' | 'createdAt' | 'updatedAt' | 'usedClaimIds' | 'usedEvidenceIds'
+> & { status?: ArtifactStatus; usedClaimIds?: string[]; usedEvidenceIds?: string[] };
 
 export interface IntelligenceRun {
   id: string;

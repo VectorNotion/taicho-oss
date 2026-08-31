@@ -89,8 +89,14 @@ Always output a JSON object:
   "content": "The full message text",
   "reportUrl": "URL of created report (if created)",
   "reportSlug": "Slug of created report (if created)",
-  "reportId": "CMS ID of report (if created)"
+  "reportId": "CMS ID of report (if created)",
+  "usedClaimIds": ["exact sharedKnowledge claim IDs used"],
+  "usedEvidenceIds": ["exact evidence IDs supporting those claims"]
 }
+
+The two lineage arrays are always required. When sharedKnowledge has claims,
+select only IDs present there and include at least one supported claim and its
+evidence. Use empty arrays only when sharedKnowledge has no claims.
 
 Output ONLY the JSON. No markdown code blocks. No explanatory text.`;
 }

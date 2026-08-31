@@ -40,7 +40,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ControlDeckPrototype } from './ControlDeckPrototype';
-import { TopicMapPreview } from './TopicMapPreview';
 import { DelegationRunwayPreview } from './DelegationRunwayPreview';
 import { StreamingMessageBlock } from './StreamingMessageBlock';
 import { ComponentTag, SectionHeading } from './spec-primitives';
@@ -569,8 +568,6 @@ function SurfacePreview({ surface, looping, paused }: { surface: SurfaceSpec; lo
         return <PersonResult loading={active} />;
       case 'DATA-03':
         return <MiniArticleBundle loading={active} />;
-      case 'DATA-05':
-        return <div className="space-y-2" data-component="DATA-05 Topic Map"><ComponentTag id="DATA-05" name="Topic Map" /><TopicMapPreview active={active} /></div>;
       case 'AGENT-05':
         return <div className="space-y-2" data-component="AGENT-05 Delegation Runway"><ComponentTag id="AGENT-05" name="Delegation Runway" /><DelegationRunwayPreview active={active} paused={paused} /></div>;
       case 'RESP-01':
@@ -584,7 +581,7 @@ function SurfacePreview({ surface, looping, paused }: { surface: SurfaceSpec; lo
     }
   })();
   return (
-    <div className={surface.id === 'DATA-05' || surface.id === 'AGENT-05' ? 'h-full md:col-span-2 xl:col-span-4' : 'h-full'} ref={cardRef}>
+    <div className={surface.id === 'AGENT-05' ? 'h-full md:col-span-2 xl:col-span-4' : 'h-full'} ref={cardRef}>
       <Card className="group h-full gap-0 overflow-hidden py-0 transition-colors hover:border-primary/30" data-component={`${surface.id} ${surface.title}`}>
       <CardHeader className="border-b bg-muted/15 p-5">
         <div className="flex items-center gap-3">
@@ -611,6 +608,7 @@ function SurfacePreview({ surface, looping, paused }: { surface: SurfaceSpec; lo
 
 function DelegationDiagram() {
   const [activeAgent, setActiveAgent] = useState('Scout');
+  const [cancelled, setCancelled] = useState(false);
   const selected = SQUAD.find((agent) => agent.name === activeAgent) ?? SQUAD[0];
   const SelectedIcon = selected.icon;
 
@@ -637,7 +635,10 @@ function DelegationDiagram() {
                   <button
                     className={`rounded-lg border p-3 text-left transition-all ${active ? 'border-primary/40 bg-primary/8 shadow-sm' : 'bg-card hover:bg-accent'}`}
                     key={agent.name}
-                    onClick={() => setActiveAgent(agent.name)}
+                    onClick={() => {
+                      setActiveAgent(agent.name);
+                      setCancelled(false);
+                    }}
                     type="button"
                   >
                     <Icon className={`size-4 ${agent.color}`} />
@@ -658,10 +659,10 @@ function DelegationDiagram() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary"><SelectedIcon className="size-4" /></span>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2"><p className="text-sm font-medium">{selected.name} joined the work</p><Badge variant="outline">Visible delegation</Badge></div>
-                <p className="mt-1 text-xs text-muted-foreground">Task: {selected.task}. The task, reason, elapsed time, and result remain inspectable.</p>
+                <div className="flex items-center gap-2"><p className="text-sm font-medium">{cancelled ? `${selected.name} delegation canceled` : `${selected.name} joined the work`}</p><Badge variant="outline">{cancelled ? 'Canceled safely' : 'Visible delegation'}</Badge></div>
+                <p className="mt-1 text-xs text-muted-foreground">{cancelled ? 'No specialist contribution will be included; Taicho keeps the conversation and any earlier evidence.' : `Task: ${selected.task}. The task, reason, elapsed time, and result remain inspectable.`}</p>
               </div>
-              <Button size="sm" variant="ghost"><CircleStop className="size-3.5" /> Cancel</Button>
+              <Button disabled={cancelled} onClick={() => setCancelled(true)} size="sm" variant="ghost"><CircleStop className="size-3.5" /> {cancelled ? 'Canceled' : 'Cancel'}</Button>
             </div>
           </div>
         </CardContent>

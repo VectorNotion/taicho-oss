@@ -22,7 +22,9 @@ import {
   activeTraceCarrier,
   currentExecutionContext,
 } from "@content-automation/observability";
-import { emitProductEvent } from "@content-automation/platform/events/emit";
+import { emitProductEvent, recordProductEvent } from "@content-automation/platform/events/emit";
+import { PUBLISHING_POST_KNOWLEDGE_EVENT } from "./knowledge-events";
+import { recordPublishingCalendarChange } from "./calendar-events";
 import type { PostRecord, PostStatus } from "./types";
 
 /** Backoff after failed attempts (seconds): 1m, 5m, 30m, 2h. Ported from Relay. */
@@ -112,6 +114,29 @@ export async function schedulePost(
       });
     }
   }
+  const organizationId = post.organizationId ?? execution?.organizationId ?? null;
+  if (organizationId) {
+    // Awaited and replay-safe: if a response is retried after this append
+    // fails, the upserted post is returned and the same event is attempted.
+    await recordProductEvent({
+      organizationId,
+      name: PUBLISHING_POST_KNOWLEDGE_EVENT,
+      origin: "internal",
+      idempotencyKey: `${post.id}:scheduled`,
+      refs: { postId: post.id, ...(post.draftId ? { draftId: post.draftId } : {}) },
+      payload: {
+        postId: post.id,
+        draftId: post.draftId,
+        destination: post.destination,
+        channelId: post.channelId,
+        status: "scheduled",
+        copy: post.copy,
+        publishAt: post.publishAt.toISOString(),
+        occurredAt: new Date().toISOString(),
+      },
+    });
+  }
+  await recordPublishingCalendarChange(post);
   return post;
 }
 
@@ -131,38 +156,48 @@ export async function claimDuePost(source: PoolClient | Database): Promise<PostR
     .limit(1)
     .for('update', { skipLocked: true });
   if (!row) return null;
-  const post = rowToPost(row);
-  await db
+  const [claimed] = await db
     .update(postsTable)
     .set({
       status: 'publishing',
       claimed_at: now,
       request_id: sql`coalesce(${postsTable.request_id}, ${postsTable.id}::text)`,
     })
-    .where(eq(postsTable.id, post.id));
-  post.requestId ??= post.id;
-  return post;
+    .where(eq(postsTable.id, row.id))
+    .returning();
+  if (!claimed) return null;
+  return rowToPost(claimed);
 }
 
 export async function recordPublished(pool: Pool, id: string, resultUrl: string): Promise<void> {
-  await databaseFor(pool)
+  const [row] = await databaseFor(pool)
     .update(postsTable)
-    .set({ status: 'published', result_url: resultUrl, error: null, claimed_at: null })
-    .where(eq(postsTable.id, id));
+    .set({
+      status: 'published',
+      attempts: sql`${postsTable.attempts} + 1`,
+      result_url: resultUrl,
+      error: null,
+      claimed_at: null,
+    })
+    .where(eq(postsTable.id, id))
+    .returning();
+  if (row) await recordPublishingCalendarChange(rowToPost(row));
 }
 
 /** Record a failed attempt: back off and requeue, or mark failed after MAX_ATTEMPTS. */
 export async function recordFailure(pool: Pool, id: string, attempts: number, error: string): Promise<PostStatus> {
   const nextAttempts = attempts + 1;
   if (nextAttempts >= MAX_ATTEMPTS) {
-    await databaseFor(pool)
+    const [row] = await databaseFor(pool)
       .update(postsTable)
       .set({ status: 'failed', attempts: nextAttempts, error, claimed_at: null })
-      .where(eq(postsTable.id, id));
+      .where(eq(postsTable.id, id))
+      .returning();
+    if (row) await recordPublishingCalendarChange(rowToPost(row));
     return "failed";
   }
   const backoff = BACKOFF_SECONDS[Math.min(nextAttempts - 1, BACKOFF_SECONDS.length - 1)];
-  await databaseFor(pool)
+  const [row] = await databaseFor(pool)
     .update(postsTable)
     .set({
       status: 'scheduled',
@@ -171,7 +206,9 @@ export async function recordFailure(pool: Pool, id: string, attempts: number, er
       claimed_at: null,
       next_attempt_at: new Date(Date.now() + backoff * 1_000).toISOString(),
     })
-    .where(eq(postsTable.id, id));
+    .where(eq(postsTable.id, id))
+    .returning();
+  if (row) await recordPublishingCalendarChange(rowToPost(row));
   return "scheduled";
 }
 
@@ -188,7 +225,8 @@ export async function recoverOrphaned(pool: Pool): Promise<number> {
       eq(postsTable.status, 'publishing'),
       lt(postsTable.claimed_at, new Date(Date.now() - ORPHAN_AFTER_SECONDS * 1_000).toISOString()),
     ))
-    .returning({ id: postsTable.id });
+    .returning();
+  await Promise.all(recovered.map((row) => recordPublishingCalendarChange(rowToPost(row))));
   return recovered.length;
 }
 
@@ -197,7 +235,8 @@ export async function cancelPost(pool: Pool, id: string): Promise<boolean> {
     .update(postsTable)
     .set({ status: 'cancelled', claimed_at: null })
     .where(and(eq(postsTable.id, id), eq(postsTable.status, 'scheduled')))
-    .returning({ id: postsTable.id });
+    .returning();
+  if (rows[0]) await recordPublishingCalendarChange(rowToPost(rows[0]));
   return rows.length > 0;
 }
 
@@ -212,7 +251,8 @@ export async function retryPost(pool: Pool, id: string): Promise<boolean> {
       publish_at: new Date().toISOString(),
     })
     .where(and(eq(postsTable.id, id), inArray(postsTable.status, ['failed', 'cancelled'])))
-    .returning({ id: postsTable.id });
+    .returning();
+  if (rows[0]) await recordPublishingCalendarChange(rowToPost(rows[0]));
   return rows.length > 0;
 }
 

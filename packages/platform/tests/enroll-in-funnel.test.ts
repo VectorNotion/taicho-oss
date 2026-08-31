@@ -1,13 +1,11 @@
-// Own scratch schema so cascade's own tests (cascade_test) and this file never collide.
-process.env.CASCADE_SCHEMA = "cascade_platform_test";
-
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test, { after } from "node:test";
+import { migrationPoolConfig } from "@content-automation/database";
+import { Pool } from "pg";
 import { createContact } from "@/products/cascade/data/contact-repository";
 import { createFunnel, listFunnelMembers } from "@/products/cascade/data/funnel-repository";
-import { getCascadePool } from "@/products/cascade/data/pool";
-import { dropCascadeSchema, ensureCascadeSchema } from "@/products/cascade/data/schema";
+import { closeCascadePools, getCascadePool } from "@/products/cascade/data/pool";
 import { createProspect } from "@/products/outreach/data/prospect-repository";
 import { closeDriver } from "../data/graph";
 import { runWithGraphOrganization } from "../data/organization-context";
@@ -20,12 +18,8 @@ import { runAddToFunnel } from "../agents/add-to-funnel";
 const ORGANIZATION_ID = `platform-enroll-${randomUUID()}`;
 const inOrg = <T>(work: () => Promise<T>) => runWithGraphOrganization(ORGANIZATION_ID, work);
 
-/** Same drop/recreate pattern as products/cascade/tests/helpers.ts. */
 async function freshSchema() {
-  const pool = getCascadePool(ORGANIZATION_ID);
-  await dropCascadeSchema(pool);
-  await ensureCascadeSchema(pool);
-  return pool;
+  return getCascadePool(ORGANIZATION_ID);
 }
 
 test("payload validation fails before any I/O", async () => {
@@ -75,7 +69,7 @@ test(
     );
     const result = await inOrg(() => runAddToFunnel({ funnelId: funnel.id, prospectId: prospect.id }));
     const contact = await pool.query(
-      `SELECT email, outreach_prospect_id, workspace_contact_linked_at FROM contacts WHERE id = $1`,
+      `SELECT email, outreach_prospect_id, workspace_contact_linked_at FROM cascade.contacts WHERE id = $1`,
       [result.contactId],
     );
     assert.equal(contact.rows[0].email, email);
@@ -106,9 +100,11 @@ test(
 
 after(async () => {
   if (process.env.PLATFORM_DB_TESTS === "1") {
-    const pool = getCascadePool(ORGANIZATION_ID);
-    await dropCascadeSchema(pool);
-    await pool.end();
+    await closeCascadePools();
+    const fixturePool = new Pool({ ...migrationPoolConfig(), max: 1 });
+    await fixturePool.query("DELETE FROM cascade.funnels WHERE organization_id = $1", [ORGANIZATION_ID]);
+    await fixturePool.query("DELETE FROM cascade.contacts WHERE organization_id = $1", [ORGANIZATION_ID]);
+    await fixturePool.end();
     // The graph driver keeps the event loop alive otherwise (same reason
     // falkordb-tenant-isolation.test.ts closes it).
     await closeDriver();

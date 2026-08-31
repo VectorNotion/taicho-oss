@@ -21,10 +21,18 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/PageHeader";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface ProjectFormData {
   title: string;
   description: string;
+  kind: string;
   tags: string[];
   demoUrl: string;
   githubUrl: string;
@@ -42,6 +50,7 @@ export default function NewProjectPage() {
   const [formData, setFormData] = useState<ProjectFormData>({
     title: "",
     description: "",
+    kind: "project",
     tags: [],
     demoUrl: "",
     githubUrl: "",
@@ -85,6 +94,7 @@ export default function NewProjectPage() {
       const { data: created } = await apiMutate<{ project: { id: string } }>('POST', '/content/projects', {
         title: formData.title,
         description: formData.description,
+        kind: formData.kind,
         tags: formData.tags,
         demoUrl: formData.demoUrl,
         githubUrl: formData.githubUrl,
@@ -154,6 +164,23 @@ export default function NewProjectPage() {
                 }
                 required
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="kind">Type</Label>
+              <Select value={formData.kind} onValueChange={(value) => setFormData({ ...formData, kind: value })}>
+                <SelectTrigger id="kind" className="max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="project">Project</SelectItem>
+                  <SelectItem value="product">Product</SelectItem>
+                  <SelectItem value="service">Service</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                How this entry reads across the workspace — a piece of work, a product you offer, or a service you provide.
+              </p>
             </div>
 
             {/* Description */}

@@ -4,7 +4,6 @@ import { Plus, Trash2, MessageSquare, PanelRightClose, Loader2 } from "lucide-re
 import { formatDistanceToNow } from "date-fns";
 
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 interface ChatThread {
@@ -48,6 +47,7 @@ export function ThreadSidebar({
             size="icon"
             onClick={onClose}
             className="h-7 w-7"
+            aria-label="Close conversation history"
           >
             <PanelRightClose className="h-4 w-4" />
           </Button>
@@ -65,8 +65,8 @@ export function ThreadSidebar({
         </Button>
       </div>
 
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="p-2 space-y-1">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="w-full min-w-0 space-y-1 p-2">
           {isLoading ? (
             <div className="flex items-center justify-center p-4">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -79,11 +79,20 @@ export function ThreadSidebar({
             </div>
           ) : (
             threads.map((thread) => (
-              <button
+              <div
                 key={thread.id}
                 onClick={() => onSelectThread(thread.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectThread(thread.id);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-current={currentThreadId === thread.id ? "true" : undefined}
                 className={cn(
-                  "w-full text-left p-3 rounded-lg transition-colors group",
+                  "w-full cursor-pointer text-left p-3 rounded-lg transition-colors group outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   "hover:bg-muted/50",
                   currentThreadId === thread.id && "bg-muted"
                 )}
@@ -108,6 +117,7 @@ export function ThreadSidebar({
                     )}
                     onClick={(e) => onDeleteThread(e, thread.id)}
                     disabled={deletingThreadId === thread.id}
+                    aria-label={`Delete conversation ${thread.title || "New Chat"}`}
                   >
                     {deletingThreadId === thread.id ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -116,11 +126,11 @@ export function ThreadSidebar({
                     )}
                   </Button>
                 </div>
-              </button>
+              </div>
             ))
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

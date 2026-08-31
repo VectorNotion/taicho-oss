@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { OpenRouterAssistantModel } from '../model'
+import { createLanguageModelRuntime } from '@content-automation/platform/agents/model'
 
 test('OpenRouter yields provider deltas from an SSE response', async (t) => {
   const originalFetch = globalThis.fetch
@@ -23,7 +24,10 @@ test('OpenRouter yields provider deltas from an SSE response', async (t) => {
     globalThis.fetch = originalFetch
   })
 
-  const model = new OpenRouterAssistantModel('openrouter-test-key', 'test/model')
+  const model = new OpenRouterAssistantModel(createLanguageModelRuntime({
+    environment: { OPENROUTER_API_KEY: 'openrouter-test-key' },
+    primaryModelSlug: 'test/model',
+  }))
   const deltas: string[] = []
   for await (const delta of model.stream({
     system: 'Follow policy.',
@@ -32,4 +36,5 @@ test('OpenRouter yields provider deltas from an SSE response', async (t) => {
 
   assert.deepEqual(deltas, ['First', ' response'])
   assert.equal(requestBody?.stream, true)
+  assert.equal(requestBody?.model, 'test/model')
 })

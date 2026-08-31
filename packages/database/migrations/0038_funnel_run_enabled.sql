@@ -1,0 +1,1 @@
+ALTER TABLE "cascade"."funnels" RENAME COLUMN "automation_enabled" TO "run_enabled";

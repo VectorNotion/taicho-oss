@@ -1,0 +1,53 @@
+{
+  "name": "@content-automation/knowledge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./calendar-manifest": "./calendar-manifest.ts",
+    "./registry": "./registry/registry.ts",
+    "./registry/compiler": "./registry/compiler.ts",
+    "./registry/core-manifest": "./registry/core-manifest.ts",
+    "./registry/schema": "./registry/schema.ts",
+    "./registry/types": "./registry/types.ts",
+    "./registry/external": "./registry/external.ts",
+    "./domain": "./domain.ts",
+    "./identity": "./identity.ts",
+    "./policy": "./policy.ts",
+    "./repository": "./repository.ts",
+    "./falkor-repository": "./falkor-repository.ts",
+    "./query": "./query.ts",
+    "./service": "./service.ts",
+    "./notes": "./notes.ts",
+    "./agent-adapter": "./agent-adapter.ts",
+    "./ingestion/source-adapter": "./ingestion/source-adapter.ts",
+    "./ingestion/normalize": "./ingestion/normalize.ts",
+    "./extraction/types": "./extraction/types.ts",
+    "./extraction/profile": "./extraction/profile.ts",
+    "./extraction/resolver": "./extraction/resolver.ts",
+    "./extraction/current-llm-adapter": "./extraction/current-llm-adapter.ts",
+    "./extraction/pipeline": "./extraction/pipeline.ts",
+    "./coverage": "./coverage.ts",
+    "./events/projector": "./events/projector.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "benchmark:extractors": "tsx scripts/benchmark-extractors.ts",
+    "graph:audit": "tsx scripts/audit-current-graph.ts",
+    "graph:backfill": "tsx scripts/backfill-v1.ts",
+    "graph:compare": "tsx scripts/compare-legacy-v1.ts",
+    "graph:cutover-report": "tsx scripts/cutover-report.ts"
+  },
+  "dependencies": {
+    "@content-automation/platform": "workspace:*",
+    "zod": "4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.23.1",
+    "typescript": "^5"
+  },
+  "license": "AGPL-3.0-only"
+}

@@ -9,6 +9,18 @@ import type {
   UpdateContentDraftInput,
   ContentDraftFilters,
 } from '../domain/content';
+import { recordContentReminderCalendarChange } from '../calendar-events';
+
+function graphTimestamp(value: unknown): string {
+  const serialized = String(value);
+  if (
+    /^\d{4}-\d{2}-\d{2}T/.test(serialized)
+    && !/(?:Z|[+-]\d{2}:\d{2})(?:\[.*\])?$/.test(serialized)
+  ) {
+    return `${serialized}Z`;
+  }
+  return serialized;
+}
 
 // ============= CONTENT IDEAS CRUD =============
 
@@ -25,6 +37,8 @@ export async function createContentIdea(data: CreateContentIdeaInput): Promise<C
         description: $description,
         rationale: $rationale,
         priority: $priority,
+        sourceClaimIdsJson: $sourceClaimIdsJson,
+        sourceEvidenceIdsJson: $sourceEvidenceIdsJson,
         status: 'idea',
         createdAt: localdatetime(),
         updatedAt: localdatetime()
@@ -36,6 +50,8 @@ export async function createContentIdea(data: CreateContentIdeaInput): Promise<C
         description: data.description,
         rationale: data.rationale,
         priority: data.priority ?? 'medium',
+        sourceClaimIdsJson: JSON.stringify(data.sourceClaimIds ?? []),
+        sourceEvidenceIdsJson: JSON.stringify(data.sourceEvidenceIds ?? []),
       }
     );
 
@@ -309,11 +325,15 @@ export async function createContentDraft(data: CreateContentDraftInput): Promise
         title: $title,
         type: $type,
         content: $content,
+        sourceClaimIdsJson: $sourceClaimIdsJson,
+        sourceEvidenceIdsJson: $sourceEvidenceIdsJson,
         status: 'draft',
         createdAt: localdatetime(),
         updatedAt: localdatetime()
       })
+      SET idea:ContentBase
       CREATE (d)-[:DRAFT_OF]->(idea)
+      CREATE (idea)-[:HAS_POST]->(d)
       RETURN d
       `,
       {
@@ -321,6 +341,8 @@ export async function createContentDraft(data: CreateContentDraftInput): Promise
         title: data.title,
         type: data.type,
         content: data.content,
+        sourceClaimIdsJson: JSON.stringify(data.sourceClaimIds ?? []),
+        sourceEvidenceIdsJson: JSON.stringify(data.sourceEvidenceIds ?? []),
       }
     );
 
@@ -443,7 +465,7 @@ export async function getContentDrafts(filters?: ContentDraftFilters): Promise<C
 
 export async function getScheduledContentDrafts(limit = 50): Promise<ContentDraft[]> {
   const session = await getSession();
-  const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+  const safeLimit = Math.max(1, Math.min(10_000, Math.trunc(limit)));
 
   try {
     const result = await session.run(
@@ -592,14 +614,75 @@ export async function updateContentDraft(
       return null;
     }
 
-    const draft = result.records[0].get('d').properties;
-    return mapDraftFromNeo4j(draft);
+    const draft = mapDraftFromNeo4j(result.records[0].get('d').properties);
+    await recordContentReminderCalendarChange(draft);
+    return draft;
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Apply one settled Resonance candidate without overwriting a Post changed
+ * since the experiment began. The compare-and-set happens in FalkorDB, not in
+ * a read-then-write window, and records the exact scoring job/candidate on the
+ * Post for durable UI and audit traceability.
+ */
+export async function applyContentResonanceCandidate(
+  id: string,
+  input: {
+    title: string;
+    content: string;
+    expectedUpdatedAt: string;
+    resonanceJobId: string;
+    candidateId: string;
+  },
+): Promise<ContentDraft | null> {
+  const session = await getSession();
+
+  try {
+    const expectedGraphUpdatedAt = input.expectedUpdatedAt.replace(/Z$/, '');
+    const expectedMilliseconds = Date.parse(input.expectedUpdatedAt);
+    const nextUpdatedAt = new Date(Math.max(
+      Date.now(),
+      // FalkorDB serializes localdatetime at whole-second precision in this
+      // graph, so advance by a full second to guarantee a new CAS token even
+      // when apply follows the source write immediately.
+      Number.isFinite(expectedMilliseconds) ? expectedMilliseconds + 1_000 : Date.now(),
+    )).toISOString().replace(/Z$/, '');
+    const result = await session.run(
+      `
+      MATCH (d:ContentDraft {id: $id})
+      WHERE toString(d.updatedAt) = $expectedUpdatedAt
+      SET d.title = $title,
+          d.content = $content,
+          d.resonanceAppliedJobId = $resonanceJobId,
+          d.resonanceAppliedCandidateId = $candidateId,
+          d.resonanceAppliedAt = localdatetime($nextUpdatedAt),
+          d.updatedAt = localdatetime($nextUpdatedAt)
+      RETURN d
+      `,
+      {
+        id,
+        title: input.title,
+        content: input.content,
+        resonanceJobId: input.resonanceJobId,
+        candidateId: input.candidateId,
+        expectedUpdatedAt: expectedGraphUpdatedAt,
+        nextUpdatedAt,
+      },
+    );
+    if (result.records.length === 0) return null;
+    const draft = mapDraftFromNeo4j(result.records[0].get('d').properties);
+    await recordContentReminderCalendarChange(draft);
+    return draft;
   } finally {
     await session.close();
   }
 }
 
 export async function deleteContentDraft(id: string): Promise<boolean> {
+  const existing = await getContentDraftById(id);
   const session = await getSession();
 
   try {
@@ -613,6 +696,7 @@ export async function deleteContentDraft(id: string): Promise<boolean> {
     );
 
     const deleted = result.records[0]?.get('deleted')?.toNumber() ?? 0;
+    if (deleted > 0 && existing) await recordContentReminderCalendarChange(existing, 'remove');
     return deleted > 0;
   } finally {
     await session.close();
@@ -622,6 +706,7 @@ export async function deleteContentDraft(id: string): Promise<boolean> {
 // ============= COUNTS =============
 
 export async function getContentCounts(): Promise<{
+  totalProjects: number;
   totalIdeas: number;
   totalDrafts: number;
   byIdeaStatus: Record<string, number>;
@@ -631,6 +716,12 @@ export async function getContentCounts(): Promise<{
   const session = await getSession();
 
   try {
+    const projectResult = await session.run(`
+      MATCH (p:Project)
+      RETURN count(p) as count
+    `);
+    const totalProjects = projectResult.records[0]?.get('count').toNumber() ?? 0;
+
     // Get idea counts (ideas are format-agnostic, no type)
     const ideaResult = await session.run(`
       MATCH (i:ContentIdea)
@@ -668,7 +759,7 @@ export async function getContentCounts(): Promise<{
       }
     }
 
-    return { totalIdeas, totalDrafts, byIdeaStatus, byDraftStatus, byType };
+    return { totalProjects, totalIdeas, totalDrafts, byIdeaStatus, byDraftStatus, byType };
   } finally {
     await session.close();
   }
@@ -710,8 +801,10 @@ function mapIdeaFromNeo4j(
     sourceTopics: topics,
     sourceResearch: research,
     sourceInsight,
-    createdAt: idea.createdAt?.toString() ?? new Date().toISOString(),
-    updatedAt: idea.updatedAt?.toString() ?? new Date().toISOString(),
+    sourceClaimIds: parseStringArray(idea.sourceClaimIdsJson),
+    sourceEvidenceIds: parseStringArray(idea.sourceEvidenceIdsJson),
+    createdAt: idea.createdAt ? graphTimestamp(idea.createdAt) : new Date().toISOString(),
+    updatedAt: idea.updatedAt ? graphTimestamp(idea.updatedAt) : new Date().toISOString(),
   };
 }
 
@@ -739,15 +832,20 @@ function mapDraftFromNeo4j(
     type: draft.type as ContentDraft['type'],
     content: draft.content as string,
     status: draft.status as ContentDraft['status'],
-    scheduledFor: draft.scheduledFor?.toString(),
-    publishedAt: draft.publishedAt?.toString(),
+    scheduledFor: draft.scheduledFor ? graphTimestamp(draft.scheduledFor) : undefined,
+    publishedAt: draft.publishedAt ? graphTimestamp(draft.publishedAt) : undefined,
     publishedUrl: draft.publishedUrl as string | undefined,
     performanceLevel: draft.performanceLevel as ContentDraft['performanceLevel'],
     performanceInsights: draft.performanceInsights as string | undefined,
+    resonanceAppliedJobId: draft.resonanceAppliedJobId as string | undefined,
+    resonanceAppliedCandidateId: draft.resonanceAppliedCandidateId as string | undefined,
+    resonanceAppliedAt: draft.resonanceAppliedAt ? graphTimestamp(draft.resonanceAppliedAt) : undefined,
     citations,
+    sourceClaimIds: parseStringArray(draft.sourceClaimIdsJson),
+    sourceEvidenceIds: parseStringArray(draft.sourceEvidenceIdsJson),
     innerLinks,
-    createdAt: draft.createdAt?.toString() ?? new Date().toISOString(),
-    updatedAt: draft.updatedAt?.toString() ?? new Date().toISOString(),
+    createdAt: draft.createdAt ? graphTimestamp(draft.createdAt) : new Date().toISOString(),
+    updatedAt: draft.updatedAt ? graphTimestamp(draft.updatedAt) : new Date().toISOString(),
   };
 }
 
