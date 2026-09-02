@@ -57,7 +57,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "pnpm run dev:content",
+    "dev": "node api.js && pnpm run dev:content",
     "dev:content": "set -a; . ./.env; set +a; BETTER_AUTH_URL=http://localhost:3005 FALKORDB_URL=${FALKORDB_URL:-redis://localhost:6380} FALKORDB_GRAPH=${FALKORDB_GRAPH:-content} POSTGRES_HOST=localhost turbo dev --filter=@content-automation/content-generator-app",
     "dev:outreach": "set -a; . ./.env; set +a; BETTER_AUTH_URL=http://localhost:3004 FALKORDB_URL=${FALKORDB_URL:-redis://localhost:6380} FALKORDB_GRAPH=${FALKORDB_GRAPH:-content} POSTGRES_HOST=localhost turbo dev --filter=@content-automation/outreach-app",
     "dev:docs": "pnpm --filter @content-automation/docs-app dev",
@@ -76,7 +76,7 @@
     "cascade:worker": "set -a; . ./.env; set +a; POSTGRES_HOST=localhost pnpm --filter @content-automation/cascade worker",
     "content:migrate": "set -a; . ./.env; set +a; POSTGRES_HOST=localhost pnpm --filter @content-automation/content-generator db:migrate",
     "publishing:worker": "set -a; . ./.env; set +a; POSTGRES_HOST=localhost pnpm --filter @content-automation/content-generator publishing:worker",
-    "build": "turbo build",
+    "build": "node api.js && turbo build",
     "build:content": "turbo build --filter=@content-automation/content-generator-app",
     "build:outreach": "turbo build --filter=@content-automation/outreach-app",
     "build:docs": "NODE_OPTIONS=--max-old-space-size=1024 pnpm --filter @content-automation/docs-app build",

@@ -6,6 +6,7 @@ import {
   type UsageKind,
   type WalletSummary,
 } from "./contract";
+import { emptyAgentUsageSummary, type AgentUsageSummary } from "./agent-usage";
 
 /**
  * The billing seam. Open-core code talks to billing exclusively through this
@@ -41,6 +42,10 @@ export interface CommercialProvider {
     metadata?: Record<string, unknown>;
   }): Promise<unknown>;
   releaseReservation(reservationId: string, reason?: string): Promise<void>;
+  summarizeAgentUsage(
+    organizationId: string,
+    options?: { days?: number },
+  ): Promise<AgentUsageSummary>;
   isPlatformOperator(email: string): boolean;
   provisionCommercialOrganization(organizationId: string, userId: string): Promise<unknown>;
 }
@@ -121,6 +126,10 @@ export class UnmeteredCommercialProvider implements CommercialProvider {
 
   async releaseReservation() {}
 
+  async summarizeAgentUsage(_organizationId: string, options?: { days?: number }) {
+    return emptyAgentUsageSummary(options?.days ?? 30);
+  }
+
   isPlatformOperator() {
     return false;
   }
@@ -162,6 +171,13 @@ export const settleReservation: CommercialProvider["settleReservation"] = (...ar
   commercialProvider().settleReservation(...args);
 export const releaseReservation: CommercialProvider["releaseReservation"] = (...args) =>
   commercialProvider().releaseReservation(...args);
+export const summarizeAgentUsage: CommercialProvider["summarizeAgentUsage"] = (organizationId, options) => {
+  const provider = commercialProvider();
+  if (typeof provider.summarizeAgentUsage !== "function") {
+    return Promise.resolve(emptyAgentUsageSummary(options?.days ?? 30));
+  }
+  return provider.summarizeAgentUsage(organizationId, options);
+};
 export const isPlatformOperator: CommercialProvider["isPlatformOperator"] = (...args) =>
   commercialProvider().isPlatformOperator(...args);
 export const provisionCommercialOrganization: CommercialProvider["provisionCommercialOrganization"] = (
