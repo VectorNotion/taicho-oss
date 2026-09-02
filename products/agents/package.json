@@ -8,7 +8,8 @@
     "./calendar-manifest": "./calendar-manifest.ts",
     "./domain": "./domain.ts",
     "./knowledge-manifest": "./knowledge-manifest.ts",
-    "./repository": "./repository.ts"
+    "./repository": "./repository.ts",
+    "./stats": "./stats.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
